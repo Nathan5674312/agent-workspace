@@ -1,6 +1,6 @@
 {
   "name": "agent-workspace",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "description": "Full-screen vault workspace with a floating agent corner.",
   "main": "./out/main/index.js",
   "private": true,

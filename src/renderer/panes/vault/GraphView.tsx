@@ -2,6 +2,14 @@ import { useEffect, useRef, useState } from 'react'
 import * as d3 from 'd3-force'
 import type { VaultGraph } from '../../../shared/ipc.js'
 import { resolvableLinks } from './helpers.js'
+import {
+  Decay,
+  Spring,
+  VelocityTracker,
+  project,
+  rubberband,
+  DRAG_THRESHOLD,
+} from '../../motion.js'
 
 /**
  * Graph view — force-directed map of the vault's wikilinks.
@@ -159,7 +167,88 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
     let neighbours = new Set<string>()
     let dragging: Node | null = null
     // Distinguishes a click from a drag that happened to end on a node.
+    //
+    // This is a HYSTERESIS, not a flag on any movement. It used to be set by a
+    // single pixel of pointermove, so a press with the slightest tremor in it
+    // was classified as a drag and `onClick` bailed — the note simply did not
+    // open, with no feedback of any kind. A press that fails silently is worse
+    // than one that fails loudly, and on a trackpad it happened constantly.
     let moved = false
+    let downAt: { x: number; y: number } | null = null
+
+    /**
+     * The node under a live press.
+     *
+     * Feedback belongs on pointer-DOWN, not on release: the moment a press
+     * produces nothing until you let go, directness "falls off a cliff". The
+     * canvas had no press state at all — a node looked identical held and
+     * untouched, so there was no way to tell whether the app had heard you.
+     */
+    let pressed: Node | null = null
+
+    /** Where inside the node it was grabbed, in graph units. See `onMove`. */
+    let grabOffset = { x: 0, y: 0 }
+
+    // Momentum. The pan used to stop dead the instant the pointer lifted, so a
+    // flick did nothing at all and the graph could only be moved by dragging it
+    // the whole way — the exact seam between dragging and animating that
+    // velocity handoff exists to remove.
+    const panVelocity = new VelocityTracker()
+    const glide = new Decay()
+    const settleX = new Spring()
+    const settleY = new Spring()
+    const settleK = new Spring()
+
+    /** Every animation the user can interrupt by touching the canvas. */
+    const stopMotion = () => {
+      glide.stop()
+      settleX.stop()
+      settleY.stop()
+      settleK.stop()
+    }
+
+    /**
+     * How far the view may be pushed before it is considered out of bounds.
+     *
+     * There were no pan bounds whatsoever: the graph could be thrown off screen
+     * in any direction and nothing brought it back, so the only recovery was to
+     * leave the tab and return. The rule is deliberately loose — the graph must
+     * merely OVERLAP the viewport by a margin, not be centred — because
+     * clamping tightly would fight someone deliberately inspecting one edge.
+     */
+    const MARGIN = 80
+    /**
+     * The correction that would bring a candidate pan back inside bounds.
+     *
+     * Takes the candidate rather than reading `tx`/`ty` so the drag can ask
+     * "where would this put me" before committing to it — which is what lets
+     * the resistance be computed from total displacement past the edge instead
+     * of from a single frame's delta.
+     */
+    const overshootAt = (candTx: number, candTy: number) => {
+      let minX = Infinity
+      let minY = Infinity
+      let maxX = -Infinity
+      let maxY = -Infinity
+      for (const n of nodes) {
+        if (n.x == null || n.y == null) continue
+        minX = Math.min(minX, n.x)
+        maxX = Math.max(maxX, n.x)
+        minY = Math.min(minY, n.y)
+        maxY = Math.max(maxY, n.y)
+      }
+      if (!Number.isFinite(minX)) return { x: 0, y: 0 }
+      // Content box in screen space.
+      const left = minX * k + candTx
+      const right = maxX * k + candTx
+      const top = minY * k + candTy
+      const bottom = maxY * k + candTy
+      return {
+        x: right < MARGIN ? MARGIN - right : left > w - MARGIN ? w - MARGIN - left : 0,
+        y: bottom < MARGIN ? MARGIN - bottom : top > h - MARGIN ? h - MARGIN - top : 0,
+      }
+    }
+    const panOvershoot = () => overshootAt(tx, ty)
 
     /**
      * Adjacency, built once.
@@ -290,12 +379,22 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
        * rule is concerned (test/review-s2-vault-pane.test.mjs). The system
        * colour keywords are the same idiom the token fallbacks above use.
        */
+      /**
+       * A held node reads as LIFTED — it grows toward the finger.
+       *
+       * Intermediate states should point at the outcome, and the outcome of
+       * holding a node is picking it up. A shrink would be right for a button,
+       * which is a surface you push into; this is an object you take hold of,
+       * and the two want opposite signs.
+       */
+      const drawRadius = (n: Node) => radius(n) * (pressed?.id === n.id ? 1.35 : 1)
+
       ctx.globalCompositeOperation = 'destination-out'
       ctx.fillStyle = 'CanvasText'
       ctx.globalAlpha = 1
       for (const n of nodes) {
         ctx.beginPath()
-        ctx.arc(n.x!, n.y!, radius(n) + 1.5 / k, 0, Math.PI * 2)
+        ctx.arc(n.x!, n.y!, drawRadius(n) + 1.5 / k, 0, Math.PI * 2)
         ctx.fill()
       }
       ctx.globalCompositeOperation = 'source-over'
@@ -303,9 +402,9 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       for (const n of nodes) {
         const lit = !dim || n.id === hover!.id || neighbours.has(n.id)
         ctx.globalAlpha = lit ? 1 : 0.18
-        ctx.fillStyle = n.id === hover?.id ? COL.hot : COL.node
+        ctx.fillStyle = n.id === hover?.id || pressed?.id === n.id ? COL.hot : COL.node
         ctx.beginPath()
-        ctx.arc(n.x!, n.y!, radius(n), 0, Math.PI * 2)
+        ctx.arc(n.x!, n.y!, drawRadius(n), 0, Math.PI * 2)
         ctx.fill()
       }
 
@@ -394,6 +493,11 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         fitted = true
         invalidate()
       }
+      // Stands in for the wheel-release event the platform does not send.
+      if (lastWheel && performance.now() - lastWheel > WHEEL_IDLE_MS) {
+        lastWheel = 0
+        settleZoom()
+      }
       // A warm simulation moves nodes every tick, so it is always dirty. Under
       // reduced motion the simulation is stopped and its alpha is frozen at
       // whatever the manual ticks left it at, so it must not be consulted —
@@ -457,15 +561,26 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       if (dragging) {
         const r = canvas.getBoundingClientRect()
         const p = toGraph(e.clientX - r.left, e.clientY - r.top)
+        /**
+         * The grab offset is preserved.
+         *
+         * Without it the node's centre jumped to the cursor on the first
+         * move — grab a big hub near its edge and it visibly teleported before
+         * it started following. Touch and content have to move together from
+         * the first frame, which means tracking where the node was picked up
+         * relative to the pointer, not re-centring it on the pointer.
+         */
         // 1:1 with the pointer. NOTHING else happens here.
         //
         // This used to call `sim.alphaTarget(0.25).restart()` on every single
         // move, which held the whole simulation at high energy for the entire
         // drag — so the entire graph re-formed around the cursor instead of
         // one node following it. The reheat belongs on press, once.
-        dragging.fx = p.x
-        dragging.fy = p.y
-        moved = true
+        dragging.fx = p.x - grabOffset.x
+        dragging.fy = p.y - grabOffset.y
+        if (downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > DRAG_THRESHOLD) {
+          moved = true
+        }
         return
       }
       const hit = pick(e)
@@ -479,10 +594,24 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
     }
 
     const onDown = (e: PointerEvent) => {
+      // Interruptibility. A press must take the view over from wherever it
+      // visually IS this frame — never wait for a glide to finish first, and
+      // never snap to where the glide was headed. Both read as the app
+      // ignoring you for a moment.
+      stopMotion()
       const hit = pick(e)
       moved = false
+      downAt = { x: e.clientX, y: e.clientY }
+      panVelocity.clear()
+      panVelocity.add(e.clientX, e.clientY)
+      // Felt before anything moves, and before the release decides anything.
+      pressed = hit
+      if (hit) invalidate()
       if (hit) {
         dragging = hit
+        const r = canvas.getBoundingClientRect()
+        const p = toGraph(e.clientX - r.left, e.clientY - r.top)
+        grabOffset = { x: p.x - hit.x!, y: p.y - hit.y! }
         hit.fx = hit.x
         hit.fy = hit.y
         refreshRest() // its links now want the ring, not 52
@@ -501,6 +630,10 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         canvas.setPointerCapture(e.pointerId)
       } else {
         panning = { x: e.clientX, y: e.clientY }
+        // Captured AFTER stopMotion(), so a pan that interrupts a glide
+        // anchors to where the view actually is on screen rather than to
+        // wherever the glide was headed.
+        panAnchor = { x: e.clientX, y: e.clientY, tx, ty }
         fitted = true
         canvas.setPointerCapture(e.pointerId)
         canvas.style.cursor = 'grabbing'
@@ -508,12 +641,38 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
     }
 
     let panning: { x: number; y: number } | null = null
+    /** Pointer position and view offset at the moment the pan began. */
+    let panAnchor = { x: 0, y: 0, tx: 0, ty: 0 }
     const onPan = (e: PointerEvent) => {
       if (!panning) return
-      tx += e.clientX - panning.x
-      ty += e.clientY - panning.y
+      panVelocity.add(e.clientX, e.clientY)
+
+      /**
+       * Resistance is computed from TOTAL displacement past the edge, not from
+       * this frame's delta.
+       *
+       * Damping each increment separately compounds: the same gesture resists
+       * differently depending on how many pointer events the OS happened to
+       * deliver, so a fast drag and a slow drag over identical distance end up
+       * in different places. Anchoring to where the gesture started makes the
+       * curve a function of the hand's position and nothing else, which is
+       * what `rubberband` is shaped for — the pointer stays glued to the
+       * content in bounds and decouples smoothly and repeatably outside them.
+       */
+      const rawTx = panAnchor.tx + (e.clientX - panAnchor.x)
+      const rawTy = panAnchor.ty + (e.clientY - panAnchor.y)
+      const over = overshootAt(rawTx, rawTy)
+      // The nearest position that is still legal, and how far past it the hand
+      // has actually travelled.
+      const excessX = -over.x
+      const excessY = -over.y
+      tx = rawTx + over.x + Math.sign(excessX) * rubberband(Math.abs(excessX), w)
+      ty = rawTy + over.y + Math.sign(excessY) * rubberband(Math.abs(excessY), h)
+
       panning = { x: e.clientX, y: e.clientY }
-      moved = true
+      if (downAt && Math.hypot(e.clientX - downAt.x, e.clientY - downAt.y) > DRAG_THRESHOLD) {
+        moved = true
+      }
       invalidate()
     }
 
@@ -531,9 +690,74 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         refreshRest() // back to ordinary rest lengths
         sim.alphaTarget(0) // stop driving; let it coast to rest
       }
+      const wasPanning = panning !== null
       panning = null
+      pressed = null
+      downAt = null
       canvas.style.cursor = 'grab'
       canvas.releasePointerCapture?.(e.pointerId)
+      invalidate() // the lift has to be released even if nothing else moves
+
+      if (wasPanning && !reduced) {
+        /**
+         * The seam between dragging and animating.
+         *
+         * The glide continues at the finger's exact release velocity, so there
+         * is no moment where the content stops and a separate animation
+         * starts. `project()` is what tells us the flick is worth honouring at
+         * all: below a few pixels of predicted travel this was a tap that
+         * wobbled, and gliding on it would feel like drift.
+         */
+        const { vx, vy } = panVelocity.velocity()
+        if (Math.hypot(project(vx), project(vy)) > 12) {
+          glide.start(
+            vx,
+            vy,
+            (dx, dy) => {
+              // Past the edge the glide is damped hard rather than clamped, so
+              // a throw decelerates into the boundary instead of hitting a wall.
+              const over = panOvershoot()
+              tx += over.x !== 0 && Math.sign(dx) === -Math.sign(over.x) ? dx * 0.25 : dx
+              ty += over.y !== 0 && Math.sign(dy) === -Math.sign(over.y) ? dy * 0.25 : dy
+              invalidate()
+            },
+            settleInBounds,
+          )
+          return
+        }
+      }
+      settleInBounds()
+    }
+
+    /**
+     * Return the view to a legal position after a gesture that left it outside
+     * one, critically damped so it does not overshoot.
+     *
+     * A correction that bounces reads as a bug. Bounce is earned by momentum
+     * the user supplied, and nobody threw this — the view is coming back from
+     * somewhere it was never allowed to be.
+     */
+    function settleInBounds() {
+      const over = panOvershoot()
+      if (over.x === 0 && over.y === 0) return
+      if (reduced) {
+        tx += over.x
+        ty += over.y
+        invalidate()
+        return
+      }
+      if (over.x !== 0) {
+        settleX.start(tx, tx + over.x, (v) => {
+          tx = v
+          invalidate()
+        })
+      }
+      if (over.y !== 0) {
+        settleY.start(ty, ty + over.y, (v) => {
+          ty = v
+          invalidate()
+        })
+      }
     }
 
     const onClick = (e: MouseEvent) => {
@@ -552,14 +776,80 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       }
     }
 
+    // Soft limits. Past these the zoom still moves, just reluctantly, and
+    // springs back on release — a hard clamp at the end of a pinch reads as the
+    // app having frozen mid-gesture.
+    const K_MIN = 0.05
+    const K_MAX = 6
+    /**
+     * The wheel has no release event, so idleness stands in for one — measured
+     * on the FRAME CLOCK, not a timer.
+     *
+     * This pane holds no timers by design (test/review-s2-vault-pane.test.mjs):
+     * a `setTimeout` here outlives unmount, fires against a closure over a
+     * canvas that has left the document, and is invisible to the one rAF loop
+     * that already owns every repaint. The loop is running anyway and is
+     * display-synced, so it is both the correct clock and the free one.
+     */
+    let lastWheel = 0
+    const WHEEL_IDLE_MS = 90
+
+    /** Ease the zoom back inside its limits once the wheel goes quiet. */
+    function settleZoom() {
+      const target = Math.min(K_MAX, Math.max(K_MIN, k))
+      if (target === k) return
+      if (reduced) {
+        k = target
+        invalidate()
+        return
+      }
+      /**
+       * Anchored to the viewport CENTRE, not the last cursor position.
+       *
+       * The pointer has moved on by the time this runs — possibly off the
+       * canvas entirely — and zooming back around a stale cursor slides the
+       * content sideways for a reason the user cannot see. The centre is the
+       * one anchor that is still true when the gesture is over.
+       */
+      const cx = w / 2
+      const cy = h / 2
+      const anchor = toGraph(cx, cy)
+      settleK.start(k, target, (v) => {
+        k = v
+        tx = cx - anchor.x * k
+        ty = cy - anchor.y * k
+        invalidate()
+      })
+    }
+
     const onWheel = (e: WheelEvent) => {
       e.preventDefault()
+      stopMotion()
       const r = canvas.getBoundingClientRect()
       const mx = e.clientX - r.left
       const my = e.clientY - r.top
       const before = toGraph(mx, my)
       fitted = true
-      k = Math.min(6, Math.max(0.05, k * Math.pow(0.999, e.deltaY)))
+
+      let next = k * Math.pow(0.999, e.deltaY)
+      /**
+       * Resistance is applied in LOG space.
+       *
+       * Zoom is multiplicative — 0.5 and 2 are the same distance from 1 — so
+       * damping the raw ratio makes the resistance lopsided, stiff zooming out
+       * and loose zooming in. Damping the exponent keeps both edges feeling
+       * identical.
+       */
+      if (next < K_MIN) {
+        const over = Math.log(K_MIN / next)
+        next = K_MIN / Math.exp(rubberband(over, 1.6))
+      } else if (next > K_MAX) {
+        const over = Math.log(next / K_MAX)
+        next = K_MAX * Math.exp(rubberband(over, 1.6))
+      }
+      k = next
+
+      lastWheel = performance.now()
       // Keep the point under the cursor fixed — zoom toward the pointer, not
       // toward the centre, or the view runs away from whatever you aimed at.
       tx = mx - before.x * k
@@ -579,6 +869,10 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
     return () => {
       ro.disconnect()
       cancelAnimationFrame(raf)
+      // A glide or a settle outlives the component otherwise: both hold a rAF
+      // and a closure over `tx`/`ty`, so an unmount mid-flick leaks a frame
+      // loop that writes to a canvas that is no longer in the document.
+      stopMotion()
       sim.stop()
       canvas.removeEventListener('pointermove', onMove)
       canvas.removeEventListener('pointermove', onPan)

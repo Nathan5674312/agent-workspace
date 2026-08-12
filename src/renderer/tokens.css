@@ -107,8 +107,17 @@
 
   /* ── motion ───────────────────────────────────────────────
      Critically damped: fast, no overshoot. Bounce is reserved for motion the
-     user physically threw, and nothing here is gesture-driven yet.
-     `--ease-spring` approximates damping 1.0 / response ~0.35. */
+     user physically threw. `--ease-spring` approximates damping 1.0 /
+     response ~0.35.
+
+     These curves are for motion the app STARTS — a card arriving, a control
+     responding to a press. They are deliberately not used for anything the
+     user is holding: a CSS transition runs a fixed curve for a fixed duration
+     from a fixed start, so it cannot be grabbed mid-flight, cannot inherit the
+     hand's velocity, and cannot be reversed without a visible jump.
+     Gesture-driven motion lives in `motion.ts` and is integrated per frame for
+     exactly those three reasons. The graph's pan, flick and boundaries are the
+     first things here that a user can physically throw. */
   --duration-instant: 100ms;
   --duration-fast: 200ms;
   --duration-normal: 350ms;

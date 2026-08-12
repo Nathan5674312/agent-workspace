@@ -146,6 +146,10 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   color: var(--label-secondary);
 }
 .vault-tree-item:hover { background: var(--fill-hover); }
+/* A row is a surface you push INTO, so it darkens rather than shrinking. The
+   global button rule scales 0.97, which on a full-width row makes the label
+   visibly shimmer as it resamples — right for a chip, wrong for a list. */
+.vault-tree-item:active { background: var(--fill-active); transform: none; }
 .vault-tree-toggle { color: var(--label-quaternary); font-size: 8px; flex: none; width: 10px; }
 .vault-tree-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 /* Indent in em so it scales with user text size. */
@@ -171,6 +175,7 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   border-bottom: 1px solid var(--separator);
 }
 .vault-tab { padding: var(--space-2) var(--space-4); border-radius: var(--radius-md); color: var(--label-tertiary); }
+.vault-tab:active { transform: none; background: var(--fill-active); }
 .vault-tab--active { color: var(--label); background: var(--fill-selected); }
 
 .vault-note-header {
@@ -200,6 +205,52 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
 .vault-view-button.active { color: var(--label); background: var(--fill-selected); }
 
 .vault-view-content { flex: 1; min-height: 0; overflow: auto; padding: var(--space-5); }
+
+/**
+ * Scroll edge effect, driven by scroll position with no JavaScript.
+ *
+ * A hairline under a header is a lie about what is happening: content is
+ * passing UNDER the chrome, and a hard 1px line says it was cut there instead.
+ * A short fade says the text continues and you have scrolled past some of it.
+ *
+ * The fade must not exist at rest, or the first line of an unscrolled note
+ * renders half-transparent for no reason — which is why this is tied to the
+ * scroll timeline rather than being a static mask. `animation-range` keeps the
+ * whole effect inside the first 40px of travel so it is finished before it can
+ * be noticed as an animation.
+ *
+ * Registered with @property because a custom property is a string to the
+ * animation engine until its syntax is declared, and an uninterpolable
+ * property snaps from start to end instead of fading.
+ */
+@property --edge-fade {
+  syntax: '<length>';
+  inherits: false;
+  initial-value: 0px;
+}
+.vault-view-content {
+  --edge-fade: 0px;
+  -webkit-mask-image: linear-gradient(to bottom, transparent 0, black var(--edge-fade));
+  mask-image: linear-gradient(to bottom, transparent 0, black var(--edge-fade));
+  /* `auto` duration is required, not decorative: the `animation` shorthand
+     resets duration to its initial value, and a scroll timeline with a 0s
+     duration never advances — the mask would sit permanently at 0px and the
+     effect would silently do nothing. */
+  animation: vault-scroll-edge auto linear both;
+  animation-timeline: scroll(self block);
+  animation-range: 0px 40px;
+}
+@keyframes vault-scroll-edge {
+  from { --edge-fade: 0px; }
+  to { --edge-fade: 28px; }
+}
+/* The graph owns its pane and does not scroll, so masking it would only clip
+   the top of the canvas permanently. */
+.vault-view-content:has(.vault-graph-view) {
+  -webkit-mask-image: none;
+  mask-image: none;
+  animation: none;
+}
 
 /* The graph fills its pane and does not scroll — panning is the navigation,
    so a scrollbar here would fight the drag. */
@@ -247,6 +298,37 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   border-radius: var(--radius-lg);
   box-shadow: var(--shadow-md);
   overflow-y: auto;
+
+  /**
+   * It MATERIALISES from the corner it lives in, rather than fading in place.
+   *
+   * Two rules are doing the work. Things should emerge from where they came
+   * from, so the origin is the bottom-right — the corner the card occupies —
+   * and it grows out of that point instead of expanding from its own centre
+   * into the middle of the note. And a surface with depth should arrive as a
+   * material: blur and scale move together so it reads as something coming
+   * into focus, where a plain opacity fade reads as a picture of a card being
+   * turned up.
+   *
+   * It appears without being asked for, over content the user was reading, so
+   * the response is deliberately slower than a control's — fast enough not to
+   * be waited on, slow enough not to be startling.
+   */
+  transform-origin: 100% 100%;
+  animation: corner-materialise var(--duration-normal) var(--ease-spring) both;
+  will-change: transform, opacity, filter;
+}
+@keyframes corner-materialise {
+  from {
+    opacity: 0;
+    transform: scale(0.92) translateY(6px);
+    filter: blur(6px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
+    filter: blur(0);
+  }
 }
 
 .artifact-title, .consent-title { margin-bottom: var(--space-3); }
@@ -316,6 +398,24 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   }
   button:active:not(:disabled),
   .claude-session-item:active { transform: none; }
+  /* The corner still ARRIVES — it just arrives without travelling. A card that
+     only becomes visible via animation must never be animated to nothing. */
+  .corner-container {
+    animation: none;
+    opacity: 1;
+    transform: none;
+    filter: none;
+  }
+  /* A scroll-driven animation takes its progress from scroll position, not
+     from a clock, so the blanket 1ms duration above does not apply to it and
+     it has to be switched off by name. The fade is decoration; removing it
+     costs no information. */
+  .vault-view-content {
+    animation: none;
+    --edge-fade: 0px;
+    -webkit-mask-image: none;
+    mask-image: none;
+  }
   /* The drift and the sweep are ambient motion with no informational
      content, so they simply stop. The text stays fully legible because the
      sweep is replaced by a flat label colour rather than being left mid-

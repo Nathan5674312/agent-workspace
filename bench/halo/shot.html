@@ -1,0 +1,119 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>halo shot</title>
+<style>
+  /* Replicates the real .vault-main stack from app.css so the screenshot shows
+     what actually ships: artwork at 16% behind an Ink scrim, transparent graph
+     canvas on top. Values copied from tokens.css / app.css deliberately — this
+     is a visual reference shot, not a source of truth. */
+  html, body { margin: 0; height: 100%; background: #160c08; }
+  #stage { position: relative; isolation: isolate; width: 1400px; height: 900px; }
+  #stage::before, #stage::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background-size: cover; background-position: center; background-repeat: no-repeat;
+  }
+  #stage::before {
+    z-index: -2;
+    background-image: url('../../src/renderer/assets/canvas-art-treated.jpg');
+    opacity: 0.16;
+  }
+  #stage::after {
+    z-index: -1;
+    background-image: linear-gradient(
+      to bottom, rgba(22,12,8,0.35), rgba(22,12,8,0.78) 55%, rgba(22,12,8,0.95));
+  }
+  canvas { display: block; }
+</style>
+<div id="stage"><canvas id="c" width="1400" height="900"></canvas></div>
+<script>
+  const HALO_ON = new URLSearchParams(location.search).get('halo') !== 'off'
+  const W = 1400, H = 900
+  const ctx = document.getElementById('c').getContext('2d')
+
+  let seed = 987654321
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+
+  // A clustered layout rather than uniform noise, so the shot contains both
+  // dense hubs (where halos overlap) and sparse regions (where the artwork must
+  // still read). Uniform scatter would hide both failure modes.
+  const nodes = []
+  for (let cluster = 0; cluster < 9; cluster++) {
+    const cx = 120 + rnd() * (W - 240)
+    const cy = 100 + rnd() * (H - 200)
+    const count = 12 + ((rnd() * 22) | 0)
+    for (let i = 0; i < count; i++) {
+      const a = rnd() * Math.PI * 2
+      const d = rnd() * 130
+      nodes.push({
+        x: cx + Math.cos(a) * d,
+        y: cy + Math.sin(a) * d,
+        r: 3.4 + Math.sqrt(rnd() * 30) * 1.45,
+      })
+    }
+  }
+  const links = []
+  for (let i = 0; i < 850; i++) {
+    const a = nodes[(rnd() * nodes.length) | 0]
+    const b = nodes[(rnd() * nodes.length) | 0]
+    if (a !== b) links.push({ a, b })
+  }
+
+  const INK = '#160c08', NODE = '#ba9b7d', LINK = '#806854'
+  const HALO_SCALE = 3.2, HALO_ALPHA = 0.8, SPRITE_PX = 128
+
+  const sprite = document.createElement('canvas')
+  sprite.width = sprite.height = SPRITE_PX
+  {
+    const s = sprite.getContext('2d')
+    const c = SPRITE_PX / 2
+    const g = s.createRadialGradient(c, c, 0, c, c, c)
+    g.addColorStop(0, INK)
+    g.addColorStop(1, 'transparent')
+    s.fillStyle = g
+    s.fillRect(0, 0, SPRITE_PX, SPRITE_PX)
+  }
+
+  ctx.clearRect(0, 0, W, H)
+
+  // links — per-link stroke, exactly as GraphView does it
+  ctx.lineWidth = 0.7
+  for (const l of links) {
+    ctx.strokeStyle = LINK
+    ctx.globalAlpha = 0.16
+    ctx.beginPath()
+    ctx.moveTo(l.a.x, l.a.y)
+    ctx.lineTo(l.b.x, l.b.y)
+    ctx.stroke()
+  }
+
+  // destination-out punch
+  ctx.globalCompositeOperation = 'destination-out'
+  ctx.fillStyle = 'CanvasText'
+  ctx.globalAlpha = 1
+  for (const n of nodes) {
+    ctx.beginPath()
+    ctx.arc(n.x, n.y, n.r + 1.5, 0, Math.PI * 2)
+    ctx.fill()
+  }
+  ctx.globalCompositeOperation = 'source-over'
+
+  // halo
+  if (HALO_ON) {
+    ctx.globalAlpha = HALO_ALPHA
+    for (const n of nodes) {
+      const R = n.r * HALO_SCALE
+      ctx.drawImage(sprite, n.x - R, n.y - R, R * 2, R * 2)
+    }
+  }
+
+  // nodes
+  ctx.globalAlpha = 1
+  ctx.fillStyle = NODE
+  for (const n of nodes) {
+    ctx.beginPath()
+    ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
+    ctx.fill()
+  }
+
+  document.title = 'ready'
+</script>

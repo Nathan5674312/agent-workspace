@@ -1,0 +1,11 @@
+const { app, BrowserWindow } = require('electron')
+const path = require('path'); const fs = require('fs')
+app.whenReady().then(async () => {
+  const win = new BrowserWindow({ show: false, width: 1400, height: 900, useContentSize: true })
+  await win.loadFile(path.join(__dirname, 'variants.html'))
+  await new Promise((r) => setTimeout(r, 500))
+  const img = await win.webContents.capturePage()
+  fs.writeFileSync(path.join(__dirname, 'out-variants.png'), img.toPNG())
+  console.log('wrote out-variants.png')
+  app.exit(0)
+})

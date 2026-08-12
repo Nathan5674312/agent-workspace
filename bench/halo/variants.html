@@ -1,0 +1,123 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>halo variants</title>
+<style>
+  html, body { margin: 0; background: #160c08; font: 12px system-ui; }
+  #grid { display: grid; grid-template-columns: 700px 700px; width: 1400px; }
+  .cell { position: relative; isolation: isolate; width: 700px; height: 450px; overflow: hidden; }
+  /* Same artwork crop in every cell, so only the halo differs. */
+  .cell::before, .cell::after {
+    content: ''; position: absolute; inset: 0; pointer-events: none;
+    background-size: 1400px 900px; background-position: 0px 0px; background-repeat: no-repeat;
+  }
+  .cell::before {
+    z-index: -2;
+    background-image: url('../../src/renderer/assets/canvas-art-treated.jpg');
+    opacity: 0.16;
+  }
+  .cell::after {
+    z-index: -1;
+    background-image: linear-gradient(
+      to bottom, rgba(22,12,8,0.35), rgba(22,12,8,0.78) 55%, rgba(22,12,8,0.95));
+  }
+  canvas { display: block; position: absolute; inset: 0; }
+  .tag {
+    position: absolute; left: 8px; top: 6px; z-index: 5;
+    color: #d8b493; font-weight: 600; letter-spacing: .04em;
+    text-shadow: 0 1px 3px #160c08, 0 0 8px #160c08;
+  }
+</style>
+<div id="grid"></div>
+<script>
+  const W = 700, H = 450
+  const INK = '#160c08', NODE = '#ba9b7d', LINK = '#806854'
+
+  // Variants: [label, outerScale, coreFraction, peakAlpha]
+  const VARIANTS = [
+    ['NONE  (control)', 0, 0, 0],
+    ['B  3.2x  core 0  a1.0', 3.2, 0.0, 1.0],
+    ['C  3.2x  core 0  a0.8', 3.2, 0.0, 0.8],
+    ['D  4.0x  core 0  a0.65', 4.0, 0.0, 0.65],
+  ]
+
+  function makeScene() {
+    let seed = 24680
+    const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+    const nodes = []
+    // Two clusters plus deliberately ISOLATED nodes — the isolated ones are
+    // where a halo shows itself as a disc, which is the failure being judged.
+    for (let c = 0; c < 2; c++) {
+      const cx = 220 + c * 300, cy = 150 + c * 160
+      for (let i = 0; i < 26; i++) {
+        const a = rnd() * Math.PI * 2, d = rnd() * 95
+        nodes.push({ x: cx + Math.cos(a) * d, y: cy + Math.sin(a) * d,
+                     r: 3.4 + Math.sqrt(rnd() * 30) * 1.45 })
+      }
+    }
+    for (const [x, y, r] of [[70, 360, 5], [140, 410, 7], [610, 90, 9], [540, 390, 4], [80, 90, 6]]) {
+      nodes.push({ x, y, r })
+    }
+    const links = []
+    for (let i = 0; i < 320; i++) {
+      const a = nodes[(rnd() * nodes.length) | 0], b = nodes[(rnd() * nodes.length) | 0]
+      if (a !== b) links.push({ a, b })
+    }
+    return { nodes, links }
+  }
+  const scene = makeScene()
+
+  function spriteFor(core) {
+    const S = 128
+    const cv = document.createElement('canvas')
+    cv.width = cv.height = S
+    const s = cv.getContext('2d')
+    const c = S / 2
+    const g = s.createRadialGradient(c, c, 0, c, c, c)
+    g.addColorStop(0, INK)
+    if (core > 0) g.addColorStop(core, INK)
+    g.addColorStop(1, 'transparent')
+    s.fillStyle = g
+    s.fillRect(0, 0, S, S)
+    return cv
+  }
+
+  const grid = document.getElementById('grid')
+  for (const [label, scale, core, alpha] of VARIANTS) {
+    const cell = document.createElement('div')
+    cell.className = 'cell'
+    const cv = document.createElement('canvas')
+    cv.width = W; cv.height = H
+    const tag = document.createElement('div')
+    tag.className = 'tag'; tag.textContent = label
+    cell.appendChild(cv); cell.appendChild(tag)
+    grid.appendChild(cell)
+
+    const ctx = cv.getContext('2d')
+    const sprite = spriteFor(core)
+
+    ctx.lineWidth = 0.7
+    for (const l of scene.links) {
+      ctx.strokeStyle = LINK; ctx.globalAlpha = 0.16
+      ctx.beginPath(); ctx.moveTo(l.a.x, l.a.y); ctx.lineTo(l.b.x, l.b.y); ctx.stroke()
+    }
+    ctx.globalCompositeOperation = 'destination-out'
+    ctx.fillStyle = 'CanvasText'; ctx.globalAlpha = 1
+    for (const n of scene.nodes) {
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.r + 1.5, 0, Math.PI * 2); ctx.fill()
+    }
+    ctx.globalCompositeOperation = 'source-over'
+
+    if (scale > 0) {
+      ctx.globalAlpha = alpha
+      for (const n of scene.nodes) {
+        const R = n.r * scale
+        ctx.drawImage(sprite, n.x - R, n.y - R, R * 2, R * 2)
+      }
+    }
+
+    ctx.globalAlpha = 1; ctx.fillStyle = NODE
+    for (const n of scene.nodes) {
+      ctx.beginPath(); ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2); ctx.fill()
+    }
+  }
+</script>

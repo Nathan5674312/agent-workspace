@@ -85,6 +85,61 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
 
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
 
+    /**
+     * The halo sprite — one gradient disc, built once, blitted per node.
+     *
+     * The canvas is transparent and sits over the artwork layer
+     * (`.vault-main::before`), so where a node lands on a busy part of the
+     * drawing the two compete and the graph stops being readable. This paints
+     * a soft pool of the window ground under each node: the artwork is pushed
+     * back locally and stays fully visible between nodes.
+     *
+     * WHY A SPRITE. `createRadialGradient` per node per frame is the obvious
+     * version and it is measurably worse — `bench/halo/` times it at 0.71ms a
+     * frame against 0.37ms for this, for identical output, over 250 nodes and
+     * 850 links in Electron's own Chromium. Neither threatens the 16.7ms
+     * budget, so this is not a rescue; it is the same picture for half the
+     * cost, and the cost scales with node count while the sprite does not.
+     *
+     * The stops carry no alpha values because they do not need to: `transparent`
+     * is a keyword, so the falloff is expressed without an `rgba()` literal —
+     * which this pane forbids (review-s2). Ink is near-black, so interpolating
+     * its RGB toward zero as alpha falls is invisible.
+     *
+     * THE THREE NUMBERS BELOW WERE PICKED FROM RENDERED OUTPUT, not by feel.
+     * `bench/halo/variants.cjs` composites the real stack — artwork at 16%
+     * under the Ink scrim — and paints the same scene four ways over the
+     * busiest part of the drawing, including a no-halo control. What that
+     * showed:
+     *
+     *   - A flat opaque core (any value) is the sticker. It puts a plateau in
+     *     the middle of the falloff, and on an isolated node that plateau
+     *     reads as a distinct dark disc. There is no core now; the gradient
+     *     runs from the centre out, and the node's own opaque disc covers the
+     *     strongest part of it anyway.
+     *   - At full alpha the pools are still blobby around isolated nodes.
+     *   - Below ~0.65 the effect is nearly indistinguishable from no halo at
+     *     all, which fails the legibility half of the task.
+     */
+    const HALO_SCALE = 3.2 // outer radius, in node radii
+    const HALO_ALPHA = 0.8 // peak, at the centre
+    const SPRITE_PX = 128
+    const halo = document.createElement('canvas')
+    halo.width = SPRITE_PX
+    halo.height = SPRITE_PX
+    {
+      const hx = halo.getContext('2d')
+      if (hx) {
+        const c = SPRITE_PX / 2
+        const g = hx.createRadialGradient(c, c, 0, c, c, c)
+        const ink = token('--bg-app', 'Canvas')
+        g.addColorStop(0, ink)
+        g.addColorStop(1, 'transparent')
+        hx.fillStyle = g
+        hx.fillRect(0, 0, SPRITE_PX, SPRITE_PX)
+      }
+    }
+
     // Degree drives node size — the same signal Obsidian uses. A hub should
     // look like a hub without being clicked.
     const degree = new Map<string, number>()
@@ -335,6 +390,33 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         ctx.fill()
       }
       ctx.globalCompositeOperation = 'source-over'
+
+      /**
+       * The halo, painted AFTER the erase and BEFORE the nodes. Both halves of
+       * that sentence are load-bearing.
+       *
+       * AFTER, because `destination-out` erases everything already on the
+       * canvas within its radius — including a halo drawn earlier. Painting
+       * the halo first leaves a 1.5px annulus of bare artwork ringing every
+       * node, which is precisely the hard-edged sticker look this is meant to
+       * avoid. Painting it after instead fills that hairline gap with ground,
+       * so the gap reads as a gap rather than as the drawing poking through.
+       *
+       * BEFORE the nodes, so the node disc sits on top of its own pool and
+       * nothing softens the node itself.
+       *
+       * Alpha is deliberately NOT modulated by hover, unlike the nodes and
+       * links below. Dimming the halos with their nodes would let the artwork
+       * surge back across the whole canvas the instant the pointer touches
+       * anything, and recede again when it leaves — a flash of background on
+       * every hover. Quieting the artwork is a property of where the nodes
+       * ARE, not of which one is under the cursor, so it holds still.
+       */
+      ctx.globalAlpha = HALO_ALPHA
+      for (const n of nodes) {
+        const R = drawRadius(n) * HALO_SCALE
+        ctx.drawImage(halo, n.x! - R, n.y! - R, R * 2, R * 2)
+      }
 
       for (const n of nodes) {
         const lit = !dim || n.id === hover!.id || neighbours.has(n.id)

@@ -1,0 +1,148 @@
+<!doctype html>
+<meta charset="utf-8" />
+<title>halo bench</title>
+<canvas id="c" width="1400" height="900"></canvas>
+<script>
+  /**
+   * Does a cached gradient sprite actually beat per-frame createRadialGradient?
+   *
+   * The task note asserts it will and says "measure, do not assume". This is
+   * the narrow, mechanical question — a property of the canvas API at this node
+   * count, not of the app's logic — so a focused harness answers it honestly.
+   * It deliberately mirrors the app's draw ORDER and counts (250 nodes, 850
+   * links, the destination-out pass) so the halo cost is measured against a
+   * realistic frame rather than in isolation.
+   */
+  const NODES = 250
+  const LINKS = 850
+  const FRAMES = 240
+  const W = 1400
+  const H = 900
+
+  const ctx = document.getElementById('c').getContext('2d')
+
+  // Deterministic layout, so every strategy draws the identical scene.
+  let seed = 12345
+  const rnd = () => ((seed = (seed * 1103515245 + 12345) & 0x7fffffff) / 0x7fffffff)
+
+  const nodes = Array.from({ length: NODES }, () => ({
+    x: rnd() * W,
+    y: rnd() * H,
+    r: 3.4 + Math.sqrt(rnd() * 30) * 1.45,
+  }))
+  const links = Array.from({ length: LINKS }, () => ({
+    a: nodes[(rnd() * NODES) | 0],
+    b: nodes[(rnd() * NODES) | 0],
+  }))
+
+  const INK = '#160c08'
+  const NODE = '#ba9b7d'
+  const LINK = '#806854'
+
+  /** The halo sprite, built once. Opaque core, then a smooth falloff. */
+  const SPRITE_PX = 64
+  const sprite = document.createElement('canvas')
+  sprite.width = sprite.height = SPRITE_PX
+  {
+    const s = sprite.getContext('2d')
+    const c = SPRITE_PX / 2
+    const g = s.createRadialGradient(c, c, 0, c, c, c)
+    g.addColorStop(0, INK)
+        g.addColorStop(1, 'transparent')
+    s.fillStyle = g
+    s.fillRect(0, 0, SPRITE_PX, SPRITE_PX)
+  }
+
+  const HALO = 3.2
+  const HALO_ALPHA = 0.8
+
+  function drawLinksAndPunch() {
+    ctx.lineWidth = 0.7
+    ctx.strokeStyle = LINK
+    ctx.globalAlpha = 0.16
+    ctx.beginPath()
+    for (const l of links) {
+      ctx.moveTo(l.a.x, l.a.y)
+      ctx.lineTo(l.b.x, l.b.y)
+    }
+    ctx.stroke()
+
+    ctx.globalCompositeOperation = 'destination-out'
+    ctx.fillStyle = '#000'
+    ctx.globalAlpha = 1
+    for (const n of nodes) {
+      ctx.beginPath()
+      ctx.arc(n.x, n.y, n.r + 1.5, 0, Math.PI * 2)
+      ctx.fill()
+    }
+    ctx.globalCompositeOperation = 'source-over'
+  }
+
+  function drawNodes() {
+    ctx.globalAlpha = 1
+    ctx.fillStyle = NODE
+    for (const n of nodes) {
+      ctx.beginPath()
+      ctx.arc(n.x, n.y, n.r, 0, Math.PI * 2)
+      ctx.fill()
+    }
+  }
+
+  const strategies = {
+    /** What ships today — no halo at all. The floor. */
+    baseline() {
+      ctx.clearRect(0, 0, W, H)
+      drawLinksAndPunch()
+      drawNodes()
+    },
+
+    /** The naive version the note warns about: a gradient object per node. */
+    perFrameGradient() {
+      ctx.clearRect(0, 0, W, H)
+      drawLinksAndPunch()
+      for (const n of nodes) {
+        const R = n.r * HALO
+        const g = ctx.createRadialGradient(n.x, n.y, 0, n.x, n.y, R)
+        g.addColorStop(0, INK)
+                g.addColorStop(1, 'transparent')
+        ctx.fillStyle = g
+        ctx.beginPath()
+        ctx.arc(n.x, n.y, R, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      drawNodes()
+    },
+
+    /** The note's recommendation: one sprite, drawImage scaled per node. */
+    cachedSprite() {
+      ctx.clearRect(0, 0, W, H)
+      drawLinksAndPunch()
+      ctx.globalAlpha = HALO_ALPHA
+      for (const n of nodes) {
+        const R = n.r * HALO
+        ctx.drawImage(sprite, n.x - R, n.y - R, R * 2, R * 2)
+      }
+      ctx.globalAlpha = 1
+      drawNodes()
+    },
+  }
+
+  function time(fn) {
+    for (let i = 0; i < 30; i++) fn() // warm the JIT and the GPU path
+    const t0 = performance.now()
+    for (let i = 0; i < FRAMES; i++) fn()
+    return (performance.now() - t0) / FRAMES
+  }
+
+  const out = {}
+  // Interleaved repeats: a single sequential pass lets thermal or GPU-state
+  // drift land entirely on whichever strategy ran last.
+  const names = Object.keys(strategies)
+  const runs = Object.fromEntries(names.map((n) => [n, []]))
+  for (let rep = 0; rep < 3; rep++) {
+    for (const n of names) runs[n].push(time(strategies[n]))
+  }
+  for (const n of names) out[n] = Math.min(...runs[n])
+
+  console.log('RESULT ' + JSON.stringify(out))
+</script>

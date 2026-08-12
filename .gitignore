@@ -3,3 +3,6 @@ out/
 dist/
 *.log
 .env
+
+# Bench output images — regenerate with bench/halo/*.cjs
+bench/halo/out-*.png

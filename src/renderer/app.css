@@ -183,53 +183,180 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
  * of the artwork passes under the glass — which is the whole reason the
  * material is translucent in the first place.
  *
- * Three treatments stacked, in this order, and each earns its place:
+ * TWO LAYERS, and they must stay separate. They were one element with the
+ * scrim and the image in a single `background-image` list — which works right
+ * up until the filter chain contains `invert(1)`, because `filter` applies to
+ * the whole element and would inverts the scrim along with the artwork,
+ * turning a near-black wash into a near-white one. The image gets filtered;
+ * the scrim must not be.
  *
- *   SCRIM — two Ink stops, lighter at the top and near-opaque at the bottom.
- *   Content density grows downward (editor body, links, backlinks), so the
- *   artwork is allowed to breathe where the screen is empty and is smothered
- *   where the words are. This is also what lets an un-retouched photo work:
- *   the scrim, not the source file, decides how dark it lands.
- *
- *   saturate(0.35) — pulls any palette toward neutral so it cannot fight ten
- *   carefully measured browns. Not grayscale(1): keeping a trace of the
- *   original hue is what stops it looking like a stock texture.
- *
- *   opacity — the single knob worth turning. See tokens.css.
+ *   ::before — the artwork. Filtered and faded. See --canvas-art-filter.
+ *   ::after  — the scrim. Two Ink stops, lighter at the top and near-opaque at
+ *              the bottom. Content density grows downward (editor body, links,
+ *              backlinks), so the artwork breathes where the screen is empty
+ *              and is smothered where the words are. This is also what lets an
+ *              un-retouched photo work: the scrim, not the source file,
+ *              decides how dark it lands.
  */
-.vault-main::before {
+.vault-main::before,
+.vault-main::after {
   content: '';
   position: absolute;
   inset: 0;
-  z-index: -1;
   pointer-events: none;
-  background-image:
-    linear-gradient(
-      to bottom,
-      rgba(22, 12, 8, 0.55),
-      rgba(22, 12, 8, 0.86) 55%,
-      rgba(22, 12, 8, 0.97)
-    ),
-    var(--canvas-art);
-  background-size: cover, cover;
-  background-position: center, center;
-  background-repeat: no-repeat, no-repeat;
-  opacity: var(--canvas-art-opacity);
-  filter: saturate(0.35);
+  background-size: cover;
+  background-position: center;
+  background-repeat: no-repeat;
 }
+
+.vault-main::before {
+  z-index: -2;
+  /* Overrides the shared `inset: 0` above. See --canvas-art-drop. */
+  top: var(--canvas-art-drop);
+  background-image: var(--canvas-art);
+  opacity: var(--canvas-art-opacity);
+  filter: var(--canvas-art-filter);
+}
+
+.vault-main::after {
+  z-index: -1;
+  background-image: linear-gradient(
+    to bottom,
+    rgba(22, 12, 8, 0.35),
+    rgba(22, 12, 8, 0.78) 55%,
+    rgba(22, 12, 8, 0.95)
+  );
+}
+
+/**
+ * Artwork credit — bottom right of the canvas.
+ *
+ * Two states, and the resting one is the important one. At rest this is a
+ * single hairline of Taupe: present if you look for it, invisible if you are
+ * reading. That is the correct weight for a credit — legible without being
+ * sought is a watermark, and a watermark competes with the notes.
+ *
+ * On hover it comes up to Clay and the claim line appears above the name. The
+ * claim is what earns the credit its place: the work is hand-made, and the
+ * screen should be able to say so without shouting it at every glance.
+ *
+ * Taupe is used deliberately. The palette forbids it for body text (its best
+ * ratio anywhere is 3.7:1) and allows it for decoration — a resting credit is
+ * exactly the decorative case that rule exists for.
+ */
+.art-credit {
+  position: absolute;
+  right: var(--space-5);
+  bottom: var(--space-4);
+  z-index: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: var(--space-1);
+  text-align: right;
+  max-width: 22rem;
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+  color: var(--label-quaternary);
+  transition: color var(--duration-fast) var(--ease-out);
+}
+.art-credit:hover { color: var(--label-tertiary); }
+
+/* At rest the signature is the ONLY thing on screen. The claim and the name
+   both sit hidden above and below it and resolve together on hover.
+
+   `visibility` rather than `display` so both keep their boxes: the signature
+   does not move when they appear, so the mark you aimed at is still under the
+   pointer. Layout that jumps on hover is the cheapest way to make a UI feel
+   loose, and here it would also mean the hover target escapes the cursor. */
+.art-credit-claim,
+.art-credit-line {
+  opacity: 0;
+  visibility: hidden;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.art-credit-claim {
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+.art-credit:hover .art-credit-claim,
+.art-credit:focus-within .art-credit-claim,
+.art-credit:hover .art-credit-line,
+.art-credit:focus-within .art-credit-line {
+  opacity: 1;
+  visibility: visible;
+}
+
+/**
+ * The signature, painted rather than pictured.
+ *
+ * `mask-image` + `background-color: currentColor` means the strokes ARE the
+ * credit's colour — Taupe at rest, Clay on hover, Tan under high contrast —
+ * so the mark can never drift out of the palette. The asset is an alpha mask
+ * generated from her scan: paper levelled to full transparency, ink to full
+ * coverage, cropped to the strokes.
+ *
+ * Sized in em so it tracks the credit's type size rather than fighting it.
+ * Small on purpose: at rest this mark is the entire control, and the whole
+ * point is that it is found rather than noticed.
+ */
+.art-credit-signature {
+  display: block;
+  width: 3.4em;
+  height: 1.9em;
+  background-color: currentColor;
+  -webkit-mask-image: url('./assets/signature.png');
+  mask-image: url('./assets/signature.png');
+  -webkit-mask-size: contain;
+  mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-position: right center;
+  mask-position: right center;
+}
+
+.art-credit-title { font-style: italic; }
+
+.art-credit-link {
+  color: inherit;
+  text-decoration: none;
+  border-radius: var(--radius-sm);
+}
+.art-credit-link:hover { color: var(--label-secondary); text-decoration: none; }
+
+/* The handle only resolves on hover. At rest the name alone is the credit; the
+   @ is wayfinding, and wayfinding you are not using is noise. */
+.art-credit-handle {
+  opacity: 0;
+  transition: opacity var(--duration-fast) var(--ease-out);
+}
+.art-credit:hover .art-credit-handle,
+.art-credit:focus-within .art-credit-handle { opacity: 1; }
 
 /* The scrim is a fixed gradient, so it cannot know where the text actually is.
    Reduced transparency means someone has told the OS that layered surfaces are
    a problem for them; an image under their text is exactly that problem. */
 @media (prefers-reduced-transparency: reduce) {
-  .vault-main::before { background-image: none; }
+  .vault-main::before, .vault-main::after { background-image: none; }
+  /* No artwork means no credit to give, and a credit for an invisible image
+     is a claim about something the user cannot see. */
+  .art-credit { display: none; }
 }
 
 /* Same reasoning as reduced-transparency, one step firmer: a contrast request
    is a request for the measured ratios, and those were measured on flat Ink. */
 @media (prefers-contrast: more) {
-  .vault-main::before { background-image: none; }
+  .vault-main::before, .vault-main::after { background-image: none; }
+  /* Taupe is 3.7:1 at its very best. A contrast request is exactly the user
+     saying that is not enough, so the credit stops being a hairline and
+     becomes readable text. It is a person's name — the one thing here that
+     should get louder, not quieter, when someone asks for legibility. */
+  .art-credit { color: var(--label-secondary); }
+  .art-credit-claim { opacity: 1; visibility: visible; }
+  .art-credit-handle { opacity: 1; }
 }
+
 .vault-tab-bar {
   display: flex; align-items: center; gap: var(--space-1);
   padding: var(--space-2) var(--space-3);

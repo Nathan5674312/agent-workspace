@@ -178,6 +178,55 @@
      Opacity is the one knob to turn. Above ~0.20 the artwork starts competing
      with body text, and the palette's measured contrast ratios are against a
      flat Ink ground, so anything that lightens that ground erodes them. */
-  --canvas-art: none;
+  /**
+   * `canvas-art.jpg` is the ARTIST'S FILE, kept untouched as the master.
+   * `canvas-art-treated.jpg` is what actually ships, and it is what this
+   * points at.
+   *
+   * The treatment is baked rather than done in CSS, because two of the three
+   * steps have no CSS equivalent. Recipe, reproducible from the master with
+   * Pillow:
+   *
+   *   1. convert('L')                      graphite is already tonal
+   *   2. ImageOps.invert                   the master is a LIGHT image (measured
+   *                                        mean luminance 144.6/255). Laid over
+   *                                        Ink it lifts the whole ground toward
+   *                                        grey and erodes the note's measured
+   *                                        ratios. Inverted, the paper becomes
+   *                                        near-black and adds nothing, while
+   *                                        the graphite becomes light and reads
+   *                                        as the drawing. Forms untouched, only
+   *                                        the tonal direction reverses.
+   *   3. autocontrast(cutoff=(1, 12))      levels: paper to true black, marks to
+   *                                        the top of the range, so the drawing
+   *                                        separates instead of hazing.
+   *   4. duotone LUT, Ink -> Sand          every pixel becomes a colour BETWEEN
+   *                                        two palette entries. The drawing is
+   *                                        made of the palette rather than
+   *                                        neutral grey sitting on top of it.
+   *
+   * Because it is baked, the CSS filter is `none`. Setting an invert here as
+   * well would undo step 2.
+   *
+   * A DARK source image needs none of this: point at it directly and use
+   * `saturate(0.35)`.
+   */
+  --canvas-art: url('./assets/canvas-art-treated.jpg');
   --canvas-art-opacity: 0.16;
+  --canvas-art-filter: none;
+
+  /**
+   * How far down the artwork sits. THE knob for composition.
+   *
+   * Not `background-position`: at `cover` this image overflows its box by only
+   * ~30px, so shifting the position inside the box moves it by single-digit
+   * pixels. Gaining room by zooming in would work, but it crops the sides —
+   * and her signature is in the top-right corner, so the sides are exactly
+   * what must not be cropped.
+   *
+   * So the whole layer drops instead. Nothing is cropped, the piece stays
+   * whole, and the strip left above it is flat Ink — invisible, because the
+   * top of the treated image is near-black anyway.
+   */
+  --canvas-art-drop: 0%;
 }

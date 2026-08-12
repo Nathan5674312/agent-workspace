@@ -32,6 +32,7 @@ import { VaultSwitcher } from './VaultSwitcher.js'
 import { TabBar } from './TabBar.js'
 import { MainCanvas } from './MainCanvas.js'
 import { ConflictDialog } from './ConflictDialog.js'
+import { ArtCredit } from './ArtCredit.js'
 import {
   collectFolderPaths,
   indexNotesByName,
@@ -387,6 +388,10 @@ export function VaultPane(): React.ReactElement {
             onOpenWikilink={handleOpenWikilink}
             discarded={discarded}
           />
+
+          {/* Sibling of the canvas, not a child of it: the credit belongs to
+              the artwork layer on `.vault-main`, and the canvas scrolls. */}
+          <ArtCredit />
         </div>
       </div>
 

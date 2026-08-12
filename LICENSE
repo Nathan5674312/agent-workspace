@@ -1,0 +1,19 @@
+UNLICENSED — all rights reserved.
+
+This is a placeholder and it is a real gap. A repository with no licence grants
+nobody any rights, including collaborators, which is the correct default while
+the question is open but is probably not what you want long term.
+
+Pick one and replace this file:
+
+  MIT         Do anything, keep the notice, no warranty. The usual choice for a
+              personal project you might share.
+  Apache-2.0  MIT plus an explicit patent grant and a requirement to state
+              changes. Better if the project ever becomes serious.
+  GPL-3.0     Anyone distributing a modified version must publish their source.
+  Proprietary Keep this file as-is. Nobody may copy, modify or distribute it.
+
+Whichever is chosen, it does NOT extend to the artwork assets in
+src/renderer/assets/ — those belong to the artist. See docs/ARTWORK.md.
+
+Copyright (c) 2026 Nathan

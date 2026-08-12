@@ -675,7 +675,32 @@ test('GraphView never hands raw graph.links to d3', () => {
     /graph\.links\.map\(/,
     'raw edges reach forceLink and an unresolvable one throws out of the effect',
   )
-  assert.match(code, /forceLink</, 'the guard is guarding nothing')
+
+  /**
+   * The forceLink call moved to graphPhysics.ts when the layout was extracted
+   * so `bench/orbit.mjs` could measure the real simulation. The invariant did
+   * not move: the sanitised array still has to be what reaches d3.
+   *
+   * So this now checks the two halves in the two places they live — GraphView
+   * sanitises and passes `links` on, graphPhysics is the only caller of
+   * forceLink. Asserting forceLink lives *somewhere* would be weaker than the
+   * original; asserting it is reached only through buildSimulation is not.
+   */
+  assert.match(
+    code,
+    /buildSimulation\(\s*nodes,\s*links,/,
+    'GraphView must hand the sanitised links to the simulation builder',
+  )
+  const physics = stripComments(src('graphPhysics.ts'))
+  assert.match(physics, /forceLink</, 'the guard is guarding nothing')
+  for (const [name, body] of all()) {
+    if (name === 'graphPhysics.ts') continue
+    assert.doesNotMatch(
+      stripComments(body),
+      /forceLink</,
+      `${name} builds its own link force — the layout must have exactly one home`,
+    )
+  }
 })
 
 // --- LOW/hardening: conflict detection survives Electron's error stringifying ---

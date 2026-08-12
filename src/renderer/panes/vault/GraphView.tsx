@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import * as d3 from 'd3-force'
 import type { VaultGraph } from '../../../shared/ipc.js'
 import { resolvableLinks } from './helpers.js'
+import { buildSimulation, radius, HOLD } from './graphPhysics.js'
 import {
   Decay,
   Spring,
@@ -101,60 +102,28 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
     // unresolvable endpoint, synchronously, inside this effect.
     const links = resolvableLinks(graph.nodes, graph.links) as unknown as Link[]
 
-    // Obsidian reads as CIRCLES joined by hairlines, not dots joined by wires.
-    // Base size is deliberately large and the degree curve is gentle, so most
-    // notes look alike and only true hubs stand out.
-    const radius = (n: Node) => 3.4 + Math.sqrt(n.degree) * 1.45
-
     let w = 0
     let h = 0
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
 
     /**
-     * Forces, tuned to read like Obsidian's graph rather than a hairball.
+     * The layout itself lives in `graphPhysics.ts`.
      *
-     * The previous values produced one dense blob with satellites orbiting it.
-     * Three things caused that, and they compound:
-     *   - Links were far too short (46) and too stiff (0.35), so every cluster
-     *     collapsed onto itself.
-     *   - Repulsion was weak (-30), so nothing pushed back against the links.
-     *   - The centring force was strong (0.045), actively squashing the whole
-     *     graph toward the middle.
+     * It is a separate module for one reason: `bench/orbit.mjs` measures the
+     * hold behaviour headlessly, and it has to measure THIS simulation rather
+     * than a second copy written to match. The hold was tuned by eye twice and
+     * shipped wrong twice; the third attempt was measured, and a measurement
+     * against a re-implementation would have been worth nothing.
      *
-     * A graph like this wants REPULSION to dominate and links to act as loose
-     * tethers. Clusters then separate on their own and the structure is legible
-     * without zooming.
+     * `dragging` and `adjacency` are read through getters so the physics never
+     * learns what a pointer is, and this file stays the only place that knows.
      */
-    // Held separately because the hold gesture retunes its rest length; see
-    // `restLength` below.
-    const linkForce = d3
-      .forceLink<Node, Link>(links)
-      .id((d) => d.id)
-      // Hubs need more room around them than leaves do, so link length
-      // grows with how connected the two endpoints are.
-      // Near-uniform length. A hub with forty leaves at the SAME radius is
-      // exactly what draws those radial bursts; scaling length by degree
-      // smeared them into diffuse clouds. Only hub-to-hub gets extra room.
-      .distance((l) => (l.source.degree > 3 && l.target.degree > 3 ? 90 : 52))
-      .strength(0.16)
-
-    const sim = d3
-      .forceSimulation<Node>(nodes)
-      .force('link', linkForce)
-      .force(
-        'charge',
-        d3
-          .forceManyBody<Node>()
-          .strength((d) => -78 - d.degree * 14)
-          // Without a cap, every node repels every other across the whole
-          // canvas and the layout inflates forever instead of settling.
-          .distanceMax(420),
-      )
-      // Collision keeps hubs from swallowing their own neighbours.
-      .force('collide', d3.forceCollide<Node>().radius((d) => radius(d) + 6))
-      // Just enough centring to stop disconnected islands drifting away.
-      .force('x', d3.forceX(0).strength(0.012))
-      .force('y', d3.forceY(0).strength(0.012))
+    const { sim, setHolding } = buildSimulation(
+      nodes,
+      links,
+      () => dragging,
+      () => adjacency,
+    )
 
     // View transform. Pan/zoom is hand-rolled rather than pulling in d3-zoom
     // for ~30 lines of wheel and pointer maths.
@@ -278,59 +247,12 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
     /**
      * Hold a node and its neighbourhood eases out to a ring around it.
      *
-     * There is no ring force. A second spring pulling out to 80 while `link`
-     * pulls in to 52 is a tug of war, and the two just cancel wherever they
-     * happen to balance — which is why neighbours already inside the ring never
-     * came out to meet it, and why the only way to make them move was to crank
-     * the strength until it felt violent.
-     *
-     * The spring that is already here is the one that should want a different
-     * length. `distance` is an accessor, so the held node's own links simply ask
-     * for the ring instead of 52, and the existing force does the work at its
-     * existing gentle strength. Nothing fights, nothing else changes, and
-     * `collide` keeps doing its job — which a placement-based version could not,
-     * because a node whose position you overwrite every tick cannot be pushed
-     * out of anything.
+     * The mechanism and every tuning value now live in `graphPhysics.ts`, next
+     * to the harness that measured them. `setHolding` re-sets the link
+     * accessors (forceLink caches them, so re-setting IS the refresh) and
+     * swaps velocity damping in one call. O(links), twice per gesture, never
+     * per tick.
      */
-    const ringOf = (hub: Node) =>
-      radius(hub) +
-      // Wide enough to SEAT everyone: at a fixed radius a hub with forty links
-      // puts forty nodes on one small circle. Circumference grows with the
-      // count so each neighbour keeps roughly 18px of arc.
-      Math.max(74, ((adjacency.get(hub.id)?.length ?? 0) * 18) / (2 * Math.PI))
-
-    const restLength = (l: Link) =>
-      dragging && (l.source.id === dragging.id || l.target.id === dragging.id)
-        ? ringOf(dragging)
-        : l.source.degree > 3 && l.target.degree > 3
-          ? 90
-          : 52
-
-    // forceLink caches rest lengths when the accessor is set, so this is also
-    // how the cache is refreshed — `onDown`/`onUp` re-set it when `dragging`
-    // changes. It is O(links) and runs twice per gesture, not per tick.
-    const refreshRest = () => linkForce.distance(restLength)
-    refreshRest()
-
-    /**
-     * The turn. One tangential nudge, perpendicular to the radius, so the ring
-     * rotates instead of sitting still.
-     *
-     * `alpha`-scaled like every built-in force. Terminal speed is roughly
-     * accel / velocityDecay, so 0.08 is about a revolution a minute at this
-     * radius — a drift you notice only if you watch for it.
-     */
-    sim.force('orbit', (alpha) => {
-      const hub = dragging
-      if (!hub) return
-      for (const n of adjacency.get(hub.id) ?? []) {
-        const dx = n.x! - hub.x!
-        const dy = n.y! - hub.y!
-        const d = Math.hypot(dx, dy) || 1
-        n.vx! += (-dy / d) * 0.08 * alpha
-        n.vy! += (dx / d) * 0.08 * alpha
-      }
-    })
 
     const draw = () => {
       const ctx = canvas.getContext('2d')
@@ -614,7 +536,8 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         grabOffset = { x: p.x - hit.x!, y: p.y - hit.y! }
         hit.fx = hit.x
         hit.fy = hit.y
-        refreshRest() // its links now want the ring, not 52
+        // Re-set the link accessors AND raise velocity damping for the hold.
+        setHolding(true)
         // Reheat ONCE, and hold it warm for the duration of the drag. This is
         // `alphaTarget`, not `alpha` — it sets the energy the simulation is
         // driven toward, so neighbours keep responding while you pull without
@@ -626,7 +549,7 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         // by charge's distanceMax, not by keeping the energy low, so the far
         // side of a 252-node graph still stays put at this alpha.
         fitted = true
-        sim.alphaTarget(0.45).restart()
+        sim.alphaTarget(HOLD.alpha).restart()
         canvas.setPointerCapture(e.pointerId)
       } else {
         panning = { x: e.clientX, y: e.clientY }
@@ -687,7 +610,7 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         dragging.fx = null
         dragging.fy = null
         dragging = null
-        refreshRest() // back to ordinary rest lengths
+        setHolding(false) // ordinary rest lengths and damping again
         sim.alphaTarget(0) // stop driving; let it coast to rest
       }
       const wasPanning = panning !== null

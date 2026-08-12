@@ -1,106 +1,602 @@
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import * as d3 from 'd3-force'
 import type { VaultGraph } from '../../../shared/ipc.js'
+import { resolvableLinks } from './helpers.js'
 
 /**
- * Graph view — force-directed graph of wikilinks.
- * Canvas-based rendering with d3-force simulation.
- * ponytail: no interaction, dragging, or zoom for v1 — just visualization.
+ * Graph view — force-directed map of the vault's wikilinks.
+ *
+ * Bugs this replaces, all of which made it look broken rather than sparse:
+ *   - The canvas was measured ONCE on mount, before layout had settled, so it
+ *     was sized to a stale box and the drawing was squashed into a corner.
+ *     A ResizeObserver now owns sizing.
+ *   - No devicePixelRatio scaling, so every line was soft on a HiDPI screen.
+ *   - Canvas defaults to black fill/stroke. On a near-black ground the graph
+ *     was drawing itself in a colour one step from the background.
+ *   - Rendering only happened on simulation ticks, so once the layout cooled
+ *     the canvas froze and could not respond to anything.
+ *
+ * Colours are read from the CSS custom properties rather than hardcoded, so
+ * the graph themes with the rest of the app from one file.
  */
 export interface GraphViewProps {
   graph: VaultGraph | null
+  onOpenNote?: (path: string) => void
 }
 
-export function GraphView({ graph }: GraphViewProps) {
+type Node = d3.SimulationNodeDatum & { id: string; label: string; degree: number }
+type Link = { source: Node; target: Node }
+
+const titleOf = (p: string) => p.split('/').pop()!.replace(/\.md$/i, '')
+
+export function GraphView({ graph, onOpenNote }: GraphViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
+  const wrapRef = useRef<HTMLDivElement>(null)
+  const [hoverLabel, setHoverLabel] = useState<string | null>(null)
+
+  /**
+   * The open-note callback is held in a ref and kept OUT of the effect's
+   * dependencies on purpose.
+   *
+   * The effect builds the entire force simulation. If `onOpenNote` were a
+   * dependency, any caller passing an inline arrow — the natural way to write
+   * it — would change its identity on every render, tear the simulation down
+   * and rebuild it from scratch. The graph would visibly reset itself at
+   * random. A ref makes the component correct regardless of how the parent
+   * chooses to pass the callback, rather than relying on every caller to
+   * remember to memoise.
+   */
+  const openRef = useRef(onOpenNote)
+  openRef.current = onOpenNote
 
   useEffect(() => {
-    if (!graph || !canvasRef.current) return
-
     const canvas = canvasRef.current
-    const rect = canvas.getBoundingClientRect()
-    canvas.width = rect.width
-    canvas.height = rect.height
+    const wrap = wrapRef.current
+    if (!graph || !canvas || !wrap) return
 
-    // ponytail: O(n) per render. Acceptable for low hundreds of notes.
-    // For 1000+ notes, add scene graph caching.
-    const nodes = graph.nodes.map((id) => ({ id }))
-    const links = graph.links.map((l) => ({
-      source: l.from,
-      target: l.to,
+    /**
+     * Canvas cannot read CSS, so the tokens are resolved once here.
+     *
+     * The fallbacks are CSS SYSTEM COLOUR KEYWORDS, not literals. A hardcoded
+     * hex here would be a second source of truth for the palette — exactly the
+     * thing tokens.css exists to prevent — and it would silently paper over a
+     * missing token instead of letting it show. `GrayText`/`CanvasText`/
+     * `Highlight` come from the OS, so they stay theme-correct and they are
+     * obviously not brand colours if one ever appears.
+     */
+    const css = getComputedStyle(canvas)
+    const token = (name: string, fallback: string) =>
+      css.getPropertyValue(name).trim() || fallback
+    const COL = {
+      link: token('--label-quaternary', 'GrayText'),
+      node: token('--label-secondary', 'CanvasText'),
+      hot: token('--accent', 'Highlight'),
+      label: token('--label-secondary', 'CanvasText'),
+    }
+
+    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+
+    // Degree drives node size — the same signal Obsidian uses. A hub should
+    // look like a hub without being clicked.
+    const degree = new Map<string, number>()
+    for (const l of graph.links) {
+      degree.set(l.from, (degree.get(l.from) ?? 0) + 1)
+      degree.set(l.to, (degree.get(l.to) ?? 0) + 1)
+    }
+
+    const nodes: Node[] = graph.nodes.map((id) => ({
+      id,
+      label: titleOf(id),
+      degree: degree.get(id) ?? 0,
     }))
+    // Dangling edges are dropped before d3 sees them: forceLink throws on an
+    // unresolvable endpoint, synchronously, inside this effect.
+    const links = resolvableLinks(graph.nodes, graph.links) as unknown as Link[]
+
+    // Obsidian reads as CIRCLES joined by hairlines, not dots joined by wires.
+    // Base size is deliberately large and the degree curve is gentle, so most
+    // notes look alike and only true hubs stand out.
+    const radius = (n: Node) => 3.4 + Math.sqrt(n.degree) * 1.45
+
+    let w = 0
+    let h = 0
+    const dpr = Math.min(window.devicePixelRatio || 1, 2)
+
+    /**
+     * Forces, tuned to read like Obsidian's graph rather than a hairball.
+     *
+     * The previous values produced one dense blob with satellites orbiting it.
+     * Three things caused that, and they compound:
+     *   - Links were far too short (46) and too stiff (0.35), so every cluster
+     *     collapsed onto itself.
+     *   - Repulsion was weak (-30), so nothing pushed back against the links.
+     *   - The centring force was strong (0.045), actively squashing the whole
+     *     graph toward the middle.
+     *
+     * A graph like this wants REPULSION to dominate and links to act as loose
+     * tethers. Clusters then separate on their own and the structure is legible
+     * without zooming.
+     */
+    // Held separately because the hold gesture retunes its rest length; see
+    // `restLength` below.
+    const linkForce = d3
+      .forceLink<Node, Link>(links)
+      .id((d) => d.id)
+      // Hubs need more room around them than leaves do, so link length
+      // grows with how connected the two endpoints are.
+      // Near-uniform length. A hub with forty leaves at the SAME radius is
+      // exactly what draws those radial bursts; scaling length by degree
+      // smeared them into diffuse clouds. Only hub-to-hub gets extra room.
+      .distance((l) => (l.source.degree > 3 && l.target.degree > 3 ? 90 : 52))
+      .strength(0.16)
 
     const sim = d3
-      .forceSimulation<d3.SimulationNodeDatum & { id: string }>(nodes as any)
+      .forceSimulation<Node>(nodes)
+      .force('link', linkForce)
       .force(
-        'link',
+        'charge',
         d3
-          .forceLink<
-            d3.SimulationNodeDatum & { id: string },
-            d3.SimulationLinkDatum<d3.SimulationNodeDatum & { id: string }>
-          >(links as any)
-          .id((d: any) => d.id)
-          .distance(80),
+          .forceManyBody<Node>()
+          .strength((d) => -78 - d.degree * 14)
+          // Without a cap, every node repels every other across the whole
+          // canvas and the layout inflates forever instead of settling.
+          .distanceMax(420),
       )
-      .force('charge', d3.forceManyBody().strength(-300))
-      .force('center', d3.forceCenter(canvas.width / 2, canvas.height / 2))
+      // Collision keeps hubs from swallowing their own neighbours.
+      .force('collide', d3.forceCollide<Node>().radius((d) => radius(d) + 6))
+      // Just enough centring to stop disconnected islands drifting away.
+      .force('x', d3.forceX(0).strength(0.012))
+      .force('y', d3.forceY(0).strength(0.012))
 
-    const render = () => {
+    // View transform. Pan/zoom is hand-rolled rather than pulling in d3-zoom
+    // for ~30 lines of wheel and pointer maths.
+    let k = 1
+    let tx = 0
+    let ty = 0
+    const toGraph = (px: number, py: number) => ({ x: (px - tx) / k, y: (py - ty) / k })
+
+    let hover: Node | null = null
+    let neighbours = new Set<string>()
+    let dragging: Node | null = null
+    // Distinguishes a click from a drag that happened to end on a node.
+    let moved = false
+
+    /**
+     * Adjacency, built once.
+     *
+     * Built AFTER the simulation, because forceLink rewrites each link's
+     * `source`/`target` from id strings to node references when the force is
+     * added — reading them before that point gives strings.
+     *
+     * It holds node references rather than ids because the drag force needs
+     * the positions, and it replaces a full scan of `links` on every hover.
+     */
+    const adjacency = new Map<string, Node[]>()
+    const connect = (from: Node, to: Node) => {
+      const list = adjacency.get(from.id)
+      if (list) list.push(to)
+      else adjacency.set(from.id, [to])
+    }
+    for (const l of links) {
+      connect(l.source, l.target)
+      connect(l.target, l.source)
+    }
+
+    const recomputeNeighbours = () => {
+      neighbours = new Set((hover ? (adjacency.get(hover.id) ?? []) : []).map((n) => n.id))
+    }
+
+    /**
+     * Hold a node and its neighbourhood eases out to a ring around it.
+     *
+     * There is no ring force. A second spring pulling out to 80 while `link`
+     * pulls in to 52 is a tug of war, and the two just cancel wherever they
+     * happen to balance — which is why neighbours already inside the ring never
+     * came out to meet it, and why the only way to make them move was to crank
+     * the strength until it felt violent.
+     *
+     * The spring that is already here is the one that should want a different
+     * length. `distance` is an accessor, so the held node's own links simply ask
+     * for the ring instead of 52, and the existing force does the work at its
+     * existing gentle strength. Nothing fights, nothing else changes, and
+     * `collide` keeps doing its job — which a placement-based version could not,
+     * because a node whose position you overwrite every tick cannot be pushed
+     * out of anything.
+     */
+    const ringOf = (hub: Node) =>
+      radius(hub) +
+      // Wide enough to SEAT everyone: at a fixed radius a hub with forty links
+      // puts forty nodes on one small circle. Circumference grows with the
+      // count so each neighbour keeps roughly 18px of arc.
+      Math.max(74, ((adjacency.get(hub.id)?.length ?? 0) * 18) / (2 * Math.PI))
+
+    const restLength = (l: Link) =>
+      dragging && (l.source.id === dragging.id || l.target.id === dragging.id)
+        ? ringOf(dragging)
+        : l.source.degree > 3 && l.target.degree > 3
+          ? 90
+          : 52
+
+    // forceLink caches rest lengths when the accessor is set, so this is also
+    // how the cache is refreshed — `onDown`/`onUp` re-set it when `dragging`
+    // changes. It is O(links) and runs twice per gesture, not per tick.
+    const refreshRest = () => linkForce.distance(restLength)
+    refreshRest()
+
+    /**
+     * The turn. One tangential nudge, perpendicular to the radius, so the ring
+     * rotates instead of sitting still.
+     *
+     * `alpha`-scaled like every built-in force. Terminal speed is roughly
+     * accel / velocityDecay, so 0.08 is about a revolution a minute at this
+     * radius — a drift you notice only if you watch for it.
+     */
+    sim.force('orbit', (alpha) => {
+      const hub = dragging
+      if (!hub) return
+      for (const n of adjacency.get(hub.id) ?? []) {
+        const dx = n.x! - hub.x!
+        const dy = n.y! - hub.y!
+        const d = Math.hypot(dx, dy) || 1
+        n.vx! += (-dy / d) * 0.08 * alpha
+        n.vy! += (dx / d) * 0.08 * alpha
+      }
+    })
+
+    const draw = () => {
       const ctx = canvas.getContext('2d')
       if (!ctx) return
+      ctx.setTransform(dpr, 0, 0, dpr, 0, 0)
+      ctx.clearRect(0, 0, w, h)
+      ctx.translate(tx, ty)
+      ctx.scale(k, k)
 
-      ctx.clearRect(0, 0, canvas.width, canvas.height)
+      const dim = hover !== null
 
-      // Draw links. forceLink() REPLACES link.source/link.target with the node
-      // objects themselves, so looking them up by id afterwards never matches
-      // and no edge was ever drawn. Read the resolved objects directly.
-      ctx.lineWidth = 1
-      ctx.globalAlpha = 0.6
-      for (const link of links as unknown as Array<{ source: unknown; target: unknown }>) {
-        const source = link.source as { x?: number; y?: number } | undefined
-        const target = link.target as { x?: number; y?: number } | undefined
-        if (
-          source &&
-          target &&
-          typeof source.x === 'number' &&
-          typeof source.y === 'number' &&
-          typeof target.x === 'number' &&
-          typeof target.y === 'number'
-        ) {
-          ctx.beginPath()
-          ctx.moveTo(source.x, source.y)
-          ctx.lineTo(target.x, target.y)
-          ctx.stroke()
-        }
+      ctx.lineWidth = 0.7 / k
+      for (const l of links) {
+        const lit = dim && (l.source.id === hover!.id || l.target.id === hover!.id)
+        if (dim && !lit) continue // dimmed edges are simply not drawn — cheaper and cleaner
+        ctx.strokeStyle = lit ? COL.hot : COL.link
+        ctx.globalAlpha = lit ? 0.95 : 0.16
+        ctx.beginPath()
+        ctx.moveTo(l.source.x!, l.source.y!)
+        ctx.lineTo(l.target.x!, l.target.y!)
+        ctx.stroke()
       }
 
-      // Draw nodes
+      /**
+       * Punch the link layer out from under every node BEFORE drawing them.
+       *
+       * `--label-secondary` is `rgba(235,235,245,0.6)` — Apple's label ramp is
+       * opacity, not different greys — so a node disc is translucent, and
+       * every link was visibly running straight through the circle it ends in.
+       * Drawing links first was never enough; they have to be removed.
+       *
+       * `destination-out` erases instead of painting a background-coloured
+       * disc over the top, which keeps this correct no matter what the pane
+       * behind the canvas is filled with (it is a material, not a flat
+       * colour). The extra 1.5px leaves the hairline gap between line and
+       * circle that makes the graph read as Obsidian's does.
+       *
+       * The fill must be OPAQUE. `destination-out` removes the source's alpha,
+       * not its colour, and the label pass at the end of the previous frame
+       * leaves `fillStyle` on the translucent `--label-secondary` — so this
+       * erased only 60% of each link and the rest went on showing through the
+       * circle.
+       *
+       * `CanvasText` rather than a hex: only the alpha matters to an erase, and
+       * a hex literal here is a palette entry as far as this pane's no-colours
+       * rule is concerned (test/review-s2-vault-pane.test.mjs). The system
+       * colour keywords are the same idiom the token fallbacks above use.
+       */
+      ctx.globalCompositeOperation = 'destination-out'
+      ctx.fillStyle = 'CanvasText'
       ctx.globalAlpha = 1
-      for (const node of nodes) {
-        if ('x' in node && 'y' in node) {
-          ctx.beginPath()
-          ctx.arc(node.x as number, node.y as number, 4, 0, 2 * Math.PI)
-          ctx.fill()
+      for (const n of nodes) {
+        ctx.beginPath()
+        ctx.arc(n.x!, n.y!, radius(n) + 1.5 / k, 0, Math.PI * 2)
+        ctx.fill()
+      }
+      ctx.globalCompositeOperation = 'source-over'
+
+      for (const n of nodes) {
+        const lit = !dim || n.id === hover!.id || neighbours.has(n.id)
+        ctx.globalAlpha = lit ? 1 : 0.18
+        ctx.fillStyle = n.id === hover?.id ? COL.hot : COL.node
+        ctx.beginPath()
+        ctx.arc(n.x!, n.y!, radius(n), 0, Math.PI * 2)
+        ctx.fill()
+      }
+
+      // Labels only appear once there is room for them. Drawing 252 of them at
+      // low zoom is unreadable noise and costs a full text layout per frame.
+      //
+      // On hover this draws EXACTLY ONE label — the node under the cursor.
+      // It previously also labelled every neighbour, so hovering a hub with
+      // fifty links painted fifty overlapping names and buried the one you
+      // were actually pointing at. The neighbours are already identified by
+      // being lit while everything else dims; they do not also need naming.
+      ctx.globalAlpha = 1
+      ctx.fillStyle = COL.label
+      ctx.font = `${11 / k}px ${css.fontFamily}`
+      ctx.textAlign = 'center'
+      if (hover) {
+        ctx.fillText(hover.label, hover.x!, hover.y! - radius(hover) - 4 / k)
+      } else if (k > 1.5) {
+        for (const n of nodes) {
+          if (n.degree < 2) continue
+          ctx.fillText(n.label, n.x!, n.y! - radius(n) - 4 / k)
+        }
+      }
+      ctx.globalAlpha = 1
+    }
+
+    /**
+     * Zoom-to-fit, once, after the layout stops moving.
+     *
+     * With repulsion dominant the graph is physically larger than the canvas,
+     * so without this you open the tab looking at the middle of a hairball at
+     * 1:1 and have to scroll out to find the shape. Obsidian frames the whole
+     * graph on open; so does this.
+     *
+     * `fitted` latches on the first user interaction — auto-framing a view the
+     * user has just panned or zoomed would feel like the app fighting them.
+     */
+    let fitted = false
+    const fit = () => {
+      let minX = Infinity
+      let minY = Infinity
+      let maxX = -Infinity
+      let maxY = -Infinity
+      for (const n of nodes) {
+        if (n.x == null || n.y == null) continue
+        const r = radius(n)
+        minX = Math.min(minX, n.x - r)
+        maxX = Math.max(maxX, n.x + r)
+        minY = Math.min(minY, n.y - r)
+        maxY = Math.max(maxY, n.y + r)
+      }
+      if (!Number.isFinite(minX) || maxX === minX || maxY === minY) return
+      const pad = 32
+      k = Math.min(
+        (w - pad * 2) / (maxX - minX),
+        (h - pad * 2) / (maxY - minY),
+      )
+      k = Math.min(2, Math.max(0.08, k))
+      tx = w / 2 - ((minX + maxX) / 2) * k
+      ty = h / 2 - ((minY + maxY) / 2) * k
+    }
+
+    /**
+     * One rAF loop, painting ON DEMAND.
+     *
+     * It used to call `draw()` unconditionally on every frame, forever. Once
+     * the layout cools nothing on screen changes, but the canvas still stroked
+     * 845 links, filled 252 arcs twice and flipped compositing mode 60 times a
+     * second for as long as the tab was open — a fan spinning up for a still
+     * image. The original reason for the unconditional loop was that painting
+     * only on simulation ticks froze the canvas against hover and pan; the
+     * answer to that is to paint on demand, not to paint always.
+     *
+     * `invalidate()` is the single entry point: every interaction that changes
+     * what should be on screen calls it, and the simulation being warm counts
+     * as continuously invalid.
+     */
+    let raf = 0
+    let dirty = true
+    const invalidate = () => {
+      dirty = true
+    }
+    const loop = () => {
+      if (!fitted && sim.alpha() < 0.06) {
+        fit()
+        fitted = true
+        invalidate()
+      }
+      // A warm simulation moves nodes every tick, so it is always dirty. Under
+      // reduced motion the simulation is stopped and its alpha is frozen at
+      // whatever the manual ticks left it at, so it must not be consulted —
+      // there, `dirty` is the only thing that may cause a repaint.
+      if (dirty || (!reduced && sim.alpha() > sim.alphaMin())) {
+        draw()
+        dirty = false
+      }
+      raf = requestAnimationFrame(loop)
+    }
+
+    const resize = () => {
+      const r = wrap.getBoundingClientRect()
+      w = r.width
+      h = r.height
+      canvas.width = Math.round(w * dpr)
+      canvas.height = Math.round(h * dpr)
+      canvas.style.width = `${w}px`
+      canvas.style.height = `${h}px`
+      // Forces pull toward the origin, so centring is a transform, not a force.
+      tx = w / 2
+      ty = h / 2
+      // Resizing clears the backing store, so the canvas is blank until repaint.
+      invalidate()
+    }
+    const ro = new ResizeObserver(resize)
+    ro.observe(wrap)
+    resize()
+
+    if (reduced) {
+      // Motion here is incidental, not informational: run the layout to rest
+      // synchronously and paint the settled result.
+      sim.stop()
+      for (let i = 0; i < 300; i++) sim.tick()
+      fit()
+      fitted = true
+      invalidate()
+    }
+    // The loop runs in BOTH modes now that it paints on demand. Under reduced
+    // motion it sits idle until an interaction invalidates — which is what makes
+    // hover and pan work there at all; they used to call `draw()` directly.
+    raf = requestAnimationFrame(loop)
+
+    // ── interaction ────────────────────────────────────────────
+    const pick = (e: PointerEvent): Node | null => {
+      const r = canvas.getBoundingClientRect()
+      const p = toGraph(e.clientX - r.left, e.clientY - r.top)
+      let best: Node | null = null
+      let bestD = Infinity
+      for (const n of nodes) {
+        const d = Math.hypot(n.x! - p.x, n.y! - p.y)
+        if (d < radius(n) + 6 / k && d < bestD) {
+          best = n
+          bestD = d
+        }
+      }
+      return best
+    }
+
+    const onMove = (e: PointerEvent) => {
+      if (dragging) {
+        const r = canvas.getBoundingClientRect()
+        const p = toGraph(e.clientX - r.left, e.clientY - r.top)
+        // 1:1 with the pointer. NOTHING else happens here.
+        //
+        // This used to call `sim.alphaTarget(0.25).restart()` on every single
+        // move, which held the whole simulation at high energy for the entire
+        // drag — so the entire graph re-formed around the cursor instead of
+        // one node following it. The reheat belongs on press, once.
+        dragging.fx = p.x
+        dragging.fy = p.y
+        moved = true
+        return
+      }
+      const hit = pick(e)
+      if (hit?.id !== hover?.id) {
+        hover = hit
+        recomputeNeighbours()
+        setHoverLabel(hit ? hit.label : null)
+        canvas.style.cursor = hit ? 'pointer' : 'grab'
+        invalidate()
+      }
+    }
+
+    const onDown = (e: PointerEvent) => {
+      const hit = pick(e)
+      moved = false
+      if (hit) {
+        dragging = hit
+        hit.fx = hit.x
+        hit.fy = hit.y
+        refreshRest() // its links now want the ring, not 52
+        // Reheat ONCE, and hold it warm for the duration of the drag. This is
+        // `alphaTarget`, not `alpha` — it sets the energy the simulation is
+        // driven toward, so neighbours keep responding while you pull without
+        // the timer being reset every frame. That reset was the original bug.
+        //
+        // 0.45 rather than 0.2: at 0.2 the graph was technically live but the
+        // response was too small to read as the cluster following your hand.
+        // The reach is bounded by `orbit` touching only direct neighbours and
+        // by charge's distanceMax, not by keeping the energy low, so the far
+        // side of a 252-node graph still stays put at this alpha.
+        fitted = true
+        sim.alphaTarget(0.45).restart()
+        canvas.setPointerCapture(e.pointerId)
+      } else {
+        panning = { x: e.clientX, y: e.clientY }
+        fitted = true
+        canvas.setPointerCapture(e.pointerId)
+        canvas.style.cursor = 'grabbing'
+      }
+    }
+
+    let panning: { x: number; y: number } | null = null
+    const onPan = (e: PointerEvent) => {
+      if (!panning) return
+      tx += e.clientX - panning.x
+      ty += e.clientY - panning.y
+      panning = { x: e.clientX, y: e.clientY }
+      moved = true
+      invalidate()
+    }
+
+    const onUp = (e: PointerEvent) => {
+      if (dragging) {
+        // Release the pin so the forces reclaim the node. Keeping fx/fy here
+        // left every dragged node permanently outside the simulation — you
+        // could scatter the graph by hand and nothing ever pulled back, which
+        // is the opposite of what a force layout is for. It settles into the
+        // neighbourhood you dropped it in rather than snapping home, because
+        // its neighbours have already moved to meet it during the drag.
+        dragging.fx = null
+        dragging.fy = null
+        dragging = null
+        refreshRest() // back to ordinary rest lengths
+        sim.alphaTarget(0) // stop driving; let it coast to rest
+      }
+      panning = null
+      canvas.style.cursor = 'grab'
+      canvas.releasePointerCapture?.(e.pointerId)
+    }
+
+    const onClick = (e: MouseEvent) => {
+      // A drag ends with a click event on the same element. Without this, every
+      // node you repositioned also opened itself in the editor.
+      if (moved) return
+      const open = openRef.current
+      if (!open) return
+      const r = canvas.getBoundingClientRect()
+      const p = toGraph(e.clientX - r.left, e.clientY - r.top)
+      for (const n of nodes) {
+        if (Math.hypot(n.x! - p.x, n.y! - p.y) < radius(n) + 6 / k) {
+          open(n.id)
+          return
         }
       }
     }
 
-    sim.on('tick', render)
+    const onWheel = (e: WheelEvent) => {
+      e.preventDefault()
+      const r = canvas.getBoundingClientRect()
+      const mx = e.clientX - r.left
+      const my = e.clientY - r.top
+      const before = toGraph(mx, my)
+      fitted = true
+      k = Math.min(6, Math.max(0.05, k * Math.pow(0.999, e.deltaY)))
+      // Keep the point under the cursor fixed — zoom toward the pointer, not
+      // toward the centre, or the view runs away from whatever you aimed at.
+      tx = mx - before.x * k
+      ty = my - before.y * k
+      invalidate()
+    }
+
+    canvas.addEventListener('pointermove', onMove)
+    canvas.addEventListener('pointermove', onPan)
+    canvas.addEventListener('pointerdown', onDown)
+    canvas.addEventListener('pointerup', onUp)
+    canvas.addEventListener('pointercancel', onUp)
+    canvas.addEventListener('click', onClick)
+    canvas.addEventListener('wheel', onWheel, { passive: false })
+    canvas.style.cursor = 'grab'
 
     return () => {
+      ro.disconnect()
+      cancelAnimationFrame(raf)
       sim.stop()
+      canvas.removeEventListener('pointermove', onMove)
+      canvas.removeEventListener('pointermove', onPan)
+      canvas.removeEventListener('pointerdown', onDown)
+      canvas.removeEventListener('pointerup', onUp)
+      canvas.removeEventListener('pointercancel', onUp)
+      canvas.removeEventListener('click', onClick)
+      canvas.removeEventListener('wheel', onWheel)
     }
   }, [graph])
 
-  if (!graph) {
-    return <div className="vault-graph-empty">No graph data</div>
-  }
+  if (!graph) return <div className="vault-graph-empty">No graph data</div>
 
   return (
-    <div className="vault-graph-view">
+    <div className="vault-graph-view" ref={wrapRef}>
       <canvas ref={canvasRef} className="vault-graph-canvas" />
       <div className="vault-graph-info">
-        {graph.nodes.length} notes, {graph.links.length} links
+        {hoverLabel ?? `${graph.nodes.length} notes, ${graph.links.length} links`}
       </div>
     </div>
   )

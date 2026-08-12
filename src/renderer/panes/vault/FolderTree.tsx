@@ -23,17 +23,23 @@ export function FolderTree({
   expanded,
   onToggle,
 }: FolderTreeProps) {
+  // Render the root's CHILDREN, not the root. Obsidian lists the vault's
+  // top-level folders directly in the explorer; the vault itself is named once,
+  // at the bottom, by the vault switcher. Rendering the root node here put
+  // every folder behind one extra collapsed row that had to be opened before
+  // the explorer showed anything at all.
   return (
     <div className="vault-folder-tree">
-      {root && (
+      {root?.children?.map((child) => (
         <TreeNode
-          node={root}
+          key={child.path}
+          node={child}
           expanded={expanded}
           onToggle={onToggle}
           onSelectNote={onSelectNote}
           depth={0}
         />
-      )}
+      ))}
     </div>
   )
 }
@@ -60,18 +66,23 @@ function TreeNode({
     <div className="vault-tree-node" data-depth={depth} data-kind={node.kind}>
       {node.kind === 'folder' ? (
         <>
-          <div className="vault-tree-item">
-            <button
-              className="vault-tree-toggle"
-              onClick={() => onToggle(node.path)}
-              disabled={!hasChildren}
-              aria-expanded={isExpanded}
-              data-has-children={hasChildren}
-            >
+          {/* The whole row toggles, not just the chevron — that is how the
+              real explorer behaves, and a 12px hit target for the only way to
+              open a folder is the kind of thing that reads as "broken" long
+              before anyone calls it a bug. The chevron stays as the affordance
+              and the state indicator. */}
+          <button
+            className="vault-tree-item vault-tree-folder"
+            onClick={() => onToggle(node.path)}
+            disabled={!hasChildren}
+            aria-expanded={isExpanded}
+            data-has-children={hasChildren}
+          >
+            <span className="vault-tree-toggle" aria-hidden="true">
               {isExpanded ? '▼' : '▶'}
-            </button>
+            </span>
             <span className="vault-tree-label">{node.name}</span>
-          </div>
+          </button>
           {isExpanded && hasChildren && (
             <div className="vault-tree-children">
               {node.children!.map((child) => (

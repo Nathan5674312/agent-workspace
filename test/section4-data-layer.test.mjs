@@ -7,8 +7,31 @@
 
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import * as vault from '../src/main/vault.ts'
 import { startMockVault } from './helpers.mjs'
+
+/**
+ * `tree()` reads the real filesystem — it is a file explorer, and the server's
+ * /notes endpoint is a curated note index that filters (it skips Inbox/), so it
+ * was the wrong source. These tests therefore need a scratch directory rather
+ * than the mock server's note list.
+ *
+ * Without this the suite pointed `tree()` at the ACTUAL Universal Vault: it
+ * walked every folder on disk, took minutes instead of milliseconds, and
+ * asserted against whatever happened to be in the user's vault that day.
+ */
+async function makeScratchVault(paths) {
+  const dir = await mkdtemp(join(tmpdir(), 'vault-tree-'))
+  for (const rel of paths) {
+    const abs = join(dir, rel)
+    await mkdir(join(abs, '..'), { recursive: true })
+    await writeFile(abs, `# ${rel}\n`, 'utf-8')
+  }
+  return dir
+}
 
 test('vault data layer', async (t) => {
   // Start the mock vault server once for this test suite
@@ -34,6 +57,20 @@ test('vault data layer', async (t) => {
   })
   const mockUrl = mock.url
   vault._setBaseForTest(mockUrl)
+
+  // Same shape as the mock note set above, on disk, so the tree assertions
+  // below keep their original intent.
+  vault._setVaultDirForTest(
+    await makeScratchVault([
+      'Home.md',
+      'Orphan Note.md',
+      'Trading Insights.md',
+      'Projects/AI.md',
+      'Projects/Tools.md',
+      'Files/Note with spaces.md',
+      'Files/Special#chars&symbols.md',
+    ]),
+  )
 
   await t.test('list() returns all notes with correct shape', async () => {
     const notes = await vault.list()
@@ -221,4 +258,122 @@ test('VaultUnavailable thrown when server is down', async () => {
   } catch (e) {
     assert.ok(e instanceof vault.VaultUnavailable)
   }
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Regressions found by the deep review + stress run.
+
+test('tree() follows a junction and terminates on a cycle', async () => {
+  const { symlink } = await import('node:fs/promises')
+  const root = await mkdtemp(join(tmpdir(), 'vault-link-'))
+  await mkdir(join(root, 'real'))
+  await writeFile(join(root, 'real', 'inside.md'), '# inside')
+
+  try {
+    // Junctions into the vault are a documented convention on this machine.
+    await symlink(join(root, 'real'), join(root, 'mirror'), 'junction')
+  } catch {
+    return // no permission to create links here; nothing to assert
+  }
+  // A link pointing back at an ancestor. Following links without a cycle guard
+  // recurses until the stack gives out.
+  try {
+    await symlink(root, join(root, 'real', 'loop'), 'junction')
+  } catch {
+    /* best effort */
+  }
+
+  vault._setVaultDirForTest(root)
+  const tree = await Promise.race([
+    vault.tree(),
+    new Promise((_, rej) => setTimeout(() => rej(new Error('tree() hung')), 10_000)),
+  ])
+
+  const names = (tree.children ?? []).map((c) => c.name)
+  // The Dirent for a junction reports isDirectory() === false, so `mirror` and
+  // everything under it used to be absent from the explorer, silently.
+  assert.ok(names.includes('mirror'), `linked folder missing from tree: ${names}`)
+  const mirror = tree.children.find((c) => c.name === 'mirror')
+  assert.ok(
+    (mirror.children ?? []).some((c) => c.name === 'inside.md'),
+    'linked folder listed but its contents were not',
+  )
+})
+
+test('list() skips malformed rows instead of throwing', async () => {
+  const mock = await startMockVault({
+    notes: {},
+    respond: ({ path }) =>
+      path === '/notes'
+        ? {
+            status: 200,
+            // A null element threw "Cannot read properties of null" out of
+            // list(), which fails list, graph AND backlinks together.
+            body: [null, 'a string', { path: { not: 'a string' } }, { path: 'ok.md' }],
+          }
+        : null,
+  })
+  vault._setBaseForTest(mock.url)
+
+  const rows = await vault.list()
+  assert.deepEqual(
+    rows.map((r) => r.path),
+    ['ok.md'],
+    'malformed rows should be dropped, not carried forward or thrown on',
+  )
+
+  await mock.close()
+})
+
+test('scrub() redacts paths with spaces and POSIX paths', async () => {
+  const cases = [
+    // The real vault path contains a space; the old class stopped at it and
+    // leaked the rest.
+    [
+      String.raw`[Errno 2] No such file: 'C:\Users\Nathan\Desktop\Universal Vault\x.md'`,
+      'Vault',
+    ],
+    ['failed at /home/nathan/vault/secret.md', 'nathan'],
+    [String.raw`unc \\SERVER\share\vault\x.md`, 'SERVER'],
+  ]
+
+  for (const [serverError, mustNotLeak] of cases) {
+    const mock = await startMockVault({
+      notes: {},
+      respond: () => ({ status: 400, body: { error: serverError } }),
+    })
+    vault._setBaseForTest(mock.url)
+    await assert.rejects(
+      () => vault.read('x.md'),
+      (e) => {
+        assert.ok(
+          !e.message.includes(mustNotLeak),
+          `leaked "${mustNotLeak}" to the renderer: ${e.message}`,
+        )
+        assert.ok(e.message.includes('<path>'), `nothing was redacted: ${e.message}`)
+        return true
+      },
+    )
+    await mock.close()
+  }
+})
+
+test('scrub() does not eat our own single-segment paths', async () => {
+  const mock = await startMockVault({
+    notes: {},
+    // No `error` key, so vault.ts falls back to `${status} ${path}` — which is
+    // a path of ours and must survive, or every error says "<path>".
+    respond: () => ({ status: 500, body: {} }),
+  })
+  vault._setBaseForTest(mock.url)
+
+  await assert.rejects(
+    () => vault.read('x.md'),
+    (e) => {
+      assert.ok(e.message.includes('/note'), `over-redacted: ${e.message}`)
+      return true
+    },
+  )
+
+  await mock.close()
 })

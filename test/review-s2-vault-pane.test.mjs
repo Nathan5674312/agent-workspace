@@ -29,8 +29,10 @@ import {
   collectFolderPaths,
   indexNotesByName,
   isBufferDirty,
+  isSaveConflict,
   mergeVersions,
   parseWikilinks,
+  resolvableLinks,
   resolveWikilink,
 } from '../src/renderer/panes/vault/helpers.ts'
 
@@ -220,7 +222,7 @@ test('the only call to onSave is the Save button click', () => {
 
 test('SaveConflict is caught in the editor and does not surface as a raw error', () => {
   const body = stripComments(src('Editor.tsx'))
-  assert.match(body, /includes\('SaveConflict'\)/, 'SaveConflict is not detected')
+  assert.match(body, /if \(isSaveConflict\(message\)\)/, 'SaveConflict is not detected')
   assert.match(
     body,
     /window\.api\.vault\.read\(note\.path\)/,
@@ -250,19 +252,46 @@ test('the edit buffer is owned above the editor, so unmounting cannot drop it', 
   )
 })
 
-test('switching notes with unsaved edits requires an explicit confirmation', () => {
+/**
+ * The dirty/conflict guards live in `loadNote`, the single loader that every
+ * navigation entry point routes through. These tests slice the whole navigation
+ * region rather than one function, because which function holds the guard is an
+ * implementation detail — that it cannot be bypassed is not.
+ */
+function navRegion() {
   const pane = stripComments(src('VaultPane.tsx'))
-  const open = pane.slice(pane.indexOf('const openNote'), pane.indexOf('const handleOpenWikilink'))
-  assert.ok(open.length > 0, 'openNote not found')
-  assert.match(open, /if \(isDirty\)/, 'note switch does not check the dirty flag')
-  assert.match(open, /window\.confirm\(/, 'note switch drops the buffer silently')
-  assert.match(open, /if \(!ok\) return/, 'the confirmation result is ignored')
+  const start = pane.indexOf('const loadNote')
+  const end = pane.indexOf('const handleOpenWikilink')
+  assert.ok(start >= 0 && end > start, 'navigation region not found')
+  return pane.slice(start, end)
+}
+
+test('switching notes with unsaved edits requires an explicit confirmation', () => {
+  const nav = navRegion()
+  assert.match(nav, /if \(isDirty\)/, 'note switch does not check the dirty flag')
+  assert.match(nav, /window\.confirm\(/, 'note switch drops the buffer silently')
+  assert.match(nav, /if \(!ok\) return/, 'the confirmation result is ignored')
+})
+
+test('every navigation entry point routes through the guarded loader', () => {
+  const nav = navRegion()
+  // Only loadNote may read a note. If openNote/goBack/goForward could call
+  // vault.readNote directly they would skip the dirty and conflict guards
+  // entirely — which is exactly the bug this whole region exists to prevent.
+  const reads = nav.match(/readNote\(/g) ?? []
+  assert.equal(reads.length, 1, 'more than one place reads a note; a guard can be bypassed')
+
+  for (const fn of ['const openNote', 'const goBack', 'const goForward']) {
+    const i = nav.indexOf(fn)
+    assert.ok(i >= 0, `${fn} not found`)
+    const body = nav.slice(i, i + 320)
+    assert.match(body, /loadNote\(/, `${fn} does not go through loadNote`)
+  }
 })
 
 test('an open conflict cannot be dismissed by navigating away', () => {
-  const pane = stripComments(src('VaultPane.tsx'))
-  const open = pane.slice(pane.indexOf('const openNote'), pane.indexOf('const handleOpenWikilink'))
-  assert.match(open, /if \(conflictOpen\) return/, 'opening a note closes the conflict dialog')
+  const nav = navRegion()
+  assert.match(nav, /if \(conflictOpen\) return/, 'opening a note closes the conflict dialog')
 
   const dialog = stripComments(src('ConflictDialog.tsx'))
   assert.doesNotMatch(dialog, /onCancel|onClose|onDismiss/, 'the dialog has an escape hatch')
@@ -310,8 +339,30 @@ test('a successful save does not silently revert keystrokes made during it', () 
 test('d3 simulation is stopped on unmount and the effect cleans up', () => {
   const code = stripComments(src('GraphView.tsx'))
   assert.match(code, /return \(\) => \{[\s\S]*?sim\.stop\(\)[\s\S]*?\}/, 'sim.stop() missing')
-  assert.doesNotMatch(code, /requestAnimationFrame/, 'an uncancelled raf loop is present')
   assert.match(code, /\}, \[graph\]\)/, 'the effect is not keyed on the graph')
+
+  // This used to assert requestAnimationFrame was ABSENT, which was a fine
+  // proxy when the canvas only painted on simulation ticks. The graph now
+  // needs its own loop so that hover, drag and zoom keep repainting after the
+  // layout cools. The real invariant was never "no rAF" — it is "no rAF that
+  // outlives the effect", so check for the cancel instead of banning the loop.
+  if (/requestAnimationFrame/.test(code)) {
+    assert.match(
+      code,
+      /return \(\) => \{[\s\S]*?cancelAnimationFrame\([\s\S]*?\}/,
+      'a requestAnimationFrame loop is never cancelled on unmount',
+    )
+  }
+
+  // Same class of leak: a ResizeObserver that is never disconnected keeps the
+  // canvas and its whole closure alive after the pane is gone.
+  if (/new ResizeObserver/.test(code)) {
+    assert.match(
+      code,
+      /return \(\) => \{[\s\S]*?\.disconnect\(\)[\s\S]*?\}/,
+      'a ResizeObserver is never disconnected on unmount',
+    )
+  }
 })
 
 test('async effects are cancellable so late responses cannot overwrite state', () => {
@@ -471,4 +522,216 @@ test('the merge separator is distinctive enough to find afterwards', () => {
   assert.ok(MERGE_SEPARATOR.length > 10)
   assert.ok(MERGE_SEPARATOR.includes('<<<<<<<'))
   assert.ok(MERGE_SEPARATOR.includes('>>>>>>>'))
+})
+
+// ================================================================= round two
+// Findings from the second review pass. Each test below has a defect behind it.
+
+// --- HIGH: an in-flight save raced a note switch and cross-wrote two notes ---
+
+test('REGRESSION: a save landing after a note switch cannot re-adopt the old note', () => {
+  const pane = stripComments(src('VaultPane.tsx'))
+  const save = pane.slice(
+    pane.indexOf('const handleSave'),
+    pane.indexOf('const handleConflict'),
+  )
+  assert.ok(save.length > 0, 'handleSave not found')
+
+  // The bug: `setSelectedNote({ ...selectedNote, ... })` after an await. The
+  // spread uses the note captured when the closure was built, so a save that
+  // resolves after the user opened note B put note A's identity back on screen
+  // underneath B's buffer — and the next Save wrote B's text into A.
+  assert.doesNotMatch(
+    save,
+    /setSelectedNote\(\s*\{\s*\.\.\.selectedNote/,
+    'post-save update spreads the captured note instead of the current one',
+  )
+  assert.match(
+    save,
+    /setSelectedNote\(\s*\(prev\)\s*=>/,
+    'post-save update is not a functional state update',
+  )
+  assert.match(
+    save,
+    /prev\.path === target\.path/,
+    'post-save update does not check it is still on the same note',
+  )
+  // The write itself must still target the note the user pressed Save on.
+  assert.match(save, /vault\.saveNote\(target\.path, text, mtime\)/)
+})
+
+test('every await inside handleSave is followed by an identity check, not a blind write', () => {
+  const pane = stripComments(src('VaultPane.tsx'))
+  const save = pane.slice(
+    pane.indexOf('const handleSave'),
+    pane.indexOf('const handleConflict'),
+  )
+  const afterAwait = save.slice(save.indexOf('await'))
+  // Nothing after the await may touch the buffer, and the only state write is
+  // the guarded setSelectedNote.
+  assert.doesNotMatch(afterAwait, /setBuffer\(/, 'save writes the live buffer back')
+  const writes = [...afterAwait.matchAll(/set[A-Z]\w*\(/g)].map((m) => m[0])
+  assert.deepEqual(writes, ['setSelectedNote('], `unexpected state writes: ${writes}`)
+})
+
+// --- MEDIUM: conflict resolution failed into console.error alone ---
+
+test('a conflict choice that fails to save says so instead of doing nothing', () => {
+  const pane = stripComments(src('VaultPane.tsx'))
+  assert.match(pane, /const \[conflictError, setConflictError\]/, 'no conflict error state')
+
+  for (const [name, next] of [
+    ['const handleKeepBuffer', 'const handleKeepDisk'],
+    ['const handleMerge', 'const handleNewNote'],
+  ]) {
+    const block = pane.slice(pane.indexOf(name), pane.indexOf(next))
+    assert.ok(block.length > 0, `${name} not found`)
+    const katch = block.slice(block.indexOf('catch'))
+    assert.match(katch, /setConflictError\(/, `${name} fails silently`)
+    assert.doesNotMatch(
+      katch,
+      /console\.error/,
+      `${name} reports failure only to the console`,
+    )
+    // A failed resolution must leave the dialog open and both versions alive.
+    assert.doesNotMatch(katch, /setConflictOpen\(false\)/, `${name} closes on failure`)
+    assert.doesNotMatch(katch, /setConflictData\(null\)/, `${name} drops the disk text`)
+    assert.doesNotMatch(katch, /setBuffer\(/, `${name} touches the buffer on failure`)
+  }
+
+  const dialog = stripComments(src('ConflictDialog.tsx'))
+  assert.match(dialog, /error: string \| null/, 'the dialog cannot show an error')
+  assert.match(dialog, /\{error &&/, 'the dialog never renders the error')
+  assert.match(pane, /error=\{conflictError\}/, 'the error is never passed down')
+})
+
+// --- MEDIUM: a dangling graph edge crashed the root and took the buffer ---
+
+test('resolvableLinks drops edges d3 cannot resolve, keeps the ones it can', () => {
+  const nodes = ['A.md', 'B.md']
+  assert.deepEqual(
+    resolvableLinks(nodes, [
+      { from: 'A.md', to: 'B.md' },
+      { from: 'A.md', to: 'Ghost.md' },
+      { from: 'Ghost.md', to: 'B.md' },
+      { from: 'Ghost.md', to: 'Other.md' },
+    ]),
+    [{ source: 'A.md', target: 'B.md' }],
+  )
+  assert.deepEqual(resolvableLinks([], [{ from: 'A.md', to: 'B.md' }]), [])
+  assert.deepEqual(resolvableLinks(nodes, []), [])
+  // Self-links are d3-resolvable and are not this function's business to judge.
+  assert.deepEqual(resolvableLinks(nodes, [{ from: 'A.md', to: 'A.md' }]), [
+    { source: 'A.md', target: 'A.md' },
+  ])
+  // Order and duplicates are preserved — filtering must not dedupe silently.
+  assert.equal(
+    resolvableLinks(nodes, [
+      { from: 'A.md', to: 'B.md' },
+      { from: 'A.md', to: 'B.md' },
+    ]).length,
+    2,
+  )
+})
+
+test('PROOF: d3 really does throw on a dangling edge, and resolvableLinks stops it', async () => {
+  // Not a claim about d3 — the real library, the real call GraphView makes.
+  // d3-force is pure JS and needs no DOM, so this runs here honestly.
+  const d3 = await import('d3-force')
+  const graph = {
+    nodes: ['A.md', 'B.md'],
+    links: [
+      { from: 'A.md', to: 'B.md' },
+      { from: 'A.md', to: 'Ghost.md' },
+    ],
+  }
+  const build = (links) =>
+    d3
+      .forceSimulation(graph.nodes.map((id) => ({ id })))
+      .force('link', d3.forceLink(links).id((d) => d.id))
+      .stop()
+
+  // The old code path: raw edges straight into forceLink.
+  assert.throws(
+    () => build(graph.links.map((l) => ({ source: l.from, target: l.to }))),
+    /node not found/,
+    'd3 tolerates dangling edges now — this guard may be redundant',
+  )
+
+  // The shipped path: no throw, and the good edge survives.
+  const safe = resolvableLinks(graph.nodes, graph.links)
+  const sim = build(safe)
+  assert.equal(safe.length, 1)
+  assert.equal(safe[0].source.id ?? safe[0].source, 'A.md')
+  assert.equal(safe[0].target.id ?? safe[0].target, 'B.md')
+  sim.stop()
+})
+
+test('GraphView never hands raw graph.links to d3', () => {
+  const code = stripComments(src('GraphView.tsx'))
+  assert.match(code, /resolvableLinks\(graph\.nodes, graph\.links\)/)
+  assert.doesNotMatch(
+    code,
+    /graph\.links\.map\(/,
+    'raw edges reach forceLink and an unresolvable one throws out of the effect',
+  )
+  assert.match(code, /forceLink</, 'the guard is guarding nothing')
+})
+
+// --- LOW/hardening: conflict detection survives Electron's error stringifying ---
+
+test('isSaveConflict recognises the conflict however Electron stringifies it', () => {
+  // What `String(e)` actually yields in the renderer for each plausible shape.
+  const conflicts = [
+    "Error: Error invoking remote method 'vault:save': SaveConflict: Note changed on disk since you opened it.",
+    "Error: Error invoking remote method 'vault:save': Error: Note changed on disk since you opened it.",
+    'SaveConflict: Note changed on disk since you opened it.',
+    'Note changed on disk since you opened it.',
+  ]
+  for (const m of conflicts) assert.equal(isSaveConflict(m), true, m)
+
+  const notConflicts = [
+    "Error: Error invoking remote method 'vault:save': VaultUnavailable: Vault server is not running on 127.0.0.1:8765.",
+    'Error: vault: unreadable response from /save',
+    'Error: ipc: refused call from a subframe',
+    'Error: 500 /save',
+    '',
+  ]
+  for (const m of notConflicts) assert.equal(isSaveConflict(m), false, m)
+})
+
+test('the conflict branch is the ONLY branch that can reach onConflict', () => {
+  const body = stripComments(src('Editor.tsx'))
+  assert.equal([...body.matchAll(/onConflict\(/g)].length, 1)
+  // And the non-conflict branch must surface the error rather than eat it.
+  assert.match(body, /else \{\s*setError\(message\)/)
+  assert.doesNotMatch(body, /catch[\s\S]{0,300}console\.(error|log)/, 'save errors go to the console')
+})
+
+// --- standing invariants that must survive the round-two edits ---
+
+test('the pane still holds no timers of any kind after the round-two fixes', () => {
+  for (const [name, code] of all()) {
+    const body = stripComments(code)
+    assert.doesNotMatch(body, /setInterval|setTimeout|queueMicrotask/, `${name} gained a timer`)
+  }
+})
+
+test('helpers.ts stays pure: no React, no DOM, no node, no window', () => {
+  const body = stripComments(src('helpers.ts'))
+  assert.doesNotMatch(body, /from ['"]react['"]/, 'helpers imports React')
+  assert.doesNotMatch(body, /\bdocument\.|\bwindow\./, 'helpers touches the DOM')
+  assert.doesNotMatch(body, /from ['"]node:/, 'helpers imports a node builtin')
+  // Type-only import of the contract is fine; a value import is not.
+  for (const m of body.matchAll(/^import (?!type )/gm)) {
+    assert.fail(`helpers has a value import: ${m[0]}`)
+  }
+})
+
+test('the conflict dialog still has no escape hatch after gaining an error prop', () => {
+  const dialog = stripComments(src('ConflictDialog.tsx'))
+  assert.doesNotMatch(dialog, /onCancel|onClose|onDismiss|onEscape/, 'dialog can be dismissed')
+  assert.doesNotMatch(dialog, /onClick=\{[^}]*\bclose\b/i, 'dialog has a close click')
+  // The overlay must not close the dialog when clicked.
+  assert.doesNotMatch(dialog, /vault-conflict-dialog-overlay"\s*onClick/, 'backdrop dismisses')
 })

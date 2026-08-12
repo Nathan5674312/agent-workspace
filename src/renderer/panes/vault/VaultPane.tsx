@@ -55,6 +55,13 @@ export function VaultPane(): React.ReactElement {
     diskText: string
   } | null>(null)
   /**
+   * Why a conflict resolution failed. Without this the three buttons could fail
+   * into console.error alone: the click appeared to do nothing at all, and the
+   * user had no way to tell "saved" from "still unsaved" in the one dialog where
+   * that distinction is the whole point.
+   */
+  const [conflictError, setConflictError] = useState<string | null>(null)
+  /**
    * Whichever side of a conflict the user chose to throw away, kept in memory
    * so a reflex click is recoverable by copy/paste. Cleared only by opening a
    * different note.
@@ -63,21 +70,57 @@ export function VaultPane(): React.ReactElement {
     null,
   )
   const [expanded, setExpanded] = useState<Set<string>>(new Set())
+  /**
+   * Navigation history for the note header's back/forward, browser-style:
+   * `trail` is the path list, `index` is where we are in it. Opening a note
+   * from the tree truncates anything ahead of the cursor.
+   *
+   * This is real state rather than two decorative arrows on purpose — the
+   * section-1 review found inert controls sitting next to live ones, and a
+   * back button that does nothing is worse than no back button.
+   *
+   * ONE piece of state, not two. As a separate array and index, `openNote` read
+   * the index from its render closure to truncate the trail while advancing it
+   * with a functional updater — and `openNote` awaits a vault read first, so two
+   * quick clicks both truncated against the SAME stale index and then each
+   * incremented. That left the index pointing past the end of a one-entry
+   * trail: Back was enabled and went to the note already open, Forward was
+   * disabled with history ahead of it. A trail and its cursor are one fact and
+   * have to move in one update.
+   */
+  const [nav, setNav] = useState<{ trail: string[]; index: number }>({
+    trail: [],
+    index: -1,
+  })
+  /** A failed open used to be a console-only no-op — invisible to the user. */
+  const [openError, setOpenError] = useState<string | null>(null)
+
+  const canGoBack = nav.index > 0
+  const canGoForward = nav.index >= 0 && nav.index < nav.trail.length - 1
 
   const isDirty = isBufferDirty(selectedNote?.text ?? null, buffer)
 
   const noteIndex = useMemo(() => indexNotesByName(vault.tree), [vault.tree])
 
-  // Backlinks for the open note. Cancelled on note change / unmount so a slow
-  // response cannot overwrite a newer note's backlinks.
+  /**
+   * Backlinks for the open note. Cancelled on note change / unmount so a slow
+   * response cannot overwrite a newer note's backlinks.
+   *
+   * Keyed on the PATH, not on the note object. `backlinks()` rebuilds the whole
+   * wikilink graph — every note in the vault read over HTTP — and `handleSave`
+   * replaces `selectedNote` with a new object on every successful save. On the
+   * object the effect re-ran on each save and paid a full-vault rescan for a
+   * result that cannot have changed for the note you are sitting on.
+   */
+  const selectedPath = selectedNote?.path ?? null
   useEffect(() => {
-    if (!selectedNote) {
+    if (!selectedPath) {
       setBacklinks([])
       return
     }
     let cancelled = false
     vault
-      .getBacklinks(selectedNote.path)
+      .getBacklinks(selectedPath)
       .then((links) => {
         if (!cancelled) setBacklinks(links)
       })
@@ -87,25 +130,60 @@ export function VaultPane(): React.ReactElement {
     return () => {
       cancelled = true
     }
-  }, [selectedNote, vault.getBacklinks])
+  }, [selectedPath, vault.getBacklinks])
 
-  const openNote = async (path: string) => {
+  /**
+   * Load a note into the buffer. Returns whether it actually happened — every
+   * caller needs to know, because history must only move when the note really
+   * changed. It can decline for three reasons: an open conflict, a declined
+   * discard prompt, or a failed read.
+   */
+  const loadNote = async (path: string): Promise<boolean> => {
     // An open conflict must be resolved before anything else can move. Closing
     // it implicitly is how the buffer used to vanish.
-    if (conflictOpen) return
+    if (conflictOpen) return false
     if (isDirty) {
       const ok = window.confirm(
         `"${selectedNote?.title ?? 'This note'}" has unsaved edits that will be lost. Discard them and open the other note?`,
       )
-      if (!ok) return
+      if (!ok) return false
     }
     try {
       const note = await vault.readNote(path)
       setSelectedNote(note)
       setBuffer(note.text)
       setDiscarded(null)
+      setOpenError(null)
+      return true
     } catch (e) {
-      console.error('Failed to read note:', e)
+      setOpenError(
+        `Could not open ${path}: ${e instanceof Error ? e.message : String(e)}`,
+      )
+      return false
+    }
+  }
+
+  const openNote = async (path: string) => {
+    if (!(await loadNote(path))) return
+    // Browser semantics: opening from the tree truncates any forward history.
+    // Trail and cursor move together, both read from the same `n`.
+    setNav((n) => ({
+      trail: [...n.trail.slice(0, n.index + 1), path],
+      index: n.index + 1,
+    }))
+  }
+
+  const goBack = async () => {
+    if (!canGoBack) return
+    if (await loadNote(nav.trail[nav.index - 1])) {
+      setNav((n) => ({ ...n, index: n.index - 1 }))
+    }
+  }
+
+  const goForward = async () => {
+    if (!canGoForward) return
+    if (await loadNote(nav.trail[nav.index + 1])) {
+      setNav((n) => ({ ...n, index: n.index + 1 }))
     }
   }
 
@@ -115,16 +193,28 @@ export function VaultPane(): React.ReactElement {
   }
 
   const handleSave = async (text: string, mtime: number) => {
-    if (!selectedNote) return
-    const saved = await vault.saveNote(selectedNote.path, text, mtime)
+    // Pin the note this save belongs to. `selectedNote` is captured from the
+    // render that produced this closure, and a save is a round-trip to the
+    // vault server; the user can open a different note while it is in flight.
+    // Spreading the CAPTURED note into setSelectedNote afterwards put note A's
+    // identity back on screen underneath note B's buffer, and the next Save
+    // then wrote B's text over A. Update only if we are still on the same note.
+    const target = selectedNote
+    if (!target) return
+    const saved = await vault.saveNote(target.path, text, mtime)
     // Record what is now on disk WITHOUT clobbering the buffer: if the user
     // kept typing while the save was in flight, those keystrokes stay, and the
     // note simply reads as dirty again.
-    setSelectedNote({ ...selectedNote, mtime: saved.mtime, text })
+    setSelectedNote((prev) =>
+      prev && prev.path === target.path
+        ? { ...prev, mtime: saved.mtime, text }
+        : prev,
+    )
   }
 
   const handleConflict = (diskMtime: number, diskText: string) => {
     setConflictData({ diskMtime, diskText })
+    setConflictError(null)
     setConflictOpen(true)
   }
 
@@ -141,6 +231,7 @@ export function VaultPane(): React.ReactElement {
     )
     if (!ok) return
     try {
+      setConflictError(null)
       const saved = await vault.saveNote(
         selectedNote.path,
         buffer,
@@ -151,7 +242,9 @@ export function VaultPane(): React.ReactElement {
       setConflictOpen(false)
       setConflictData(null)
     } catch (e) {
-      console.error('Failed to save buffer:', e)
+      // Dialog stays open and the buffer is untouched, so nothing is lost — but
+      // say so, otherwise the click reads as a no-op.
+      setConflictError(`Could not save your version: ${String(e)}`)
     }
   }
 
@@ -167,11 +260,13 @@ export function VaultPane(): React.ReactElement {
     setBuffer(conflictData.diskText)
     setConflictOpen(false)
     setConflictData(null)
+    setConflictError(null)
   }
 
   const handleMerge = async (merged: string) => {
     if (!selectedNote || !conflictData) return
     try {
+      setConflictError(null)
       const saved = await vault.saveNote(
         selectedNote.path,
         merged,
@@ -182,7 +277,9 @@ export function VaultPane(): React.ReactElement {
       setConflictOpen(false)
       setConflictData(null)
     } catch (e) {
-      console.error('Failed to save merged:', e)
+      // Same as above: both sides are still in memory, but a silent failure here
+      // is how a user walks away believing the merge landed.
+      setConflictError(`Could not save the merge: ${String(e)}`)
     }
   }
 
@@ -264,6 +361,15 @@ export function VaultPane(): React.ReactElement {
             onNewTab={handleNewTab}
           />
 
+          {openError && (
+            <div className="vault-open-error" role="alert">
+              {openError}
+              <button onClick={() => setOpenError(null)} aria-label="Dismiss">
+                ×
+              </button>
+            </div>
+          )}
+
           <MainCanvas
             note={selectedNote}
             text={buffer}
@@ -273,6 +379,10 @@ export function VaultPane(): React.ReactElement {
             onConflict={handleConflict}
             getGraph={vault.getGraph}
             backlinks={backlinks}
+            onBack={goBack}
+            onForward={goForward}
+            canGoBack={canGoBack}
+            canGoForward={canGoForward}
             onOpenNote={openNote}
             onOpenWikilink={handleOpenWikilink}
             discarded={discarded}
@@ -284,6 +394,7 @@ export function VaultPane(): React.ReactElement {
         isOpen={conflictOpen}
         diskText={conflictData?.diskText ?? ''}
         bufferText={buffer}
+        error={conflictError}
         onKeepBuffer={handleKeepBuffer}
         onKeepDisk={handleKeepDisk}
         onMerge={handleMerge}

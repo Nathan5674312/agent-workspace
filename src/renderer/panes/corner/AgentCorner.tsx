@@ -16,7 +16,7 @@
  *
  * NO styling beyond structure.
  */
-import { useEffect, useState, useCallback, useRef } from 'react'
+import { useEffect, useState, useCallback } from 'react'
 import type { CornerItem, ConsentDecision } from '../../../shared/ipc.js'
 import { ArtifactItem } from './ArtifactItem.js'
 import { ConsentItem } from './ConsentItem.js'
@@ -31,71 +31,73 @@ function nextToShow(list: CornerItem[]): CornerItem | null {
 
 export function AgentCorner(): React.ReactElement {
   const [items, setItems] = useState<CornerItem[]>([])
-  const [displayQueue, setDisplayQueue] = useState<CornerItem | null>(null)
-  const displayQueueRef = useRef<CornerItem | null>(null)
 
-  // Sync ref with state so callbacks can access current displayQueue.
-  useEffect(() => {
-    displayQueueRef.current = displayQueue
-  }, [displayQueue])
+  /**
+   * What is on screen is DERIVED from `items`, not a second piece of state.
+   *
+   * It used to be its own `useState` kept in step with a `useRef`, and the
+   * `onResolved` handler called `setDisplayQueue` from inside the `setItems`
+   * updater. React updaters must be pure; under StrictMode they are invoked
+   * twice, and updating another component's state from inside one is the exact
+   * pattern React warns about ("Cannot update a component while rendering a
+   * different component"). It also gave three copies of one fact — `items`,
+   * `displayQueue`, `displayQueueRef` — that could disagree, on the surface
+   * whose whole job is showing the human the right prompt.
+   *
+   * `nextToShow` already encodes the policy (a consent outranks everything,
+   * otherwise oldest first), so deriving it is behaviourally identical and
+   * cannot drift.
+   */
+  const displayQueue = nextToShow(items)
 
   // Load initial items and set up subscriptions once on mount.
   useEffect(() => {
-    // Fetch current items on mount.
+    let live = true
+
+    // Fetch current items on mount. A consent raised before any window existed
+    // was broadcast to nobody, so this fetch is the only thing that surfaces
+    // it — the caller is still blocked on it.
     void window.api.corner.items().then((initial) => {
-      setItems(initial)
-      setDisplayQueue(nextToShow(initial))
+      if (live) setItems(initial)
     })
 
     // Subscribe to new items pushed from main.
     const unsubscribePush = window.api.corner.onPush((item) => {
       setItems((prev) => (prev.some((i) => i.id === item.id) ? prev : [...prev, item]))
-      // A consent takes the surface immediately; anything else waits its turn.
-      setDisplayQueue((current: CornerItem | null) =>
-        current && !(item.kind === 'consent' && current.kind !== 'consent')
-          ? current
-          : item,
-      )
     })
 
     // Main broadcasts this for BOTH decided and dismissed items, so it is the
-    // single place the queue advances. State updaters stay pure — the next
-    // item is computed in its own updater, not as a side effect of another.
+    // single place the queue shrinks.
     const unsubscribeResolved = window.api.corner.onResolved((id) => {
-      setItems((prev) => {
-        const remaining = prev.filter((i) => i.id !== id)
-        if (displayQueueRef.current?.id === id) {
-          setDisplayQueue(nextToShow(remaining))
-          displayQueueRef.current = nextToShow(remaining)
-        }
-        return remaining
-      })
+      setItems((prev) => prev.filter((i) => i.id !== id))
     })
 
     return () => {
+      live = false
       unsubscribePush()
       unsubscribeResolved()
     }
   }, [])
 
-  const handleDecide = useCallback((allow: boolean) => {
-    const current = displayQueueRef.current
-    if (!current || current.kind !== 'consent') return
+  const handleDecide = useCallback(
+    (allow: boolean) => {
+      if (!displayQueue || displayQueue.kind !== 'consent') return
 
-    const decision: ConsentDecision = {
-      id: current.id,
-      allow,
-    }
+      const decision: ConsentDecision = {
+        id: displayQueue.id,
+        allow,
+      }
 
-    void window.api.corner.decide(decision)
-  }, [])
+      void window.api.corner.decide(decision)
+    },
+    [displayQueue],
+  )
 
   const handleDismiss = useCallback(() => {
-    const current = displayQueueRef.current
-    if (!current) return
+    if (!displayQueue) return
 
-    void window.api.corner.dismiss(current.id)
-  }, [])
+    void window.api.corner.dismiss(displayQueue.id)
+  }, [displayQueue])
 
   // Nothing to display: silence is the default.
   if (!displayQueue) {

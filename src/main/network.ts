@@ -283,7 +283,19 @@ export async function getCurrentNetwork(): Promise<NetworkTrust> {
  * Only trusted networks bypass the consent prompt on sync operations.
  * Require a fingerprint to trust; if we cannot fingerprint, do nothing.
  */
-export async function trustCurrentNetwork(trusted: boolean): Promise<NetworkTrust> {
+export async function trustCurrentNetwork(trusted: unknown): Promise<NetworkTrust> {
+  /**
+   * Only literal `true` grants trust — the same rule corner.ts applies to a
+   * consent decision, and for the same reason. The parameter arrives over IPC
+   * from the renderer; the `boolean` annotation it used to carry is erased at
+   * runtime and stopped nothing, so `trust("no")`, `trust(1)` and `trust({})`
+   * all took the truthy branch and wrote a permanent trust entry that
+   * suppresses every future prompt for that network.
+   *
+   * Anything else is a REVOCATION, not a no-op: a malformed grant must land on
+   * the safe side, not be ignored.
+   */
+  const grant = trusted === true
   const current = await detectNetwork()
 
   if (!current.fingerprint) {
@@ -294,7 +306,7 @@ export async function trustCurrentNetwork(trusted: boolean): Promise<NetworkTrus
   const kind: FingerprintKind = current.fingerprint.startsWith('mac:') ? 'mac' : 'ssid'
   const store = loadTrustStore()
 
-  if (trusted) {
+  if (grant) {
     // Add to trust store if not already there.
     if (!store.trustedNetworks.some((n) => n.fingerprint === current.fingerprint)) {
       store.trustedNetworks.push({
@@ -313,11 +325,11 @@ export async function trustCurrentNetwork(trusted: boolean): Promise<NetworkTrus
   }
 
   // Reflect the new state without re-running four subprocesses.
-  return { ...current, trusted }
+  return { ...current, trusted: grant }
 }
 
 export function register(handle: Handle): void {
   handle(CH.networkTrustCurrent, () => getCurrentNetwork())
 
-  handle(CH.networkTrust, (trusted: boolean) => trustCurrentNetwork(trusted))
+  handle(CH.networkTrust, (trusted: unknown) => trustCurrentNetwork(trusted))
 }

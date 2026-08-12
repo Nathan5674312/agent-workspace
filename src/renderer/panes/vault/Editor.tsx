@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import type { VaultNoteBody } from '../../../shared/ipc.js'
-import { parseWikilinks } from './helpers.js'
+import { isSaveConflict, parseWikilinks } from './helpers.js'
 
 /**
  * Plain <textarea> editor for notes.
@@ -52,7 +52,7 @@ export function Editor({
       // Error, so only its message survives — `currentMtime` does not. Re-read
       // the note to get both the disk mtime and the disk text. The buffer is
       // untouched on every branch here; a failed save never costs the user text.
-      if (message.includes('SaveConflict')) {
+      if (isSaveConflict(message)) {
         try {
           const diskNote = await window.api.vault.read(note.path)
           onConflict(diskNote.mtime, diskNote.text)

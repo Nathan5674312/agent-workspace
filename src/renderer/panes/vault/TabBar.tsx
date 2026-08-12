@@ -2,6 +2,10 @@
  * Tab bar — named tabs, new tab, tab-list chevron, split pane, window controls.
  * ponytail: single tab for v1, no multi-tab management yet.
  */
+import { ChevronDown, Columns2, EllipsisVertical } from 'lucide-react'
+
+const NOT_YET = 'Not implemented yet'
+
 export interface TabBarProps {
   tabs: Array<{ id: string; name: string }>
   activeTabId: string
@@ -31,14 +35,16 @@ export function TabBar({
       <button className="vault-new-tab" onClick={onNewTab} title="New tab">
         +
       </button>
-      <button className="vault-tab-chevron" title="Tab list">
-        ⌄
+      {/* Disabled, not inert: none of these three had an onClick at all, so
+          they were decoration that read as controls. */}
+      <button className="vault-tab-chevron" disabled title={NOT_YET}>
+        <ChevronDown size={14} aria-hidden="true" />
       </button>
-      <button className="vault-tab-split" title="Split right">
-        ⫿
+      <button className="vault-tab-split" disabled title={NOT_YET}>
+        <Columns2 size={14} aria-hidden="true" />
       </button>
-      <button className="vault-tab-menu" title="Tab menu">
-        ⋮
+      <button className="vault-tab-menu" disabled title={NOT_YET}>
+        <EllipsisVertical size={14} aria-hidden="true" />
       </button>
     </div>
   )

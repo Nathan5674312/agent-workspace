@@ -3,6 +3,13 @@
     "target": "ES2022",
     "module": "ESNext",
     "moduleResolution": "bundler",
+    // src/shared/wikilink.ts is the one module both processes import for its
+    // VALUES, not just its types. Every other cross-process import is `import
+    // type` and erases, which is why `.js` specifiers worked despite no .js
+    // file existing — node's type stripping never had to resolve them. A real
+    // runtime import must name the file that is actually there. Safe with
+    // noEmit: tsc never writes the specifier out, and vite resolves it.
+    "allowImportingTsExtensions": true,
     "lib": ["ES2022", "DOM", "DOM.Iterable"],
     "jsx": "react-jsx",
     "strict": true,

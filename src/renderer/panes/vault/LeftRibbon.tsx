@@ -1,35 +1,54 @@
 /**
- * Left icon ribbon — vertical stack of navigation icons for Obsidian-like navigation.
- * v1: files, search, bookmarks, graph, canvas, calendar, terminal, plugins.
- * ponytail: icons are text labels for v1, no SVG assets yet.
+ * Left icon ribbon — vertical navigation, Obsidian-shaped.
+ *
+ * Icons are Lucide SVGs stroked with `currentColor`. They replace the emoji
+ * placeholders, which could not be themed at all: an emoji is an OS-supplied
+ * colour raster, so it ignores `color`, takes no stroke weight, and sits on its
+ * own baseline. No stylesheet could ever have made them match.
  */
+import {
+  Files,
+  Search,
+  Bookmark,
+  Waypoints,
+  Frame,
+  Calendar,
+  SquareTerminal,
+  Blocks,
+  type LucideIcon,
+} from 'lucide-react'
+
 export interface LeftRibbonProps {
   activeView: string
   onViewChange: (view: string) => void
 }
 
-export function LeftRibbon({ activeView, onViewChange }: LeftRibbonProps) {
-  const icons = [
-    { id: 'files', label: '📁' },
-    { id: 'search', label: '🔍' },
-    { id: 'bookmarks', label: '🔖' },
-    { id: 'graph', label: '◉' },
-    { id: 'canvas', label: '🖼️' },
-    { id: 'calendar', label: '📅' },
-    { id: 'terminal', label: '⌘' },
-    { id: 'plugins', label: '⚙️' },
-  ]
+const VIEWS: { id: string; label: string; Icon: LucideIcon }[] = [
+  { id: 'files', label: 'Files', Icon: Files },
+  { id: 'search', label: 'Search', Icon: Search },
+  { id: 'bookmarks', label: 'Bookmarks', Icon: Bookmark },
+  { id: 'graph', label: 'Graph view', Icon: Waypoints },
+  { id: 'canvas', label: 'Canvas', Icon: Frame },
+  { id: 'calendar', label: 'Daily notes', Icon: Calendar },
+  { id: 'terminal', label: 'Terminal', Icon: SquareTerminal },
+  { id: 'plugins', label: 'Plugins', Icon: Blocks },
+]
 
+export function LeftRibbon({ activeView, onViewChange }: LeftRibbonProps) {
   return (
-    <nav className="vault-left-ribbon">
-      {icons.map(({ id, label }) => (
+    <nav className="vault-ribbon" aria-label="Vault views">
+      {VIEWS.map(({ id, label, Icon }) => (
         <button
           key={id}
           className={`vault-ribbon-icon ${activeView === id ? 'active' : ''}`}
           onClick={() => onViewChange(id)}
-          title={id}
+          // The button carries the accessible name; the icon is decorative and
+          // must not announce itself twice.
+          aria-label={label}
+          aria-pressed={activeView === id}
+          title={label}
         >
-          {label}
+          <Icon size={18} strokeWidth={1.75} aria-hidden="true" />
         </button>
       ))}
     </nav>

@@ -16,6 +16,8 @@ export interface ConflictDialogProps {
   isOpen: boolean
   diskText: string
   bufferText: string
+  /** Why the last choice failed to save. Null when there is nothing to report. */
+  error: string | null
   onKeepBuffer: () => void
   onKeepDisk: () => void
   onMerge: (merged: string) => void
@@ -25,6 +27,7 @@ export function ConflictDialog({
   isOpen,
   diskText,
   bufferText,
+  error,
   onKeepBuffer,
   onKeepDisk,
   onMerge,
@@ -59,6 +62,13 @@ export function ConflictDialog({
             />
           </div>
         </div>
+
+        {error && (
+          <p className="vault-conflict-error" role="alert">
+            {error} — nothing was written and both versions above are still
+            intact.
+          </p>
+        )}
 
         <div className="vault-conflict-actions">
           <button

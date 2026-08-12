@@ -2,6 +2,7 @@ import { useState } from 'react'
 import type { VaultNoteBody, VaultGraph } from '../../../shared/ipc.js'
 import { Editor } from './Editor.js'
 import { GraphView } from './GraphView.js'
+import { ArrowLeft, ArrowRight, Ellipsis } from 'lucide-react'
 
 /**
  * Main canvas — dispatcher between editor and graph view.
@@ -22,6 +23,10 @@ export interface MainCanvasProps {
   onOpenNote: (path: string) => void
   onOpenWikilink: (name: string) => void
   discarded: { label: string; text: string } | null
+  onBack: () => void
+  onForward: () => void
+  canGoBack: boolean
+  canGoForward: boolean
 }
 
 export function MainCanvas({
@@ -36,15 +41,30 @@ export function MainCanvas({
   onOpenNote,
   onOpenWikilink,
   discarded,
+  onBack,
+  onForward,
+  canGoBack,
+  canGoForward,
 }: MainCanvasProps) {
   const [view, setView] = useState<'editor' | 'graph'>('editor')
   const [graph, setGraph] = useState<VaultGraph | null>(null)
   const [loadingGraph, setLoadingGraph] = useState(false)
   const [graphError, setGraphError] = useState<string | null>(null)
 
+  /**
+   * Always re-fetch. This used to early-return whenever `graph` was non-null,
+   * which meant the graph you saw was whatever the vault looked like the first
+   * time you opened the tab: add a [[link]], save, come back, and the edge was
+   * missing with no control anywhere to refresh it. Only restarting the app
+   * cleared it.
+   *
+   * Re-fetching is cheap because the memo now lives in the main process
+   * (src/main/vault.ts `graph()`), where it is shared with `backlinks()`, has a
+   * TTL, and is invalidated by our own saves. One cache, at the layer that
+   * knows when it is stale — instead of a permanent one up here that never did.
+   */
   const handleSwitchToGraph = async () => {
     setView('graph')
-    if (graph !== null) return
     try {
       setLoadingGraph(true)
       setGraphError(null)
@@ -61,6 +81,39 @@ export function MainCanvas({
 
   return (
     <div className="vault-main-canvas">
+      {/* Note header — back / forward, the title, and the view menu, in the
+          arrangement the real explorer uses. The arrows are wired to actual
+          navigation history in <VaultPane>; they disable rather than sit
+          inert, so the control tells the truth about whether it can act. */}
+      <div className="vault-note-header">
+        <div className="vault-note-nav">
+          <button
+            className="vault-nav-back"
+            onClick={onBack}
+            disabled={!canGoBack}
+            aria-label="Back"
+            title="Back"
+          >
+            <ArrowLeft size={15} aria-hidden="true" />
+          </button>
+          <button
+            className="vault-nav-forward"
+            onClick={onForward}
+            disabled={!canGoForward}
+            aria-label="Forward"
+            title="Forward"
+          >
+            <ArrowRight size={15} aria-hidden="true" />
+          </button>
+        </div>
+        <span className="vault-note-title">
+          {view === 'graph' ? 'Graph view' : (note?.title ?? 'No note selected')}
+        </span>
+        <button className="vault-note-menu" aria-label="More options" title="More options">
+          <Ellipsis size={15} aria-hidden="true" />
+        </button>
+      </div>
+
       <div className="vault-view-controls">
         <button
           className={`vault-view-button ${view === 'editor' ? 'active' : ''}`}
@@ -99,7 +152,16 @@ export function MainCanvas({
         ) : graphError ? (
           <div className="vault-graph-error">Graph failed: {graphError}</div>
         ) : (
-          <GraphView graph={graph} />
+          <GraphView
+            graph={graph}
+            onOpenNote={(path) => {
+              // Loading the note is only half of "open". Without the view
+              // switch the note opens behind the graph and nothing appears to
+              // happen — the click reads as broken even though it worked.
+              onOpenNote(path)
+              setView('editor')
+            }}
+          />
         )}
       </div>
     </div>

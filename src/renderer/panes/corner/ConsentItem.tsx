@@ -66,10 +66,31 @@ export function ConsentItem({
             </div>
           )}
 
+          {/*
+            OUR determination gets the prominent block. The public-network line
+            below is driven by `osProfile`, which is the user-set Windows flag —
+            advisory, frequently wrong, and never a reason to suppress anything.
+            Previously it was the only warning with any structural weight, so
+            the strongest signal on screen came from the weakest source: a
+            network Windows calls "Private" that we have never seen before
+            rendered as a one-line "Status: Untrusted" indistinguishable from
+            the SSID line above it.
+
+            Structure and text only. No colour is involved in either warning,
+            so neither depends on a palette entry that does not exist.
+          */}
+          {!item.network.trusted && (
+            <div className="network-warning">
+              <strong>This network is not one you have trusted.</strong> Nothing
+              here has been marked trusted in this app, so what you send crosses a
+              network we cannot vouch for.
+            </div>
+          )}
+
           {isPublicNetwork && (
             <div className="network-warning">
-              <strong>Public network detected.</strong> Avoid sending sensitive data
-              over public WiFi.
+              <strong>Windows also reports this network as public.</strong> Avoid
+              sending sensitive data over it.
             </div>
           )}
         </div>
@@ -84,8 +105,14 @@ export function ConsentItem({
         </button>
       </div>
 
+      {/*
+        Dismiss denies (src/main/corner.ts `dismiss`). A third control on a
+        consent card whose effect is not stated is a consent-clarity defect in
+        its own right: the safe reading has to be the obvious one, not the one
+        you learn by reading the main process.
+      */}
       <button className="consent-dismiss-link" onClick={onDismiss}>
-        Dismiss
+        Dismiss (denies)
       </button>
     </div>
   )

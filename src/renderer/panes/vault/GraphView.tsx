@@ -107,6 +107,23 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
     const dpr = Math.min(window.devicePixelRatio || 1, 2)
 
     /**
+     * These two are declared HERE, above `buildSimulation`, and it matters.
+     *
+     * `forceLink.distance()` and `.strength()` are not lazy: d3 evaluates the
+     * accessor over every link the moment you set it, and caches the result.
+     * So the getters handed to `buildSimulation` fire DURING that call, not on
+     * the first tick — which means a `let dragging` declared after it is still
+     * in its temporal dead zone and the whole pane dies with "Cannot access
+     * 'dragging' before initialization".
+     *
+     * `adjacency` is created empty here and filled further down, after
+     * forceLink has rewritten each link's source/target from id strings to node
+     * references. Same Map object either way, so the getter stays correct.
+     */
+    let dragging: Node | null = null
+    const adjacency = new Map<string, Node[]>()
+
+    /**
      * The layout itself lives in `graphPhysics.ts`.
      *
      * It is a separate module for one reason: `bench/orbit.mjs` measures the
@@ -134,7 +151,6 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
 
     let hover: Node | null = null
     let neighbours = new Set<string>()
-    let dragging: Node | null = null
     // Distinguishes a click from a drag that happened to end on a node.
     //
     // This is a HYSTERESIS, not a flag on any movement. It used to be set by a
@@ -229,7 +245,6 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
      * It holds node references rather than ids because the drag force needs
      * the positions, and it replaces a full scan of `links` on every hover.
      */
-    const adjacency = new Map<string, Node[]>()
     const connect = (from: Node, to: Node) => {
       const list = adjacency.get(from.id)
       if (list) list.push(to)

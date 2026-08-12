@@ -336,6 +336,35 @@ test('a successful save does not silently revert keystrokes made during it', () 
 
 // -------------------------------------------------- effects and simulations
 
+test('state the physics reads is declared before the simulation is built', () => {
+  /**
+   * Guards a crash that took the whole vault pane down: "Cannot access
+   * 'dragging' before initialization".
+   *
+   * `buildSimulation` receives `() => dragging` and `() => adjacency`. Those
+   * getters run DURING the call, not on the first tick, because d3 evaluates
+   * forceLink's distance/strength accessors eagerly and caches them (proved in
+   * test/graph-orbit.test.mjs). Anything declared below the call is therefore
+   * in its temporal dead zone when the getter fires.
+   *
+   * Position-in-file is a crude thing to assert, and it is asserted anyway:
+   * the alternative was a bug that typechecks, passes 159 tests, and only
+   * appears when a human opens the graph tab.
+   */
+  const code = stripComments(src('GraphView.tsx'))
+  const build = code.indexOf('buildSimulation(')
+  assert.ok(build > 0, 'GraphView no longer calls buildSimulation')
+  for (const decl of [/let dragging\b/, /const adjacency\b/]) {
+    const at = code.search(decl)
+    assert.ok(at > 0, `${decl} not found`)
+    assert.ok(
+      at < build,
+      `${decl} is declared after buildSimulation() — the getter reads it in its ` +
+        `temporal dead zone and the pane dies on open`,
+    )
+  }
+})
+
 test('d3 simulation is stopped on unmount and the effect cleans up', () => {
   const code = stripComments(src('GraphView.tsx'))
   assert.match(code, /return \(\) => \{[\s\S]*?sim\.stop\(\)[\s\S]*?\}/, 'sim.stop() missing')

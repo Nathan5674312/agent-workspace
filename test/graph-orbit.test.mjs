@@ -93,6 +93,58 @@ test('the hold never pushes nodes through each other', () => {
   assert.equal(now.collisions, 0, 'nodes overlap during the hold')
 })
 
+test('PROOF: forceLink evaluates its accessors eagerly, not on first tick', async () => {
+  /**
+   * This is the fact that took the vault pane down with "Cannot access
+   * 'dragging' before initialization", and it is not obvious.
+   *
+   * `buildSimulation` is handed `() => dragging` and `() => adjacency`, which
+   * LOOK lazy — the natural assumption is that they first run on tick one, so
+   * the variables can be declared anywhere in the effect. They are not. d3
+   * runs `distance` and `strength` over every link the moment the accessor is
+   * set, and caches the result. So the getters fire inside `buildSimulation`,
+   * and any `let` declared below that call is still in its temporal dead zone.
+   *
+   * The 159 tests in this repo all passed while the app was broken, because
+   * the harness happened to declare its `held` variable above the call. So
+   * this asserts the underlying d3 behaviour rather than my own arrangement of
+   * it: if a future d3 ever makes these lazy, this fails, and the ordering
+   * constraint in GraphView can be relaxed deliberately instead of by accident.
+   */
+  const d3 = await import('d3-force')
+  const nodes = [{ id: 'a' }, { id: 'b' }]
+  const links = [{ source: 'a', target: 'b' }]
+  let distanceCalls = 0
+  let strengthCalls = 0
+
+  const force = d3
+    .forceLink(links)
+    .id((d) => d.id)
+    .distance(() => {
+      distanceCalls++
+      return 50
+    })
+    .strength(() => {
+      strengthCalls++
+      return 0.1
+    })
+
+  // Setting the accessor alone does nothing: d3's initializeDistance() returns
+  // early while the force has no nodes. This is the half that misleads.
+  assert.equal(distanceCalls, 0, 'no nodes yet, so nothing to evaluate')
+
+  // Attaching it to a simulation initialises the force — and THAT is where the
+  // accessors run, once per link, before a single tick has happened.
+  const sim = d3.forceSimulation(nodes).force('link', force)
+  sim.stop()
+
+  assert.ok(
+    distanceCalls > 0,
+    'distance() became lazy — the ordering constraint in GraphView can be relaxed',
+  )
+  assert.ok(strengthCalls > 0, 'strength() became lazy — same')
+})
+
 test('the measurement is deterministic', () => {
   // A flaky harness would make every threshold above meaningless.
   const again = measure(HOLD)

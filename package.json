@@ -1,7 +1,7 @@
 {
   "name": "agent-workspace",
   "version": "0.0.1",
-  "description": "Three-pane desktop workspace: Claude Code, vault, agent corner.",
+  "description": "Full-screen vault workspace with a floating agent corner.",
   "main": "./out/main/index.js",
   "private": true,
   "scripts": {
@@ -12,15 +12,15 @@
     "test": "node --experimental-strip-types --no-warnings --test test/"
   },
   "dependencies": {
-    "@anthropic-ai/claude-agent-sdk": "^0.1.0"
+    "lucide-react": "^1.31.0"
   },
   "devDependencies": {
+    "@types/d3-force": "^3.0.10",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.3.4",
     "d3-force": "^3.0.0",
-    "@types/d3-force": "^3.0.10",
     "electron": "^33.3.0",
     "electron-vite": "^2.3.0",
     "react": "^19.0.0",

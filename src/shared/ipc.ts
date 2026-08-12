@@ -33,51 +33,7 @@ export type VaultLink = { from: string; to: string }
 
 export type VaultGraph = { nodes: string[]; links: VaultLink[] }
 
-// ------------------------------------------------------------- claude (pane 1)
-
-export type SessionId = string
-
-export type Session = {
-  id: SessionId
-  title: string
-  /** Project scope this session is bound to (absolute path). */
-  cwd: string
-  status: 'idle' | 'running' | 'awaiting-permission' | 'error'
-  updatedAt: number
-}
-
-export type ChatBlock =
-  | { kind: 'text'; text: string }
-  | { kind: 'thinking'; text: string }
-  | { kind: 'tool_use'; id: string; name: string; input: unknown }
-  | { kind: 'tool_result'; id: string; content: string; isError?: boolean }
-
-export type ChatMessage = {
-  id: string
-  role: 'user' | 'assistant'
-  blocks: ChatBlock[]
-  at: number
-}
-
-/** Fed to the stats card. Computed by us, not by the SDK. */
-export type Stats = {
-  range: 'all' | '30d' | '7d'
-  sessions: number
-  messages: number
-  totalTokens: number
-  activeDays: number
-  currentStreak: number
-  longestStreak: number
-  /** 0-23, or null when there is no data. */
-  peakHour: number | null
-  favoriteModel: string | null
-  /** One cell per day, oldest first. `count` drives the heatmap intensity. */
-  heatmap: { date: string; count: number }[]
-}
-
-export type PermissionMode = 'ask' | 'accept-edits' | 'bypass'
-
-// ---------------------------------------------------- agent corner (pane 3)
+// ---------------------------------------------------- agent corner
 
 /**
  * Everything the corner can show. `consent` items BLOCK until answered;
@@ -136,14 +92,6 @@ export const CH = {
   vaultGraph: 'vault:graph',
   vaultBacklinks: 'vault:backlinks',
 
-  claudeSessions: 'claude:sessions',
-  claudeNewSession: 'claude:new-session',
-  claudeSend: 'claude:send',
-  claudeInterrupt: 'claude:interrupt',
-  claudeHistory: 'claude:history',
-  claudeStats: 'claude:stats',
-  claudeSetPermissionMode: 'claude:set-permission-mode',
-
   cornerItems: 'corner:items',
   cornerDecide: 'corner:decide',
   cornerDismiss: 'corner:dismiss',
@@ -153,8 +101,6 @@ export const CH = {
 
 /** main -> renderer pushes. */
 export const EV = {
-  claudeMessage: 'claude:message',
-  claudeSessionUpdate: 'claude:session-update',
   cornerPush: 'corner:push',
   cornerResolved: 'corner:resolved',
   networkChanged: 'network:changed',
@@ -169,17 +115,6 @@ export type Api = {
     save(path: string, text: string, mtime: number): Promise<VaultNote>
     graph(): Promise<VaultGraph>
     backlinks(path: string): Promise<string[]>
-  }
-  claude: {
-    sessions(): Promise<Session[]>
-    newSession(cwd: string): Promise<Session>
-    send(id: SessionId, text: string): Promise<void>
-    interrupt(id: SessionId): Promise<void>
-    history(id: SessionId): Promise<ChatMessage[]>
-    stats(range: Stats['range']): Promise<Stats>
-    setPermissionMode(id: SessionId, mode: PermissionMode): Promise<void>
-    onMessage(cb: (id: SessionId, m: ChatMessage) => void): () => void
-    onSessionUpdate(cb: (s: Session) => void): () => void
   }
   corner: {
     items(): Promise<CornerItem[]>

@@ -2,7 +2,7 @@
  * SECTION 3 — Agent corner, main-process half.
  *
  * The ONE consent surface in the app. Everything consequential asks here:
- * Claude Code tool permissions, vault syncs over the network, anything that
+ * vault syncs over the network, anything that
  * leaves the machine.
  *
  * Design rules that are not up for negotiation:
@@ -51,8 +51,8 @@ function broadcast(channel: string, payload: unknown): void {
 const items: CornerItem[] = []
 
 /**
- * Called by other main-process modules (notably claude.ts permission callbacks
- * and any future sync path). Resolves true ONLY when a human clicks allow.
+ * Called by other main-process modules (notably the network sync path
+ * and anything added later). Resolves true ONLY when a human clicks allow.
  * Deny and dismiss both resolve false. Ignoring the prompt resolves nothing —
  * the caller waits, which is the safe direction.
  *

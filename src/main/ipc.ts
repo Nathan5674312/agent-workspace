@@ -1,7 +1,6 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { CH } from '../shared/ipc.js'
 import * as vault from './vault.js'
-import * as claude from './claude.js'
 import * as corner from './corner.js'
 import * as network from './network.js'
 
@@ -54,7 +53,6 @@ export function registerIpc(): void {
   handle(CH.vaultGraph, () => vault.graph())
   handle(CH.vaultBacklinks, (p: string) => vault.backlinks(p))
 
-  claude.register(handle)
   corner.register(handle)
   network.register(handle)
 }

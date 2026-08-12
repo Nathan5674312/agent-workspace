@@ -16,34 +16,35 @@ body {
   font: 13px/1.5 system-ui, sans-serif;
 }
 
-/* Claude Code down the whole left side. Obsidian top right. Corner bottom right. */
+/* The vault owns the whole window. The agent corner is not a pane in the flow —
+   it floats over the bottom-right, so it takes no layout space from the vault
+   and disappears entirely when there is nothing to ask. */
 .app {
-  display: grid;
-  grid-template-columns: minmax(280px, 22%) 1fr;
-  grid-template-rows: 1fr minmax(160px, 28%);
-  grid-template-areas:
-    'claude vault'
-    'claude corner';
   height: 100%;
 }
 
-.pane-claude {
-  grid-area: claude;
-}
 .pane-vault {
-  grid-area: vault;
-}
-.pane-corner {
-  grid-area: corner;
-}
-
-.pane-claude,
-.pane-vault,
-.pane-corner {
+  height: 100%;
   min-width: 0;
   min-height: 0;
   overflow: auto;
-  border: 1px solid;
+}
+
+/* Fixed, not absolute: it must sit over the vault regardless of what the vault
+   scrolls. `pointer-events: none` on the frame so the empty state cannot eat
+   clicks meant for the note underneath; the card itself re-enables them. */
+.pane-corner {
+  position: fixed;
+  right: 0;
+  bottom: 0;
+  max-width: min(480px, 40vw);
+  max-height: 60vh;
+  overflow: auto;
+  pointer-events: none;
+  z-index: 100;
+}
+.pane-corner > * {
+  pointer-events: auto;
 }
 
 /* Wide content scrolls inside its own pane; the window never scrolls. */

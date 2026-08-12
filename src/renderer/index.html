@@ -2,9 +2,21 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
+    <!--
+      base-uri and form-action do NOT fall back to default-src, so
+      `default-src 'none'` leaves both wide open. Without them, injected markup
+      can retarget every relative URL in the document with a <base> tag, or POST
+      to a remote host with a form submit — an exfiltration route around
+      `connect-src 'none'`. The app has no <form> and no <base>, so denying both
+      costs nothing.
+
+      style-src keeps 'unsafe-inline' for the dev server only: `electron-vite
+      dev` applies CSS by injecting <style> elements from JS. The production
+      build emits a linked stylesheet, which 'self' already covers.
+    -->
     <meta
       http-equiv="Content-Security-Policy"
-      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'none'"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; font-src 'self' data:; connect-src 'none'; base-uri 'none'; form-action 'none'"
     />
     <title>Agent Workspace</title>
   </head>

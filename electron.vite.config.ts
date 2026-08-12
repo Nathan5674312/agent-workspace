@@ -6,7 +6,7 @@ export default defineConfig({
   main: {
     build: {
       lib: { entry: resolve(__dirname, 'src/main/index.ts') },
-      rollupOptions: { external: ['electron', '@anthropic-ai/claude-agent-sdk'] },
+      rollupOptions: { external: ['electron'] },
     },
   },
   preload: {

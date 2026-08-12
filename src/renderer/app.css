@@ -1,0 +1,352 @@
+/**
+ * Pane styling. Every value comes from tokens.css.
+ *
+ * Rules this file is holding, from the Apple design guidance:
+ *   - Feedback is immediate and CONTINUOUS. `:active` responds on press, not
+ *     on release, and every control has a pressed state.
+ *   - Only `transform` and `opacity` are animated. Everything else lands on
+ *     the main thread and drops frames.
+ *   - Chrome is translucent and content passes under it. Never an opaque bar.
+ *   - Three independent accessibility signals are honoured at the bottom:
+ *     reduced-motion, reduced-transparency, and contrast. They are not the
+ *     same preference and cannot be collapsed into one.
+ */
+
+/* ── base ─────────────────────────────────────────────────── */
+
+body {
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-regular);
+  letter-spacing: var(--tracking-body);
+  line-height: var(--leading-body);
+  color: var(--label);
+  background: var(--bg-app);
+  -webkit-font-smoothing: antialiased;
+  font-optical-sizing: auto;
+}
+
+.app {
+  gap: 0;
+  background: var(--bg-app);
+}
+.pane-vault,
+.pane-corner {
+  border: none;
+  background: transparent;
+}
+
+::selection { background: var(--accent); color: var(--label-on-accent); }
+
+/* Overlay scrollbars — a scrollbar is chrome, and chrome does not take
+   layout space away from content. */
+* { scrollbar-width: thin; scrollbar-color: var(--label-quaternary) transparent; }
+*::-webkit-scrollbar { width: 9px; height: 9px; }
+*::-webkit-scrollbar-thumb {
+  background: var(--label-quaternary);
+  border-radius: 999px;
+  border: 2px solid transparent;
+  background-clip: content-box;
+}
+*::-webkit-scrollbar-thumb:hover { background: var(--label-tertiary); background-clip: content-box; }
+*::-webkit-scrollbar-track { background: transparent; }
+
+/* ── controls ─────────────────────────────────────────────── */
+
+button {
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--label-secondary);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  padding: var(--space-2) var(--space-3);
+  cursor: default;
+  /* transform + opacity only */
+  transition: background var(--duration-instant) var(--ease-out),
+    color var(--duration-instant) var(--ease-out),
+    transform var(--duration-instant) var(--ease-out);
+}
+button:hover:not(:disabled) { background: var(--fill-hover); color: var(--label); }
+/* Responds on press, and it is felt before the release. */
+button:active:not(:disabled) { background: var(--fill-active); transform: scale(0.97); }
+button:disabled { color: var(--label-quaternary); }
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+input, textarea, select {
+  font: inherit;
+  letter-spacing: inherit;
+  color: var(--label);
+  background: var(--material-light);
+  border: 1px solid transparent;
+  border-radius: var(--radius-md);
+  padding: var(--space-3) var(--space-4);
+  transition: background var(--duration-fast) var(--ease-out);
+}
+input::placeholder, textarea::placeholder { color: var(--label-tertiary); }
+input:focus, textarea:focus { outline: none; background: var(--bg-elevated); border-color: var(--accent); }
+
+a { color: var(--accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+
+h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
+
+/* Caps micro-labels carry POSITIVE tracking — the opposite of display type,
+   because capitals set tight are unreadable. */
+.artifact-title,
+.corner-queue-info {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--label-tertiary);
+}
+
+/* ══ PANE 2 — vault ═══════════════════════════════════════ */
+
+.vault-pane, .vault-layout { display: flex; height: 100%; min-height: 0; }
+.vault-layout { flex: 1; min-width: 0; }
+
+.vault-ribbon {
+  display: flex; flex-direction: column; gap: var(--space-1); flex: none;
+  padding: var(--space-3) var(--space-2);
+  background: var(--material-heavy);
+  backdrop-filter: var(--blur-regular);
+  -webkit-backdrop-filter: var(--blur-regular);
+  border-right: 1px solid var(--separator);
+}
+
+.vault-sidebar {
+  width: 15rem; flex: none;
+  display: flex; flex-direction: column; min-height: 0;
+  background: var(--material-heavy);
+  backdrop-filter: var(--blur-regular);
+  -webkit-backdrop-filter: var(--blur-regular);
+  border-right: 1px solid var(--separator);
+}
+.vault-explorer-header {
+  display: flex; align-items: center; gap: var(--space-1);
+  padding: var(--space-3);
+  border-bottom: 1px solid var(--separator);
+  flex-wrap: wrap;               /* was clipping "Sort" under the tab bar */
+}
+.vault-explorer-header select { padding: var(--space-1) var(--space-2); font-size: var(--text-xs); }
+.vault-folder-tree { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-3) var(--space-2); }
+
+.vault-tree-item {
+  display: flex; align-items: center; gap: var(--space-2);
+  width: 100%; text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--label-secondary);
+}
+.vault-tree-item:hover { background: var(--fill-hover); }
+.vault-tree-toggle { color: var(--label-quaternary); font-size: 8px; flex: none; width: 10px; }
+.vault-tree-label { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+/* Indent in em so it scales with user text size. */
+.vault-tree-node[data-depth="1"] { padding-left: 1em; }
+.vault-tree-node[data-depth="2"] { padding-left: 2em; }
+.vault-tree-node[data-depth="3"] { padding-left: 3em; }
+.vault-tree-note .vault-tree-label { color: var(--label-tertiary); }
+
+.vault-switcher {
+  display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-4);
+  border-top: 1px solid var(--separator);
+}
+.vault-switcher-name { flex: 1; min-width: 0; font-weight: var(--weight-medium); font-size: var(--text-sm); }
+
+.vault-main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.vault-tab-bar {
+  display: flex; align-items: center; gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+  background: var(--material-regular);
+  backdrop-filter: var(--blur-regular);
+  -webkit-backdrop-filter: var(--blur-regular);
+  border-bottom: 1px solid var(--separator);
+}
+.vault-tab { padding: var(--space-2) var(--space-4); border-radius: var(--radius-md); color: var(--label-tertiary); }
+.vault-tab--active { color: var(--label); background: var(--fill-selected); }
+
+.vault-note-header {
+  display: flex; align-items: center; gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border-bottom: 1px solid var(--separator);
+}
+.vault-note-nav { display: flex; gap: var(--space-1); }
+.vault-note-title { flex: 1; text-align: center; color: var(--label-secondary); font-weight: var(--weight-medium); }
+
+/* The canvas wrapper had no layout rule at all. Without it the header, the
+   view controls and the content box each sized to their own content, so
+   `flex: 1` on the content below did nothing and anything asking for
+   `height: 100%` — the graph — resolved against an auto-height parent and got
+   cut off. The whole column has to be a flex context for the content to claim
+   the leftover space. */
+.vault-main-canvas {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.vault-view-controls { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-3) var(--space-4); flex: none; }
+.vault-note-header { flex: none; }
+.vault-view-button { border-radius: var(--radius-md); }
+.vault-view-button.active { color: var(--label); background: var(--fill-selected); }
+
+.vault-view-content { flex: 1; min-height: 0; overflow: auto; padding: var(--space-5); }
+
+/* The graph fills its pane and does not scroll — panning is the navigation,
+   so a scrollbar here would fight the drag. */
+.vault-graph-view { position: relative; width: 100%; height: 100%; min-height: 0; overflow: hidden; }
+.vault-graph-canvas { display: block; width: 100%; height: 100%; touch-action: none; }
+.vault-graph-info {
+  position: absolute;
+  left: var(--space-4);
+  bottom: var(--space-4);
+  font-size: var(--text-xs);
+  color: var(--label-tertiary);
+  background: var(--material-regular);
+  backdrop-filter: var(--blur-regular);
+  -webkit-backdrop-filter: var(--blur-regular);
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+  pointer-events: none;
+}
+/* The graph view owns its whole pane, so the canvas parent must not pad it. */
+.vault-view-content:has(.vault-graph-view) { padding: 0; overflow: hidden; }
+.vault-editor-textarea {
+  width: 100%; min-height: 24rem; resize: vertical;
+  font-family: var(--font-mono);
+  line-height: var(--leading-body);
+  border-radius: var(--radius-lg);
+}
+.vault-open-error {
+  margin: var(--space-4);
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: rgba(255, 69, 58, 0.14);
+  color: var(--danger);
+  display: flex; justify-content: space-between; gap: var(--space-4);
+}
+
+/* ══ PANE 3 — agent corner ════════════════════════════════ */
+
+/* It floats over the vault now, so it carries its own surface — an unbacked
+   card over note text is unreadable. */
+.corner-empty { height: 0; }
+.corner-container {
+  margin: var(--space-5);
+  padding: var(--space-5);
+  background: var(--bg-elevated);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  overflow-y: auto;
+}
+
+.artifact-title, .consent-title { margin-bottom: var(--space-3); }
+.artifact-body, .artifact-keypoints {
+  background: var(--bg-sunken);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+  white-space: pre-wrap;
+  overflow-x: auto;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+.artifact-file { color: var(--label-tertiary); font-size: var(--text-sm); }
+.artifact-actions, .consent-actions { display: flex; gap: var(--space-3); }
+
+/* A consent is the one thing here allowed to raise its voice. */
+.consent-item {
+  background: var(--bg-elevated);
+  border-radius: var(--radius-lg);
+  padding: var(--space-5);
+  box-shadow: var(--shadow-md);
+}
+.consent-detail { margin-bottom: var(--space-4); }
+
+/* The network warning must READ AS A WARNING WITH NO COLOUR AT ALL — its own
+   block, its own rule, and the word itself. Colour is an enhancement, and
+   prefers-contrast / colour-blind users never receive it. */
+.consent-warning {
+  border-left: 3px solid var(--warning);
+  background: rgba(255, 159, 10, 0.12);
+  border-radius: var(--radius-md);
+  padding: var(--space-4);
+  margin-bottom: var(--space-4);
+}
+.consent-warning::before {
+  content: "Warning — ";
+  font-weight: var(--weight-semibold);
+}
+.consent-network { font-size: var(--text-sm); color: var(--label-tertiary); }
+.consent-allow { background: var(--accent); color: var(--label-on-accent); border-radius: var(--radius-md); padding: var(--space-3) var(--space-5); }
+.consent-allow:hover:not(:disabled) { background: var(--accent-pressed); color: var(--label-on-accent); }
+.consent-deny { background: var(--material-light); border-radius: var(--radius-md); padding: var(--space-3) var(--space-5); }
+.corner-queue-info { margin-top: var(--space-4); }
+
+/* ── crash boundary ───────────────────────────────────────── */
+
+.pane-crash { padding: var(--space-6); color: var(--label-secondary); }
+.pane-crash h2 { font-size: var(--text-md); color: var(--danger); margin-bottom: var(--space-3); }
+.pane-crash-message {
+  font-family: var(--font-mono); font-size: var(--text-sm);
+  background: var(--bg-sunken); border-radius: var(--radius-md);
+  padding: var(--space-4); margin: var(--space-4) 0; overflow-x: auto;
+}
+
+/* ══ accessibility ════════════════════════════════════════
+   Three INDEPENDENT signals. They are different preferences and a user can
+   set any one without the others. */
+
+/* Motion off means the end state without the travel — never "nothing
+   happens". Content that only appears via animation would vanish entirely. */
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after {
+    transition-duration: 1ms !important;
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+  }
+  button:active:not(:disabled),
+  .claude-session-item:active { transform: none; }
+  /* The drift and the sweep are ambient motion with no informational
+     content, so they simply stop. The text stays fully legible because the
+     sweep is replaced by a flat label colour rather than being left mid-
+     gradient — an animation-dependent element must never vanish. */
+  .claude-greeting::before { animation: none; }
+  .shining-text {
+    animation: none;
+    background: none;
+    -webkit-background-clip: initial;
+    background-clip: initial;
+    color: var(--label-secondary);
+  }
+}
+
+/* Transparency off means frosted goes solid — raise opacity, drop the blur. */
+@media (prefers-reduced-transparency: reduce) {
+  .claude-top-rail, .claude-composer, .claude-account-row,
+  .vault-ribbon, .vault-sidebar, .vault-tab-bar {
+    background: var(--bg-elevated);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+
+/* More contrast means real borders and near-solid grounds. */
+@media (prefers-contrast: more) {
+  :root {
+    --label-secondary: rgba(235, 235, 245, 0.85);
+    --label-tertiary: rgba(235, 235, 245, 0.7);
+    --separator: rgba(255, 255, 255, 0.3);
+  }
+  button, input, textarea, select { border: 1px solid var(--separator); }
+  .claude-session-item--active, .vault-tab--active { outline: 1px solid var(--label-secondary); }
+}

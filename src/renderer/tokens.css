@@ -1,0 +1,124 @@
+/**
+ * Design tokens. THE ONLY FILE IN THE RENDERER WITH VALUES IN IT.
+ *
+ * Apple-idiom dark. Three things drive it:
+ *   1. Materials, not panels. Chrome is translucent and content passes under it.
+ *   2. Type hierarchy comes from weight + size + leading as a SET, and tracking
+ *      is size-specific — tight on display, neutral on body. Never one value.
+ *   3. Spacing is in rem so a larger system text size scales the layout with it
+ *      instead of breaking it.
+ */
+
+:root {
+  /* ── materials ────────────────────────────────────────────
+     Chrome is rgba + backdrop-filter, never an opaque bar. Content scrolls
+     UNDER it. Weight encodes hierarchy: heavier = structural (sidebars),
+     lighter = interactive (controls). Never stack two light materials. */
+  --bg-app: #1c1c1e;
+  --bg-elevated: #2c2c2e;
+  --bg-sunken: #141416;
+
+  --material-heavy: rgba(28, 28, 30, 0.82); /* sidebars, structural */
+  --material-regular: rgba(44, 44, 46, 0.68); /* toolbars, tab bars */
+  --material-light: rgba(255, 255, 255, 0.06); /* controls, chips */
+
+  --blur-regular: blur(20px) saturate(180%);
+  --blur-heavy: blur(30px) saturate(180%);
+
+  --fill-hover: rgba(255, 255, 255, 0.07);
+  --fill-active: rgba(255, 255, 255, 0.12);
+  --fill-selected: rgba(255, 255, 255, 0.1);
+
+  /* ── labels ───────────────────────────────────────────────
+     Apple's label ramp: opacity, not different greys, so labels stay correct
+     over any material. */
+  --label: #ffffff;
+  --label-secondary: rgba(235, 235, 245, 0.6);
+  --label-tertiary: rgba(235, 235, 245, 0.3);
+  --label-quaternary: rgba(235, 235, 245, 0.18);
+  --label-on-accent: #ffffff;
+
+  /* ── separators ───────────────────────────────────────────
+     A separator is a hairline, not a border. The bright top edge on a
+     translucent surface is what makes it read as glass. */
+  --separator: rgba(255, 255, 255, 0.08);
+  --separator-opaque: #38383a;
+  --edge-highlight: rgba(255, 255, 255, 0.14);
+
+  /* ── meaning ──────────────────────────────────────────────
+     System-blue accent. Reserved for the interactive and the selected —
+     never decorative, or it stops meaning anything. */
+  --accent: #0a84ff;
+  --accent-pressed: #0060df;
+  --warning: #ff9f0a;
+  --danger: #ff453a;
+  --success: #30d158;
+
+  /* ── type ─────────────────────────────────────────────────
+     System font first: it ships optical sizing and real tracking tables that
+     no webfont substitute gives you for free. */
+  --font-ui: -apple-system, BlinkMacSystemFont, "SF Pro Text",
+    "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+  --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono",
+    Consolas, monospace;
+
+  --text-xs: 0.6875rem;
+  --text-sm: 0.75rem;
+  --text-base: 0.8125rem;
+  --text-md: 0.9375rem;
+  --text-lg: 1.3125rem;
+  --text-xl: 1.75rem;
+
+  --weight-regular: 400;
+  --weight-medium: 500;
+  --weight-semibold: 600;
+
+  /* Tracking is SIZE-SPECIFIC. Large type reads too loose at default
+     spacing; body type does not. One fixed value is always wrong somewhere. */
+  --tracking-display: -0.022em;
+  --tracking-title: -0.014em;
+  --tracking-body: 0em;
+  --tracking-caps: 0.06em;
+
+  /* Leading runs inversely to size. */
+  --leading-display: 1.08;
+  --leading-title: 1.25;
+  --leading-body: 1.47;
+
+  /* ── rhythm — rem so user text size scales layout, not breaks it ── */
+  --space-1: 0.125rem;
+  --space-2: 0.25rem;
+  --space-3: 0.5rem;
+  --space-4: 0.75rem;
+  --space-5: 1rem;
+  --space-6: 1.5rem;
+
+  /* ── shape ────────────────────────────────────────────────
+     Generous radii. Small controls stay tight so they do not read as pills. */
+  --radius-sm: 5px;
+  --radius-md: 8px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+
+  /* ── depth — bigger surfaces read thicker: more blur, deeper shadow ── */
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);
+  --shadow-lg: 0 12px 40px rgba(0, 0, 0, 0.55);
+
+  /* ── motion ───────────────────────────────────────────────
+     Critically damped: fast, no overshoot. Bounce is reserved for motion the
+     user physically threw, and nothing here is gesture-driven yet.
+     `--ease-spring` approximates damping 1.0 / response ~0.35. */
+  --duration-instant: 100ms;
+  --duration-fast: 200ms;
+  --duration-normal: 350ms;
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --ease-spring: cubic-bezier(0.32, 0.72, 0, 1);
+  /* Reversible transitions mirror their easing. */
+  --ease-in: cubic-bezier(0.7, 0, 0.84, 0);
+
+  /* ── icon ─────────────────────────────────────────────────── */
+  --icon-sm: 13px;
+  --icon-md: 15px;
+  --icon-lg: 19px;
+}

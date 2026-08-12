@@ -29,18 +29,6 @@ const api: Api = {
     graph: () => ipcRenderer.invoke(CH.vaultGraph),
     backlinks: (path) => ipcRenderer.invoke(CH.vaultBacklinks, path),
   },
-  claude: {
-    sessions: () => ipcRenderer.invoke(CH.claudeSessions),
-    newSession: (cwd) => ipcRenderer.invoke(CH.claudeNewSession, cwd),
-    send: (id, text) => ipcRenderer.invoke(CH.claudeSend, id, text),
-    interrupt: (id) => ipcRenderer.invoke(CH.claudeInterrupt, id),
-    history: (id) => ipcRenderer.invoke(CH.claudeHistory, id),
-    stats: (range) => ipcRenderer.invoke(CH.claudeStats, range),
-    setPermissionMode: (id, mode) =>
-      ipcRenderer.invoke(CH.claudeSetPermissionMode, id, mode),
-    onMessage: (cb) => on(EV.claudeMessage, cb),
-    onSessionUpdate: (cb) => on(EV.claudeSessionUpdate, cb),
-  },
   corner: {
     items: () => ipcRenderer.invoke(CH.cornerItems),
     decide: (d) => ipcRenderer.invoke(CH.cornerDecide, d),

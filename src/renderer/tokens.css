@@ -1,58 +1,88 @@
 /**
  * Design tokens. THE ONLY FILE IN THE RENDERER WITH VALUES IN IT.
  *
- * Apple-idiom dark. Three things drive it:
+ * Palette: the owner-supplied warm earthy neutrals, dark-first and MONOCHROME.
+ * Source of truth, including the measured contrast ratios quoted below:
+ * `Universal Vault/Business/Claude Code Extension/07 - Design - Color.md`.
+ * Ratios were measured with palette.py, not estimated. Do not adjust a value
+ * here without re-reading that note — several pairs in this palette are
+ * unusable together and the note names them.
+ *
+ *   Cream #F0CBA5 · Sand #D8B493 · Tan #BA9B7D · Clay #987D65 · Taupe #806854
+ *   Umber #645040 · Coffee #433428 · Chocolate #422713 · Bistre #26160B · Ink #160C08
+ *
+ * Four things drive the system:
  *   1. Materials, not panels. Chrome is translucent and content passes under it.
- *   2. Type hierarchy comes from weight + size + leading as a SET, and tracking
- *      is size-specific — tight on display, neutral on body. Never one value.
- *   3. Spacing is in rem so a larger system text size scales the layout with it
- *      instead of breaking it.
+ *   2. Labels are SOLID palette colours, not an opacity ramp. Apple's ramp is
+ *      opacity — `rgba(235,235,245,0.6)` — which makes effective contrast depend
+ *      on whatever happens to sit behind it. This palette's ratios were measured
+ *      against Ink, so opacity would throw the measurement away. Solid keeps it.
+ *      Surfaces stay translucent; only the ink is solid.
+ *   3. There is NO accent hue (note §4b). Emphasis comes from luminance, weight
+ *      and space. That is harder than reaching for blue and it is the thing to
+ *      watch in review.
+ *   4. Spacing is in rem so a larger system text size scales the layout with it.
  */
 
 :root {
   /* ── materials ────────────────────────────────────────────
      Chrome is rgba + backdrop-filter, never an opaque bar. Content scrolls
      UNDER it. Weight encodes hierarchy: heavier = structural (sidebars),
-     lighter = interactive (controls). Never stack two light materials. */
-  --bg-app: #1c1c1e;
-  --bg-elevated: #2c2c2e;
-  --bg-sunken: #141416;
+     lighter = interactive (controls). Never stack two light materials.
 
-  --material-heavy: rgba(28, 28, 30, 0.82); /* sidebars, structural */
-  --material-regular: rgba(44, 44, 46, 0.68); /* toolbars, tab bars */
-  --material-light: rgba(255, 255, 255, 0.06); /* controls, chips */
+     The four darks sit within 1.1–1.6:1 of each other, so these surfaces are
+     deliberately near-indistinguishable. Separation is the job of the hairline
+     separators and the light labels, never of the ground itself — the note is
+     explicit that stacking darks for contrast is how text vanishes. */
+  --bg-app: #160c08; /* Ink */
+  --bg-elevated: #26160b; /* Bistre */
+  --bg-sunken: #0f0805; /* Ink, one step down. Decorative separation only. */
+
+  --material-heavy: rgba(22, 12, 8, 0.82); /* Ink — sidebars, structural */
+  --material-regular: rgba(38, 22, 11, 0.68); /* Bistre — toolbars, tab bars */
+  --material-light: rgba(240, 203, 165, 0.06); /* Cream film — controls, chips */
 
   --blur-regular: blur(20px) saturate(180%);
   --blur-heavy: blur(30px) saturate(180%);
 
-  --fill-hover: rgba(255, 255, 255, 0.07);
-  --fill-active: rgba(255, 255, 255, 0.12);
-  --fill-selected: rgba(255, 255, 255, 0.1);
+  /* Warm films, not white. A white overlay on a brown ground greys it out. */
+  --fill-hover: rgba(240, 203, 165, 0.07);
+  --fill-active: rgba(240, 203, 165, 0.12);
+  --fill-selected: rgba(240, 203, 165, 0.1);
 
   /* ── labels ───────────────────────────────────────────────
-     Apple's label ramp: opacity, not different greys, so labels stay correct
-     over any material. */
-  --label: #ffffff;
-  --label-secondary: rgba(235, 235, 245, 0.6);
-  --label-tertiary: rgba(235, 235, 245, 0.3);
-  --label-quaternary: rgba(235, 235, 245, 0.18);
-  --label-on-accent: #ffffff;
+     Solid palette colours. Ratios are against Ink, from the note's §2 dark
+     table. Body text clears AAA in this palette, which the previous cyan
+     direction did not. */
+  --label: #d8b493; /* Sand   — 10.0:1 AAA */
+  --label-secondary: #ba9b7d; /* Tan    —  7.4:1 AAA */
+  --label-tertiary: #987d65; /* Clay   —  5.0:1 AA  */
+  --label-quaternary: #806854; /* Taupe  — decorative ONLY, never body text (§3) */
+  --label-on-accent: #160c08; /* Ink — the accent is light, so its ink is dark */
 
   /* ── separators ───────────────────────────────────────────
      A separator is a hairline, not a border. The bright top edge on a
      translucent surface is what makes it read as glass. */
-  --separator: rgba(255, 255, 255, 0.08);
-  --separator-opaque: #38383a;
-  --edge-highlight: rgba(255, 255, 255, 0.14);
+  --separator: rgba(240, 203, 165, 0.08);
+  --separator-opaque: #433428; /* Coffee — the note's border value */
+  --edge-highlight: rgba(240, 203, 165, 0.14);
 
   /* ── meaning ──────────────────────────────────────────────
-     System-blue accent. Reserved for the interactive and the selected —
-     never decorative, or it stops meaning anything. */
-  --accent: #0a84ff;
-  --accent-pressed: #0060df;
-  --warning: #ff9f0a;
-  --danger: #ff453a;
-  --success: #30d158;
+     MONOCHROME (note §4b). The accent is the brightest thing in the palette
+     rather than a different hue, so "interactive" reads as luminance. Reserved
+     for the interactive and the selected — never decorative. */
+  --accent: #f0cba5; /* Cream */
+  --accent-pressed: #d8b493; /* Sand — recedes under the press */
+
+  /* PROPOSED, not owner-supplied. The note's §5 lists semantic colour as still
+     open ("hard to derive from browns"), so these are placeholders warmed into
+     the family: Apple's #ff453a / #ff9f0a / #30d158 read as alien against these
+     browns. Nothing load-bearing depends on them — the public-network warning
+     is distinguishable by structure and wording with no colour at all (§4), and
+     there is a test holding that. Replace when you decide. */
+  --warning: #d98e3c;
+  --danger: #c4552f;
+  --success: #8a9a5b;
 
   /* ── type ─────────────────────────────────────────────────
      System font first: it ships optical sizing and real tracking tables that
@@ -130,4 +160,24 @@
   --icon-sm: 13px;
   --icon-md: 15px;
   --icon-lg: 19px;
+
+  /* ── canvas artwork ───────────────────────────────────────
+     A single image sitting behind the main canvas as TEXTURE, not decoration.
+     It should be almost invisible — noticed on the second look, never the
+     first, and never in competition with a word on screen.
+
+     This is a SLOT. Empty by default, and `none` is a valid background-image
+     so nothing breaks while it is unfilled. To fill it, drop the file at
+     src/renderer/assets/canvas-art.jpg and set:
+
+         --canvas-art: url("./assets/canvas-art.jpg");
+
+     The scrim in app.css does the taming, so the source image does NOT need
+     to be pre-darkened — hand it the original at full brightness.
+
+     Opacity is the one knob to turn. Above ~0.20 the artwork starts competing
+     with body text, and the palette's measured contrast ratios are against a
+     flat Ink ground, so anything that lightens that ground erodes them. */
+  --canvas-art: none;
+  --canvas-art-opacity: 0.16;
 }

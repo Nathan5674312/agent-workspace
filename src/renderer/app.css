@@ -165,7 +165,71 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
 }
 .vault-switcher-name { flex: 1; min-width: 0; font-weight: var(--weight-medium); font-size: var(--text-sm); }
 
-.vault-main { flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0; }
+.vault-main {
+  flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0;
+  /* Owns the artwork layer below. `isolate` keeps the z-index: -1 child inside
+     this stacking context — without it the layer escapes and paints behind the
+     window ground, which is to say nowhere. */
+  position: relative;
+  isolation: isolate;
+}
+
+/**
+ * The canvas artwork. Texture behind the work, never a picture on a wall.
+ *
+ * Deliberately NOT behind the ribbon or the explorer: those are structural
+ * chrome and stay flat Ink, so the image reads as depth in the one region the
+ * eye rests in. The tab bar sits over it on a translucent material, so a hint
+ * of the artwork passes under the glass — which is the whole reason the
+ * material is translucent in the first place.
+ *
+ * Three treatments stacked, in this order, and each earns its place:
+ *
+ *   SCRIM — two Ink stops, lighter at the top and near-opaque at the bottom.
+ *   Content density grows downward (editor body, links, backlinks), so the
+ *   artwork is allowed to breathe where the screen is empty and is smothered
+ *   where the words are. This is also what lets an un-retouched photo work:
+ *   the scrim, not the source file, decides how dark it lands.
+ *
+ *   saturate(0.35) — pulls any palette toward neutral so it cannot fight ten
+ *   carefully measured browns. Not grayscale(1): keeping a trace of the
+ *   original hue is what stops it looking like a stock texture.
+ *
+ *   opacity — the single knob worth turning. See tokens.css.
+ */
+.vault-main::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  pointer-events: none;
+  background-image:
+    linear-gradient(
+      to bottom,
+      rgba(22, 12, 8, 0.55),
+      rgba(22, 12, 8, 0.86) 55%,
+      rgba(22, 12, 8, 0.97)
+    ),
+    var(--canvas-art);
+  background-size: cover, cover;
+  background-position: center, center;
+  background-repeat: no-repeat, no-repeat;
+  opacity: var(--canvas-art-opacity);
+  filter: saturate(0.35);
+}
+
+/* The scrim is a fixed gradient, so it cannot know where the text actually is.
+   Reduced transparency means someone has told the OS that layered surfaces are
+   a problem for them; an image under their text is exactly that problem. */
+@media (prefers-reduced-transparency: reduce) {
+  .vault-main::before { background-image: none; }
+}
+
+/* Same reasoning as reduced-transparency, one step firmer: a contrast request
+   is a request for the measured ratios, and those were measured on flat Ink. */
+@media (prefers-contrast: more) {
+  .vault-main::before { background-image: none; }
+}
 .vault-tab-bar {
   display: flex; align-items: center; gap: var(--space-1);
   padding: var(--space-2) var(--space-3);
@@ -281,7 +345,7 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   margin: var(--space-4);
   padding: var(--space-4);
   border-radius: var(--radius-md);
-  background: rgba(255, 69, 58, 0.14);
+  background: rgba(196, 85, 47, 0.16); /* --danger at low alpha, warmed to match */
   color: var(--danger);
   display: flex; justify-content: space-between; gap: var(--space-4);
 }
@@ -359,7 +423,7 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
    prefers-contrast / colour-blind users never receive it. */
 .consent-warning {
   border-left: 3px solid var(--warning);
-  background: rgba(255, 159, 10, 0.12);
+  background: rgba(217, 142, 60, 0.14); /* --warning at low alpha, warmed to match */
   border-radius: var(--radius-md);
   padding: var(--space-4);
   margin-bottom: var(--space-4);

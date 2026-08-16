@@ -17,6 +17,7 @@ import './fixtures/ts-hooks.mjs'
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { mkdtempSync } from 'node:fs'
+import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -25,6 +26,27 @@ import { join } from 'node:path'
 process.env.TEST_USER_DATA = mkdtempSync(join(tmpdir(), 'aw-s4-'))
 
 import * as vault from '../src/main/vault.ts'
+
+/**
+ * A vault on disk, for the `list()` and `graph()` tests below.
+ *
+ * Those used to be driven entirely by the mock HTTP server, because that is
+ * where the note text lived. They read the filesystem now, so a test that sets
+ * only `_setBaseForTest` leaves VAULT_DIR pointing at whatever ran last — or,
+ * on the first such test, at the REAL Universal Vault. That is how these went
+ * from milliseconds to hundreds of milliseconds each and asserted against the
+ * user's actual notes.
+ */
+async function scratchVault(notes) {
+  const dir = await mkdtemp(join(tmpdir(), 'aw-s4-vault-'))
+  for (const [rel, text] of Object.entries(notes)) {
+    const abs = join(dir, rel)
+    await mkdir(join(abs, '..'), { recursive: true })
+    await writeFile(abs, text, 'utf-8')
+  }
+  vault._setVaultDirForTest(dir)
+  return dir
+}
 
 // ---------------------------------------------------------------------------
 // A. THE LOST-UPDATE GUARD  (the live data-loss bug, and its fix)
@@ -139,11 +161,15 @@ test('lost-update guard: mtime is validated before anything is written', async (
 test('list() rows carry mtime 0 and are not a version', async () => {
   const mock = await startPythonish({ 'Home.md': { text: 'disk', mtime: 5_000 } })
   vault._setBaseForTest(mock.url)
+  await scratchVault({ 'Home.md': 'disk' })
 
-  // GET /notes carries no mtime (server.py:392-399 builds the row without one)
-  // and vault.ts defaults it to 0. LATENT, not live: no current caller routes a
-  // list row into save(). If one ever does, it 409s forever rather than losing
-  // data — which is why 0 is left permitted by requireMtime().
+  // The index carries no mtime. It never did — GET /notes did not send one and
+  // vault.ts defaulted it to 0 — and now it is a deliberate hole rather than an
+  // accident of the wire format: `save()`'s guard compares a NANOSECOND value
+  // that does not survive a JS number, so the scan does not pretend to supply
+  // one. LATENT, not live: no current caller routes a list row into save(). If
+  // one ever does it 409s forever rather than losing data, which is why 0 is
+  // left permitted by requireMtime().
   const [row] = await vault.list()
   assert.equal(row.mtime, 0)
   await assert.rejects(
@@ -365,41 +391,22 @@ test('scrub() keeps absolute paths out of renderer-visible errors', async (t) =>
 // ---------------------------------------------------------------------------
 
 test('hostile titles and paths do not break or pollute anything', async () => {
-  const mock = await startPythonish({
-    'Home.md': { text: 'plain', mtime: 1 },
-    '__proto__.md': { text: '[[Home]]', mtime: 2 },
-    '__proto__/constructor/prototype.md': { text: '[[__proto__]]', mtime: 3 },
-    'Regex (.*)+$ [meta].md': { text: '[[Home]]', mtime: 4 },
-    '<script>alert(1)</script>.md': { text: '[[Home]]', mtime: 5 },
-    'Unicode \u202Egnp.md': { text: '[[Home]]', mtime: 6 },
-  })
-  vault._setBaseForTest(mock.url)
+  // ONE fixture, on disk. This used to run list() and graph() against a mock
+  // note set of six while tree() walked a scratch directory of four: two
+  // different vaults inside a single test, survivable only while those
+  // functions read different sources. They read the same source now.
+  const hostile = {
+    'Home.md': 'plain',
+    '__proto__.md': '[[Home]]',
+    '__proto__/constructor/prototype.md': '[[__proto__]]',
+    'constructor.md': '[[Home]]',
+    'Regex (dot-star)+$ [meta].md': '[[Home]]',
+  }
+  await scratchVault(hostile)
+  const count = Object.keys(hostile).length
 
   const notes = await vault.list()
-  assert.equal(notes.length, 6)
-
-  // tree() reads real dirents now, so it is exercised against a scratch dir.
-  // The names here are the ones that are BOTH adversarial and legal on Windows
-  // — `<script>`, `*`, `?` and friends cannot exist as filenames at all, so the
-  // OS already forecloses them; prototype-pollution keys do not.
-  const { mkdtemp, mkdir, writeFile } = await import('node:fs/promises')
-  const { tmpdir } = await import('node:os')
-  const { join } = await import('node:path')
-  const scratch = await mkdtemp(join(tmpdir(), 'vault-hostile-'))
-  // NB: `Regex (.*)+$ [meta].md` was tried here and is impossible — `*` is not
-  // a legal Windows filename character, so the OS refuses it before any of our
-  // code runs. That is the boundary this test is documenting.
-  const hostile = [
-    '__proto__.md',
-    '__proto__/constructor/prototype.md',
-    'constructor.md',
-    'Regex (dot-star)+$ [meta].md',
-  ]
-  for (const rel of hostile) {
-    await mkdir(join(scratch, rel, '..'), { recursive: true })
-    await writeFile(join(scratch, rel), '# x\n', 'utf-8')
-  }
-  vault._setVaultDirForTest(scratch)
+  assert.equal(notes.length, count)
 
   const root = await vault.tree()
   const paths = []
@@ -407,15 +414,17 @@ test('hostile titles and paths do not break or pollute anything', async () => {
     if (n.kind === 'note') paths.push(n.path)
     n.children?.forEach(walk)
   })(root)
-  assert.equal(paths.length, hostile.length, 'every note survives tree()')
+  assert.equal(paths.length, count, 'every note survives tree()')
   assert.ok(paths.includes('__proto__/constructor/prototype.md'))
   // The tree is built from plain objects; a `__proto__` path segment must not
   // have reached Object.prototype on the way through.
   assert.equal({}.polluted, undefined, 'Object.prototype polluted by tree()')
 
   const g = await vault.graph()
-  assert.equal(g.nodes.length, 6)
+  assert.equal(g.nodes.length, count)
   // '[[__proto__]]' must resolve through the title Map, not Object.prototype.
+  // The Map is what makes that safe; a plain object keyed the same way returns
+  // Object.prototype for this lookup instead of a miss.
   assert.ok(
     g.links.some(
       (l) => l.from === '__proto__/constructor/prototype.md' && l.to === '__proto__.md',
@@ -426,9 +435,8 @@ test('hostile titles and paths do not break or pollute anything', async () => {
   assert.equal(Object.prototype.kind, undefined)
   assert.equal(Object.prototype.children, undefined)
   assert.equal(Array.prototype.name, undefined)
-
-  await mock.close()
 })
+
 
 // ---------------------------------------------------------------------------
 // F. LARGE RESPONSES
@@ -470,9 +478,12 @@ test('a server that accepts the connection and never answers times out', async (
   const mock = await startPythonish({}, { respond: () => 'hang' })
   vault._setBaseForTest(mock.url)
 
+  // Probed through read(), not list(). list() no longer opens a socket, so it
+  // can neither hang nor time out — proving the timeout still needs a call that
+  // is actually on the wire.
   const started = Date.now()
   await assert.rejects(
-    () => vault.list(),
+    () => vault.read('Home.md'),
     (e) => e instanceof vault.VaultUnavailable,
   )
   const took = Date.now() - started
@@ -487,122 +498,107 @@ test('a server that accepts the connection and never answers times out', async (
 // H. graph() CONCURRENCY POOL
 // ---------------------------------------------------------------------------
 
-test('graph() reads every note exactly once, bounded to 8 in flight', async () => {
-  const notes = { 'Home.md': { text: 'hub', mtime: 1 } }
-  for (let i = 0; i < 24; i++) {
-    notes[`N${i}.md`] = { text: '[[Home]] and [[Home]] again', mtime: i + 2 }
-  }
-  const reads = []
-  const mock = await startPythonish(notes, { inflight: 0, noteDelayMs: 5, reads })
-  vault._setBaseForTest(mock.url)
+test('graph() reads every note exactly once', async () => {
+  const notes = { 'Home.md': 'hub' }
+  for (let i = 0; i < 24; i++) notes[`N${i}.md`] = '[[Home]] and [[Home]] again'
+  await scratchVault(notes)
 
   const g = await vault.graph()
 
   assert.equal(g.nodes.length, 25)
-  assert.ok(mock.state.peak <= 8, `peak in-flight was ${mock.state.peak}, expected <= 8`)
-  assert.ok(mock.state.peak > 1, `pool never overlapped (peak ${mock.state.peak})`)
+  assert.equal(new Set(g.nodes).size, 25, 'a note appeared in the graph twice')
 
-  // Exactly-once is now measured at the WIRE, not inferred from how many edges
-  // came back. It used to be inferred: two [[Home]] links per note produced two
-  // identical edges, and a note read twice produced four, so the edge count was
-  // the signal. graph() dedups edges by resolved target — one note linking one
-  // target is one relationship however many times it says so — which silently
-  // destroyed that signal. Counting the GET /note requests tests the property
-  // the name claims and cannot be fooled by a change to edge semantics.
-  assert.equal(reads.length, 25, `expected 25 note reads, got ${reads.length}`)
-  assert.equal(new Set(reads).size, 25, 'a note was read more than once')
-
-  // Two [[Home]] mentions per note collapse to one edge each.
+  // Exactly-once used to be measured at the WIRE, counting GET /note requests
+  // against a bounded pool of 8. There is no wire now — the scan reads each
+  // file once and hands the text straight to the resolver — so the property is
+  // asserted where it is still observable: no duplicate nodes, and one edge per
+  // linking note however many times that note says [[Home]].
   assert.equal(g.links.length, 24)
   const sources = new Set(g.links.map((l) => l.from))
   assert.equal(sources.size, 24, 'every linking note contributed')
-
-  await mock.close()
 })
 
 test('graph() emits one edge per relationship, not per mention', async () => {
-  const mock = await startPythonish({
-    'Home.md': { text: 'hub', mtime: 1 },
+  await scratchVault({
+    'Home.md': 'hub',
     // Same target named three different ways, plus a plain repeat. All four are
     // ONE relationship. Before the dedup a note repeating a link 20 000 times
     // produced 20 000 edges, and GraphView sizes nodes by endpoint count.
-    'A.md': { text: '[[Home]] [[Home]] [[home]] [[Home.md]]', mtime: 2 },
+    'A.md': '[[Home]] [[Home]] [[home]] [[Home.md]]',
   })
-  vault._setBaseForTest(mock.url)
 
   const g = await vault.graph()
   assert.deepEqual(g.links, [{ from: 'A.md', to: 'Home.md' }])
-
-  await mock.close()
 })
 
 test('graph() ignores an unterminated [[', async () => {
-  const mock = await startPythonish({
-    'Home.md': { text: 'hub', mtime: 1 },
+  await scratchVault({
+    'Home.md': 'hub',
     // A note documenting the syntax. The old link regex had no closing `]]`, so
     // this drew an edge the editor's Links list never showed.
-    'Doc.md': { text: 'write a link as [[Home and close it with brackets', mtime: 2 },
+    'Doc.md': 'write a link as [[Home and close it with brackets',
   })
-  vault._setBaseForTest(mock.url)
 
   const g = await vault.graph()
   assert.deepEqual(g.links, [])
-
-  await mock.close()
 })
 
 test('graph() memo is shared by concurrent callers and dropped by save()', async () => {
-  const reads = []
-  const mock = await startPythonish(
-    { 'Home.md': { text: '[[Home]]', mtime: 1 }, 'A.md': { text: '[[Home]]', mtime: 2 } },
-    { reads },
-  )
+  const { writeFile: write } = await import('node:fs/promises')
+  const mock = await startPythonish({ 'A.md': { text: '[[Home]]', mtime: 2 } })
   vault._setBaseForTest(mock.url)
+  const dir = await scratchVault({ 'Home.md': '[[Home]]', 'A.md': '[[Home]]' })
 
   // Overlapping callers (the graph tab and a backlinks lookup) share one scan.
   await Promise.all([vault.graph(), vault.graph(), vault.backlinks('Home.md')])
-  assert.equal(reads.length, 2, `overlapping calls rescanned: ${reads.length} reads`)
+  assert.deepEqual((await vault.graph()).links, [{ from: 'A.md', to: 'Home.md' }])
 
-  // A later call inside the TTL is served from the memo.
-  await vault.graph()
-  assert.equal(reads.length, 2, 'a cached call went back to the server')
+  // Staleness is now measured against the DISK rather than a request count:
+  // change a file behind the memo's back and the memo must not notice.
+  await write(join(dir, 'A.md'), 'no links any more', 'utf-8')
+  assert.deepEqual(
+    (await vault.graph()).links,
+    [{ from: 'A.md', to: 'Home.md' }],
+    'a cached call went back to disk inside the TTL',
+  )
 
   // Our own write invalidates it immediately — no waiting out the TTL.
-  await vault.save('A.md', '[[Home]] changed', mock.state.notes['A.md'].mtime)
-  await vault.graph()
-  assert.equal(reads.length, 4, 'save() did not invalidate the graph memo')
+  await vault.save('A.md', 'no links any more', mock.state.notes['A.md'].mtime)
+  assert.deepEqual((await vault.graph()).links, [], 'save() did not invalidate the memo')
 
   await mock.close()
 })
 
 test('graph() on an empty vault resolves rather than deadlocking', async () => {
-  const mock = await startPythonish({})
-  vault._setBaseForTest(mock.url)
+  await scratchVault({})
   // Math.min(LIMIT, 0) spawns zero workers; Promise.all([]) must still settle.
   const g = await vault.graph()
   assert.deepEqual(g, { nodes: [], links: [] })
-  await mock.close()
 })
 
-test('graph() survives notes that fail to read', async () => {
-  const mock = await startPythonish({
-    'Home.md': { text: 'hub', mtime: 1 },
-    'A.md': { text: '[[Home]]', mtime: 2 },
-    'B.md': { text: '[[Home]]', mtime: 3 },
+/**
+ * Was 'graph() survives notes that fail to read', which injected a 500 on
+ * GET /note?path=A.md. There is no request to fail now, and the disk analogue —
+ * a file deleted in the window between the directory walk and the read — is a
+ * race with no deterministic trigger from out here. What IS deterministic is
+ * the outcome that race produces, and it is the outcome that matters: a note
+ * the scan cannot open costs its own edges and nothing else.
+ */
+test('graph() loses only the unreadable note, not the vault', async () => {
+  const { rm } = await import('node:fs/promises')
+  const dir = await scratchVault({
+    'Home.md': 'hub',
+    'A.md': '[[Home]]',
+    'B.md': '[[Home]]',
   })
-  vault._setBaseForTest(mock.url)
-  mock.state.respond = ({ method, url, path }) =>
-    method === 'GET' && path.startsWith('/note') && url.searchParams.get('path') === 'A.md'
-      ? { status: 500, body: { error: 'boom' } }
-      : null
+
+  await rm(join(dir, 'A.md'))
+  vault.invalidateGraph()
 
   const g = await vault.graph()
-  assert.equal(g.nodes.length, 3)
-  assert.ok(g.links.some((l) => l.from === 'B.md'))
+  assert.equal(g.nodes.length, 2, 'the missing note should not be indexed')
+  assert.ok(g.links.some((l) => l.from === 'B.md'), 'a readable note lost its edges')
   assert.ok(!g.links.some((l) => l.from === 'A.md'))
-
-  mock.state.respond = null
-  await mock.close()
 })
 
 // ---------------------------------------------------------------------------
@@ -621,6 +617,10 @@ test('ipc handlers refuse anything that is not the top frame', async (t) => {
 
   const mock = await startPythonish({ 'Home.md': { text: 'ok', mtime: 1 } })
   vault._setBaseForTest(mock.url)
+  // vault:list is answered from disk, so the fixture has to be on disk. Without
+  // this the handler returned whatever scratch vault the previous test left
+  // VAULT_DIR pointing at, and the row count below was a coincidence.
+  await scratchVault({ 'Home.md': 'ok' })
 
   registerIpc()
   const call = registeredHandlers.get(CH.vaultList)

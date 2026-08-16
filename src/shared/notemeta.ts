@@ -108,26 +108,24 @@ export type InboxItem = {
 }
 
 /**
- * Read one inbox capture.
- *
  * A deliberately small frontmatter reader, matching the one that WROTE these
  * files (`bench/writer.py` parse_fm): flat `key: value`, quotes stripped. Not a
  * YAML parser, because a YAML parser would be a dependency and a lie — nothing
  * writes nested frontmatter here, and pretending to support it would invite it.
  *
- * Everything is optional. One of the ten items on disk has no frontmatter at
- * all ("george flowberry broke"), and a capture queue that throws on the
- * scruffiest thing in it is useless precisely when it matters.
+ * A note with no frontmatter, or an unterminated block, yields `{}` rather than
+ * throwing. One of the ten inbox items on disk has no frontmatter at all
+ * ("george flowberry broke"), and an index that throws on the scruffiest file
+ * in the vault is useless precisely when it matters.
+ *
+ * Shared with `src/main/vault.ts`, which builds the database and graph views
+ * off the same frontmatter. Two readers that disagree about what `type:` means
+ * would put a note in one view and not the other.
  */
-export function parseProposal(path: string, text: string): InboxItem {
-  const stem = path.split('/').pop()!.replace(/\.md$/i, '')
-  const empty: InboxItem = {
-    path, title: stem, folder: '', alternatives: [], type: '', captured: '',
-    body: text.trim(),
-  }
-  if (!text.startsWith('---')) return empty
+export function parseFrontmatter(text: string): Record<string, string> {
+  if (!text.startsWith('---')) return {}
   const end = text.indexOf('\n---', 3)
-  if (end === -1) return empty
+  if (end === -1) return {}
 
   const fm: Record<string, string> = {}
   for (const line of text.slice(3, end).split('\n')) {
@@ -135,6 +133,20 @@ export function parseProposal(path: string, text: string): InboxItem {
     const cut = line.indexOf(':')
     fm[line.slice(0, cut).trim()] = line.slice(cut + 1).trim().replace(/^"|"$/g, '')
   }
+  return fm
+}
+
+/** The body after the frontmatter block, or the whole text when there is none. */
+export function stripFrontmatter(text: string): string {
+  if (!text.startsWith('---')) return text.trim()
+  const end = text.indexOf('\n---', 3)
+  return end === -1 ? text.trim() : text.slice(end + 4).trim()
+}
+
+/** Read one inbox capture. */
+export function parseProposal(path: string, text: string): InboxItem {
+  const stem = path.split('/').pop()!.replace(/\.md$/i, '')
+  const fm = parseFrontmatter(text)
 
   return {
     path,
@@ -149,7 +161,7 @@ export function parseProposal(path: string, text: string): InboxItem {
       .filter(Boolean),
     type: fm.proposed_type || '',
     captured: fm.captured || '',
-    body: text.slice(end + 4).trim(),
+    body: stripFrontmatter(text),
   }
 }
 

@@ -14,21 +14,27 @@ import * as vault from '../src/main/vault.ts'
 import { startMockVault } from './helpers.mjs'
 
 /**
- * `tree()` reads the real filesystem — it is a file explorer, and the server's
- * /notes endpoint is a curated note index that filters (it skips Inbox/), so it
- * was the wrong source. These tests therefore need a scratch directory rather
- * than the mock server's note list.
+ * `tree()`, `list()` and `graph()` all read the real filesystem, so these tests
+ * need a scratch directory. Without one the suite pointed them at the ACTUAL
+ * Universal Vault: it walked every folder on disk, took minutes instead of
+ * milliseconds, and asserted against whatever happened to be in the user's
+ * vault that day.
  *
- * Without this the suite pointed `tree()` at the ACTUAL Universal Vault: it
- * walked every folder on disk, took minutes instead of milliseconds, and
- * asserted against whatever happened to be in the user's vault that day.
+ * Accepts either an array of paths (content does not matter) or a
+ * `{ path: text }` map. The map form exists because `list()` and `graph()` now
+ * parse the FILES — frontmatter and wikilinks — where they used to parse the
+ * mock server's JSON. A fixture of empty stubs would silently assert that a
+ * vault with no links has no links.
  */
 async function makeScratchVault(paths) {
   const dir = await mkdtemp(join(tmpdir(), 'vault-tree-'))
-  for (const rel of paths) {
+  const entries = Array.isArray(paths)
+    ? paths.map((rel) => [rel, `# ${rel}\n`])
+    : Object.entries(paths)
+  for (const [rel, text] of entries) {
     const abs = join(dir, rel)
     await mkdir(join(abs, '..'), { recursive: true })
-    await writeFile(abs, `# ${rel}\n`, 'utf-8')
+    await writeFile(abs, text, 'utf-8')
   }
   return dir
 }
@@ -58,18 +64,20 @@ test('vault data layer', async (t) => {
   const mockUrl = mock.url
   vault._setBaseForTest(mockUrl)
 
-  // Same shape as the mock note set above, on disk, so the tree assertions
-  // below keep their original intent.
+  // The SAME note set as the mock, with the same text, on disk. `read()` and
+  // `save()` still go to the server, while `tree()`, `list()` and `graph()`
+  // read this directory — so the two have to agree or the suite is testing two
+  // different vaults and the link assertions below mean nothing.
   vault._setVaultDirForTest(
-    await makeScratchVault([
-      'Home.md',
-      'Orphan Note.md',
-      'Trading Insights.md',
-      'Projects/AI.md',
-      'Projects/Tools.md',
-      'Files/Note with spaces.md',
-      'Files/Special#chars&symbols.md',
-    ]),
+    await makeScratchVault({
+      'Home.md': '# Home\n[[Projects]]',
+      'Orphan Note.md': '# Orphan\nNo links here',
+      'Trading Insights.md': '# Trading\n[[Projects/AI]]',
+      'Projects/AI.md': '# AI Projects\n[[Trading Insights]]',
+      'Projects/Tools.md': '# My Tools\n[[Home]]',
+      'Files/Note with spaces.md': '# Spaces\n[[Home]]',
+      'Files/Special#chars&symbols.md': '# Special\n[[Home]]',
+    }),
   )
 
   await t.test('list() returns all notes with correct shape', async () => {
@@ -250,14 +258,42 @@ test('vault data layer', async (t) => {
   await mock.close()
 })
 
+/**
+ * Asserted through `read()`, not `list()`. `list()` used to be the natural
+ * probe because everything went over HTTP; it now reads the disk and CANNOT
+ * raise this, which is the whole point of the change. `read()` and `save()` are
+ * the two calls still on the wire, so they are what this contract covers.
+ */
 test('VaultUnavailable thrown when server is down', async () => {
   vault._setBaseForTest('http://127.0.0.1:1') // port that definitely has nothing
   try {
-    await vault.list()
+    await vault.read('Home.md')
     assert.fail('should have thrown VaultUnavailable')
   } catch (e) {
     assert.ok(e instanceof vault.VaultUnavailable)
   }
+})
+
+/**
+ * The disk-side counterpart: the database and graph must survive a server that
+ * is not there at all. This is the regression the whole change exists to
+ * prevent — both views failed with VaultUnavailable when note-system stopped
+ * running, and neither of them ever needed it.
+ */
+test('list() and graph() work with no server running', async () => {
+  vault._setBaseForTest('http://127.0.0.1:1')
+  vault._setVaultDirForTest(
+    await makeScratchVault({
+      'Home.md': '# Home\n[[Deep]]',
+      'Deep.md': '# Deep\nnothing',
+    }),
+  )
+
+  const notes = await vault.list()
+  assert.equal(notes.length, 2)
+
+  const g = await vault.graph()
+  assert.deepEqual(g.links, [{ from: 'Home.md', to: 'Deep.md' }])
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -300,29 +336,41 @@ test('tree() follows a junction and terminates on a cycle', async () => {
   )
 })
 
-test('list() skips malformed rows instead of throwing', async () => {
-  const mock = await startMockVault({
-    notes: {},
-    respond: ({ path }) =>
-      path === '/notes'
-        ? {
-            status: 200,
-            // A null element threw "Cannot read properties of null" out of
-            // list(), which fails list, graph AND backlinks together.
-            body: [null, 'a string', { path: { not: 'a string' } }, { path: 'ok.md' }],
-          }
-        : null,
-  })
-  vault._setBaseForTest(mock.url)
+/**
+ * Was 'list() skips malformed rows instead of throwing', against a mock that
+ * served `[null, 'a string', …]` — untrusted JSON from another process. The
+ * rows come off the disk now, so the untrusted thing is the FILE, and the same
+ * invariant has to hold: one unparseable note must not fail list, graph and
+ * backlinks together.
+ */
+test('list() survives files it cannot parse', async () => {
+  vault._setVaultDirForTest(
+    await makeScratchVault({
+      'ok.md': '---\ntitle: Fine\ntype: note\n---\n# ok\n[[also ok]]',
+      // Frontmatter that opens and never closes: `indexOf('\n---')` finds no
+      // terminator, and a reader that assumed one would slice past the end.
+      'unterminated.md': '---\ntitle: Broken\nstill going',
+      // A `:` in prose above any frontmatter, and a value containing colons.
+      'colons.md': 'no frontmatter here: but a colon\n[[ok]]',
+      'also ok.md': '# also ok',
+    }),
+  )
 
   const rows = await vault.list()
   assert.deepEqual(
-    rows.map((r) => r.path),
-    ['ok.md'],
-    'malformed rows should be dropped, not carried forward or thrown on',
+    rows.map((r) => r.path).sort(),
+    ['also ok.md', 'colons.md', 'ok.md', 'unterminated.md'],
+    'every readable file should be indexed, however scruffy its frontmatter',
   )
 
-  await mock.close()
+  // The unterminated block yields no frontmatter at all rather than a title of
+  // "Broken" — matching writer.py's parse_fm, which returns None for it.
+  assert.equal(rows.find((r) => r.path === 'unterminated.md').title, 'unterminated')
+  assert.equal(rows.find((r) => r.path === 'ok.md').type, 'note')
+
+  // And the links still resolve around the damage.
+  const g = await vault.graph()
+  assert.ok(g.links.some((l) => l.from === 'ok.md' && l.to === 'also ok.md'))
 })
 
 test('scrub() redacts paths with spaces and POSIX paths', async () => {
@@ -379,10 +427,11 @@ test('scrub() does not eat our own single-segment paths', async () => {
 })
 
 /**
- * checkRoots() — the two vault roots are configured independently and nothing
- * verified they matched. These pin every answer it can give, including the two
- * kinds of wrong answer it must not give: a false alarm on a stale index, and
- * silence on roots that only partially overlap.
+ * checkRoots() — was a comparison of TWO roots, the app's and the note
+ * server's, which could silently disagree. There is one root now, so what it
+ * checks is that the root is a real directory with notes in it. Both failures
+ * are silent and expensive otherwise: an empty explorer, an empty database, and
+ * nothing on screen saying the path is wrong.
  */
 const ROOT_FIXTURE = [
   'Home.md',
@@ -393,53 +442,42 @@ const ROOT_FIXTURE = [
   'Trading/ICT.md',
 ]
 
-test('checkRoots() detects a disagreement between the two vault roots', async (t) => {
-  const mock = await startMockVault({
-    notes: Object.fromEntries(
-      ROOT_FIXTURE.map((p, i) => [p, { text: `# ${p}`, mtime: i + 1 }]),
-    ),
-  })
-  vault._setBaseForTest(mock.url)
-
-  await t.test('agreeing roots report nothing', async () => {
+test('checkRoots() reports an unusable vault root', async (t) => {
+  await t.test('a populated root reports nothing', async () => {
     vault._setVaultDirForTest(await makeScratchVault(ROOT_FIXTURE))
     assert.equal(await vault.checkRoots(), null)
   })
 
-  await t.test('one stale row is not a mismatch', async () => {
-    // Five of six on disk. A note deleted between the server building its index
-    // and this stat is routine, and must never be reported as a wrong root.
-    vault._setVaultDirForTest(await makeScratchVault(ROOT_FIXTURE.slice(1)))
-    assert.equal(await vault.checkRoots(), null)
-  })
-
-  await t.test('a partially overlapping root IS reported', async () => {
-    // The case the first version got wrong. One coincidentally shared filename
-    // used to buy silence, while every other note still 400d on open — the
-    // "broken note, not broken config" confusion this check exists to end.
-    const partial = await makeScratchVault(['Home.md'])
-    vault._setVaultDirForTest(partial)
+  await t.test('a missing directory is reported with the path', async () => {
+    const gone = join(tmpdir(), 'vault-does-not-exist-' + Date.now())
+    vault._setVaultDirForTest(gone)
     const msg = await vault.checkRoots()
-    assert.ok(msg, 'a single shared filename silenced a genuinely wrong root')
-    assert.ok(msg.includes(partial), `message does not name the directory: ${msg}`)
+    assert.ok(msg, 'a nonexistent vault root went unreported')
+    assert.ok(msg.includes(gone), `message does not name the directory: ${msg}`)
   })
 
-  await t.test('a genuinely different root is reported with the path', async () => {
-    const wrong = await makeScratchVault(['Somewhere Else.md'])
-    vault._setVaultDirForTest(wrong)
+  await t.test('a file where a directory should be is reported', async () => {
+    const dir = await makeScratchVault(['Home.md'])
+    const notADir = join(dir, 'Home.md')
+    vault._setVaultDirForTest(notADir)
+    assert.ok(await vault.checkRoots(), 'a file used as a vault root went unreported')
+  })
+
+  await t.test('an empty directory is reported with the path', async () => {
+    const empty = await makeScratchVault([])
+    vault._setVaultDirForTest(empty)
     const msg = await vault.checkRoots()
-    assert.ok(msg, 'divergent roots went unreported')
-    assert.ok(msg.includes(wrong), `message does not name the directory: ${msg}`)
+    assert.ok(msg, 'a vault root with no notes went unreported')
+    assert.ok(msg.includes(empty), `message does not name the directory: ${msg}`)
   })
 
-  await mock.close()
-
-  await t.test('a dead server is unanswerable, not a mismatch', async () => {
-    // The scratch vault deliberately shares NO filename with the fixture. With
-    // an overlapping one this assertion passed whether or not mock.close() did
-    // anything — null is also the answer for agreeing roots, so the test could
-    // not tell the dead-server path from the happy path and proved neither.
-    vault._setVaultDirForTest(await makeScratchVault(['Unrelated Note.md']))
-    assert.equal(await vault.checkRoots(), null)
+  await t.test('a root holding only skipped paths counts as empty', async () => {
+    // Templates/ and the vendored skill bundles are files, not notes. A root
+    // containing nothing else indexes to zero rows, and the honest answer is
+    // the same as an empty directory rather than a silent blank table.
+    vault._setVaultDirForTest(
+      await makeScratchVault(['Templates/Note.md', 'System/Skill Sources/x/SKILL.md']),
+    )
+    assert.ok(await vault.checkRoots(), 'a root with no indexable notes went unreported')
   })
 })

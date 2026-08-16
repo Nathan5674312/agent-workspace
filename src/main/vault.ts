@@ -1,12 +1,23 @@
 /**
- * Vault data layer. Talks to the existing local server (note-system/app/server.py)
- * on 127.0.0.1:8765 — it already owns atomic writes, backups, the lost-update
- * guard, path-traversal checks and the no-silent-overwrite rule. Reimplementing
- * any of that in Node would reintroduce bugs that were fixed on 2026-08-08.
+ * Vault data layer.
  *
- * These calls run in the MAIN process only. The renderer has no network access,
- * and requests from Node carry no Origin header, which is what the server's
- * bad_origin() check expects from a non-browser client.
+ * READS come off disk, here in the main process. `tree()`, `list()` and
+ * `graph()` open no socket and need nothing running — the vault is a directory
+ * of markdown and every question those three answer is answerable by reading
+ * it. That was not always true: they used to be HTTP calls to
+ * note-system/app/server.py on 127.0.0.1:8765, so the database and graph views
+ * failed with `VaultUnavailable` whenever that separate process was not up.
+ * It has since been retired.
+ *
+ * WRITES still go to that server (`read()` and `save()` below), which owns
+ * atomic writes, backups, the lost-update guard and the no-silent-overwrite
+ * rule. Reimplementing those in Node would reintroduce bugs fixed on
+ * 2026-08-08, and `save()`'s guard compares a NANOSECOND mtime that does not
+ * survive a round trip through a JS number — so the read that supplies it stays
+ * on the same side of the wire as the write that checks it.
+ *
+ * These calls run in the MAIN process only. The renderer has no network access
+ * and no filesystem access.
  */
 import type {
   VaultGraph,
@@ -15,7 +26,7 @@ import type {
   VaultTreeNode,
 } from '../shared/ipc.js'
 import { parseWikilinks } from '../shared/wikilink.ts'
-import type { VaultNoteMeta } from '../shared/notemeta.ts'
+import { parseFrontmatter, type VaultNoteMeta } from '../shared/notemeta.ts'
 
 let BASE = 'http://127.0.0.1:8765'
 
@@ -31,6 +42,11 @@ let VAULT_DIR =
 /** For tests only: override the vault directory used by `tree()`. */
 export function _setVaultDirForTest(dir: string) {
   VAULT_DIR = dir
+  // A different directory is a different vault, so the index cannot survive the
+  // switch. This mattered less when the index came from the server and only the
+  // explorer read this variable; now `list()` and `graph()` are built from THIS
+  // directory, and a memo held across the change describes the old one.
+  invalidateGraph()
 }
 
 /**
@@ -176,117 +192,64 @@ function requireMtime(mtime: unknown): number {
 
 const titleOf = (p: string) => p.split('/').pop()!.replace(/\.md$/i, '')
 
+/**
+ * Every note in the vault, with its frontmatter and its reachability.
+ *
+ * Served from the index memo below, so the database view and the graph view
+ * share one scan of the disk instead of taking one each.
+ *
+ * TRAP for the next caller, unchanged from when this came off the wire: `mtime`
+ * is always 0 here. A row from this function is fine to open or to draw, but
+ * its mtime is NOT a version — feeding it to save() 409s every time. Call
+ * read() first. Left as 0 rather than made optional because `VaultNote.mtime`
+ * is `number` in the shared contract.
+ */
 export async function list(): Promise<VaultNoteMeta[]> {
-  // The server's /notes shape is its own; normalise to VaultNote here so the
-  // renderer never sees two spellings of the same thing.
-  const raw = await req<unknown>('/notes')
-  const rows = Array.isArray(raw) ? raw : []
-  return rows.flatMap((r) => {
-    // `r as Record<...>` is a compile-time claim, not a runtime one. A `null`
-    // element threw "Cannot read properties of null" straight out of list(),
-    // which fails list, graph AND backlinks together — one malformed row from
-    // the server took out the whole graph. The array check above already
-    // treats this response as untrusted; so does this.
-    if (typeof r !== 'object' || r === null) return []
-    const o = r as Record<string, unknown>
-    // Only a string is a path. `String({})` produced "[object Object]" and
-    // carried it forward as a real note.
-    const path = typeof o.path === 'string' ? o.path : typeof o.rel === 'string' ? o.rel : ''
-    if (!path) return []
-    return [{
-      path,
-      title: String(o.title ?? titleOf(path)),
-      // Carried through rather than dropped. /notes has always returned folder,
-      // type and orphan; this function normalised them away, so the renderer
-      // could not group or filter without re-reading all 258 notes itself.
-      // status/updated were added to server.py's note_list() for the same
-      // reason -- the frontmatter is already parsed there.
-      // Widening the row does NOT break the narrower VaultNote consumers: the
-      // extra keys ride along and are ignored by everything that does not ask.
-      folder: typeof o.folder === 'string' ? o.folder : '(root)',
-      type: typeof o.type === 'string' ? o.type : '',
-      status: typeof o.status === 'string' ? o.status : '',
-      updated: typeof o.updated === 'string' ? o.updated : '',
-      depth: typeof o.depth === 'number' ? o.depth : null,
-      orphan: o.orphan === true,
-      // TRAP for the next caller: /notes carries no mtime (server.py builds the
-      // row without one), so this is always 0. A row from here is fine to open
-      // or to draw, but its mtime is NOT a version — feeding it to save() 409s
-      // every time. Read the note first. Left as 0 rather than made optional
-      // because VaultNote.mtime is `number` in the shared contract, and
-      // src/shared/ipc.ts is not this section's to change.
-      mtime: Number(o.mtime ?? 0),
-    }]
-  })
+  return (await index()).notes
 }
 
 /**
- * Startup coherence check for the two vault roots.
+ * Startup sanity check on the vault root.
  *
- * `tree()` reads the folder structure off disk from VAULT_DIR. Every read and
- * write goes through the server, which has its own root. Nothing made the two
- * agree, so when they diverge the explorer lists notes that `read()` then 400s
- * on — and the failure reads as a broken note rather than a misconfigured root.
+ * This used to compare TWO roots — VAULT_DIR against the note server's own —
+ * because reads went over HTTP to a process with its own idea of where the
+ * vault was, and when they diverged the explorer listed notes that `read()`
+ * then 400d on. There is one root now, so that comparison is a tautology and
+ * has been dropped.
  *
- * The server exposes no endpoint for its root (checked: server.py's do_GET
- * serves /, /inbox, /notes and /note only), so this asks the question the one
- * way available — take notes the server says it has and look for them under
- * ours. `/notes` is already implemented as `list()`, so this costs one HTTP
- * call and a few stats.
+ * What is still worth checking at boot is the root itself. `AGENT_WORKSPACE_VAULT_DIR`
+ * and the persisted `vaultDir` setting both point this anywhere, and a wrong
+ * value fails silently and expensively: the explorer renders an empty tree, the
+ * database renders zero rows, and nothing says why. An empty directory is a far
+ * more likely misconfiguration than a corrupt one.
  *
- * Returns null when the roots agree OR when the question cannot be answered:
- * server down, or an empty index. A missing answer is not a mismatch, and a
- * false alarm here would send someone chasing a config bug that does not exist.
- *
- * The message carries VAULT_DIR unscrubbed. That is deliberate — the whole
- * point is to name the wrong directory, and this string is for the main-process
- * console, not the renderer. Do not forward it over IPC without scrub().
+ * Returns null when the root looks like a vault. The message carries VAULT_DIR
+ * unscrubbed — the whole point is to name the wrong directory, and this string
+ * is for the main-process console, not the renderer. Do not forward it over IPC
+ * without scrub().
  */
 export async function checkRoots(): Promise<string | null> {
-  // Only the server being unreachable is swallowed. A malformed index is
-  // list()'s problem and it already returns [] for that.
-  const notes = await list().catch((): VaultNote[] => [])
-  if (notes.length === 0) return null
+  const { stat } = await import('node:fs/promises')
 
-  const { access } = await import('node:fs/promises')
-  const { join } = await import('node:path')
-
-  // Sample rather than test one: a note can legitimately be missing, deleted
-  // between the server building its index and this stat, and one stale row must
-  // not be reported as two different vaults.
-  //
-  // Spread the sample across the list instead of taking the first N. A fixed
-  // prefix is the SAME notes every boot, so a bulk rename or move of whatever
-  // happens to sort first — an index the server has not rebuilt yet — reports
-  // "different vaults" deterministically. Striding samples the whole vault, so
-  // a stale corner cannot masquerade as a wrong root.
-  const WANT = 9
-  const step = Math.max(1, Math.floor(notes.length / WANT))
-  const sample: VaultNote[] = []
-  for (let i = 0; i < notes.length && sample.length < WANT; i += step) sample.push(notes[i])
-
-  let hits = 0
-  const misses: string[] = []
-  for (const n of sample) {
-    const hit = await access(join(VAULT_DIR, n.path)).then(() => true, () => false)
-    if (hit) hits++
-    else if (misses.length < 2) misses.push(n.path)
+  const dir = await stat(VAULT_DIR).catch(() => null)
+  if (!dir || !dir.isDirectory()) {
+    return (
+      `vault: ${VAULT_DIR} is not a readable directory. ` +
+      `The explorer, the database and the graph will all be empty. ` +
+      `Set AGENT_WORKSPACE_VAULT_DIR or fix the vault path in settings.`
+    )
   }
 
-  // Majority, not "any one hit". The old rule was that a single surviving file
-  // proved the roots agreed, which fails the exact case this function is for:
-  // PARTIALLY overlapping roots — the app pointed at a sibling or a parent of
-  // the server's vault. One coincidentally shared filename (Home.md, README.md)
-  // bought silence while every other note still 400d on open, which is the
-  // "broken note, not broken config" confusion the check exists to end.
-  if (hits * 2 > sample.length) return null
+  // Non-empty is the real signal, and it costs one scan that the first view to
+  // load would have paid for anyway — the memo makes this free rather than
+  // duplicated work.
+  const notes = await list().catch((): VaultNoteMeta[] => [])
+  if (notes.length > 0) return null
 
   return (
-    `vault: the note server and this app are pointed at different vaults. ` +
-    `Only ${hits} of ${sample.length} notes the server lists exist under ` +
-    `${VAULT_DIR} (missing e.g. ${misses.map((m) => `"${m}"`).join(', ')}). ` +
-    `The explorer will list notes that fail to open. ` +
-    `Fix VAULT in note-system/app/server.py or AGENT_WORKSPACE_VAULT_DIR.`
+    `vault: no notes found under ${VAULT_DIR}. ` +
+    `The directory exists but contains no indexable .md files, so the database ` +
+    `and graph will render empty. Check the vault path in settings.`
   )
 }
 
@@ -425,29 +388,71 @@ function sort(node: VaultTreeNode): void {
 }
 
 /**
- * Memoised graph.
+ * Path prefixes that are files but not NOTES, excluded from the database and
+ * the graph. Ported from the note server's `links.py` SKIP, which is where
+ * these were tuned: third-party skill bundles and generated indexes ran to
+ * thousands of documents and swamped both views.
  *
- * The measurement the old `ponytail:` note asked for: on an 800-note vault a
- * single `backlinks()` call issued 800 GET /note requests, because it rebuilds
- * the whole graph — and the vault pane calls it every time a note is opened.
- * The Python server serialises every request on one module-wide lock, so that
- * is the cost of a click.
+ * Deliberately NOT the same list as HIDDEN above. HIDDEN hides things from the
+ * EXPLORER; this hides them from the INDEX. `Templates/` is the case that shows
+ * why they must stay separate — the explorer still lists it, because a person
+ * browsing wants to open a template, while the database counting it as a note
+ * would file every template shape as content.
+ *
+ * `Inbox/` is here for the reason it was in the server's note_list(): those are
+ * pending captures, unfiled by definition, and every one of them would read as
+ * an orphan. The Inbox tab reads them directly and is unaffected.
+ *
+ * Trailing slashes are load-bearing: `links.py` matched the bare prefix
+ * "Templates", which also swallowed any real note whose name merely started
+ * with it.
+ */
+const SKIP = [
+  'graphify-out/',
+  'System/Skills/gstack/',
+  'System/Skills/skill-router/',
+  'System/Skill Sources/',
+  'Templates/',
+  '.backups/',
+  'Inbox/',
+]
+
+/** Where reachability is measured from. `depth` is hops from here. */
+const ROOT_NOTE = 'Home.md'
+
+/**
+ * Memoised index: one disk scan behind both `list()` and `graph()`.
+ *
+ * They are built together because they need the same thing — the text of every
+ * note — and computing them separately means reading the whole vault twice.
+ * `depth`/`orphan` additionally cannot be computed without the graph, which is
+ * why the server sent them down with the note list rather than as a third call.
  *
  * `inflight` is not an optimisation, it is correctness under overlap: opening a
- * note while the graph tab loads used to start two full rescans that each
- * hammered the same server. Concurrent callers now share one.
+ * note while the graph tab loads used to start two full rescans. Concurrent
+ * callers share one.
  *
- * The TTL is what keeps this honest as a CACHE rather than a second source of
- * truth — edits made outside the app show up within 30s, and our own writes
- * invalidate immediately.
+ * The TTL keeps this honest as a CACHE rather than a second source of truth —
+ * edits made outside the app show up within 30s, and our own writes invalidate
+ * immediately.
  */
-const GRAPH_TTL_MS = 30_000
-let graphCache: { at: number; value: VaultGraph } | null = null
-let graphInflight: Promise<VaultGraph> | null = null
+const INDEX_TTL_MS = 30_000
+type VaultIndex = { notes: VaultNoteMeta[]; graph: VaultGraph }
+let indexCache: { at: number; value: VaultIndex } | null = null
+let indexInflight: Promise<VaultIndex> | null = null
 
 /** Drop the memo. Called by save(); exported so a future watcher can call it. */
 export function invalidateGraph(): void {
-  graphCache = null
+  indexCache = null
+}
+
+async function index(): Promise<VaultIndex> {
+  if (indexCache && Date.now() - indexCache.at < INDEX_TTL_MS) return indexCache.value
+  if (indexInflight) return indexInflight
+  indexInflight = buildIndex().finally(() => {
+    indexInflight = null
+  })
+  return indexInflight
 }
 
 /**
@@ -456,16 +461,85 @@ export function invalidateGraph(): void {
  * authoritative. Nothing here writes anything.
  */
 export async function graph(): Promise<VaultGraph> {
-  if (graphCache && Date.now() - graphCache.at < GRAPH_TTL_MS) return graphCache.value
-  if (graphInflight) return graphInflight
-  graphInflight = buildGraph().finally(() => {
-    graphInflight = null
-  })
-  return graphInflight
+  return (await index()).graph
 }
 
-async function buildGraph(): Promise<VaultGraph> {
-  const notes = await list()
+/**
+ * Every indexed note with its text, read off disk.
+ *
+ * Reuses `tree()` for the walk rather than globbing again — that function
+ * already handles the two things a naive `readdir` recursion gets wrong on this
+ * machine: Windows junctions (which `readdir` reports as links, not
+ * directories, so linked folders vanish) and the link cycles that follow from
+ * supporting them.
+ */
+async function scan(): Promise<{ note: VaultNoteMeta; text: string }[]> {
+  const { readFile } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+
+  const paths: string[] = []
+  const collect = (n: VaultTreeNode): void => {
+    if (n.kind === 'note') paths.push(n.path)
+    n.children?.forEach(collect)
+  }
+  collect(await tree())
+  const keep = paths.filter((p) => !SKIP.some((s) => p.startsWith(s)))
+
+  const out: { note: VaultNoteMeta; text: string }[] = []
+  // Bounded rather than `Promise.all` over every path: a vault in the low
+  // thousands opens that many file handles at once and takes EMFILE, which
+  // fails the whole index instead of one note. Same worker-pool shape the HTTP
+  // version needed, for a different reason.
+  const LIMIT = 16
+  let cursor = 0
+  const worker = async (): Promise<void> => {
+    while (cursor < keep.length) {
+      const path = keep[cursor++]
+      let text: string
+      try {
+        text = await readFile(join(VAULT_DIR, path), 'utf8')
+      } catch {
+        // Deleted between the walk and the read, or unreadable. Absent from the
+        // index is right; failing the index for one bad file is not.
+        continue
+      }
+      const fm = parseFrontmatter(text)
+      const cut = path.lastIndexOf('/')
+      out.push({
+        text,
+        note: {
+          path,
+          // Filename first, frontmatter second — the same precedence the link
+          // resolver below uses, so a note cannot be titled one thing in the
+          // database and another in the graph.
+          title: fm.title || titleOf(path),
+          folder: cut === -1 ? '(root)' : path.slice(0, cut),
+          type: fm.type ?? '',
+          status: fm.status ?? '',
+          updated: fm.updated ?? '',
+          depth: null, // filled by the BFS in buildIndex
+          orphan: false,
+          mtime: 0, // see the TRAP note on list()
+        },
+      })
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(LIMIT, keep.length) }, worker))
+
+  // The workers finish out of order, so the array order is nondeterministic.
+  // Sorted here, once, on the server's own key — the database view renders in
+  // this order and a table that reshuffles between loads is unreadable.
+  out.sort(
+    (a, b) =>
+      a.note.folder.localeCompare(b.note.folder) ||
+      a.note.title.toLowerCase().localeCompare(b.note.title.toLowerCase()),
+  )
+  return out
+}
+
+async function buildIndex(): Promise<VaultIndex> {
+  const scanned = await scan()
+  const notes = scanned.map((s) => s.note)
 
   /**
    * Wikilink resolution index, built the way Obsidian actually resolves.
@@ -487,10 +561,10 @@ async function buildGraph(): Promise<VaultGraph> {
   const norm = (s: string) =>
     s.trim().toLowerCase().replace(/\\/g, '/').replace(/\.md$/i, '')
 
-  const index = new Map<string, string>()
+  const byName = new Map<string, string>()
   const add = (key: string, path: string) => {
     const k = norm(key)
-    if (k && !index.has(k)) index.set(k, path)
+    if (k && !byName.has(k)) byName.set(k, path)
   }
   for (const n of notes) {
     add(titleOf(n.path), n.path) // "_START HERE"      — the common form
@@ -508,45 +582,58 @@ async function buildGraph(): Promise<VaultGraph> {
   // a ~200px disc and every frame stroked 20 000 coincident lines.
   const seenEdges = new Set<string>()
 
-  // Bounded, was `Promise.all(notes.map(...))` — one in-flight fetch per note,
-  // all at once. Against a vault in the low hundreds that opens ~150 concurrent
-  // sockets to a Python ThreadingHTTPServer that serialises every request on
-  // one module-wide lock, so the requests queue anyway and the only thing the
-  // extra parallelism buys is socket pressure and a 15s timeout that can fire
-  // on notes still waiting their turn. A small pool keeps the server busy
-  // without stampeding it.
-  const LIMIT = 8
-  let cursor = 0
-  const worker = async (): Promise<void> => {
-    // Safe without a lock: single-threaded event loop, and the read of `cursor`
-    // and its increment are one synchronous step with no await between them.
-    while (cursor < notes.length) {
-      const n = notes[cursor++]
-      let text: string
-      try {
-        text = (await read(n.path)).text
-      } catch {
-        continue
-      }
-      for (const name of parseWikilinks(text)) {
-        const target = index.get(norm(name))
-        if (!target || target === n.path) continue
-        // `parseWikilinks` already dedups by NAME within a note; this dedups by
-        // resolved TARGET, because [[Home]] and [[Home.md]] name one note.
-        // Stringifying the pair sidesteps the separator question entirely.
-        const key = JSON.stringify([n.path, target])
-        if (seenEdges.has(key)) continue
-        seenEdges.add(key)
-        links.push({ from: n.path, to: target })
-      }
+  // The text is already in hand from the scan — this used to be a bounded pool
+  // of GET /note requests, one per note, because the text lived behind HTTP. On
+  // an 800-note vault that was 800 round trips through a Python server that
+  // serialised every one of them on a module-wide lock, and it ran on every
+  // note the user opened. Reading the directory once costs a fraction of it.
+  const out = new Map<string, string[]>()
+  for (const { note: n, text } of scanned) {
+    for (const name of parseWikilinks(text)) {
+      const target = byName.get(norm(name))
+      if (!target || target === n.path) continue
+      // `parseWikilinks` already dedups by NAME within a note; this dedups by
+      // resolved TARGET, because [[Home]] and [[Home.md]] name one note.
+      // Stringifying the pair sidesteps the separator question entirely.
+      const key = JSON.stringify([n.path, target])
+      if (seenEdges.has(key)) continue
+      seenEdges.add(key)
+      links.push({ from: n.path, to: target })
+      // Adjacency, kept as the edges are found rather than rebuilt from
+      // `links` afterwards, because the BFS below needs it and a second pass
+      // over 20k edges to recover what we just computed is waste.
+      const adj = out.get(n.path)
+      if (adj) adj.push(target)
+      else out.set(n.path, [target])
     }
   }
-  await Promise.all(
-    Array.from({ length: Math.min(LIMIT, notes.length) }, () => worker()),
-  )
 
-  const value = { nodes: notes.map((n) => n.path), links }
-  graphCache = { at: Date.now(), value }
+  /**
+   * R6 reachability: hops from [[Home]], following links outward.
+   *
+   * Obsidian links are directional but browsing is not — if A links to B a
+   * person can get from A to B — so only outbound edges are walked, matching
+   * the server's `links.reach()`. `orphan` is the invariant the vault is
+   * actually graded on: not reachable from Home within 2 hops.
+   */
+  const depth = new Map<string, number>([[ROOT_NOTE, 0]])
+  const queue = [ROOT_NOTE]
+  for (let i = 0; i < queue.length; i++) {
+    const cur = queue[i]
+    for (const next of out.get(cur) ?? []) {
+      if (depth.has(next)) continue
+      depth.set(next, depth.get(cur)! + 1)
+      queue.push(next)
+    }
+  }
+  for (const n of notes) {
+    const d = depth.get(n.path)
+    n.depth = d ?? null
+    n.orphan = d === undefined || d > 2
+  }
+
+  const value: VaultIndex = { notes, graph: { nodes: notes.map((n) => n.path), links } }
+  indexCache = { at: Date.now(), value }
   return value
 }
 

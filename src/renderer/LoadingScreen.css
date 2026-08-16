@@ -1,0 +1,176 @@
+/**
+ * Boot screen. Co-located with LoadingScreen.tsx, which is why it is not in
+ * app.css — that file is edited by several agents at once and this needs none
+ * of it.
+ *
+ * Every colour is a token. The React Bits original hard-coded cool slate
+ * (#111827) and near-white (#f8fafc) plus a dozen rgba() shadows; this app is
+ * warm earthy monochrome and its own test suite bans hex and rgb() in pane
+ * sources. The mechanical read — the bevel, the seam, the shadow under a
+ * turning leaf — is kept, but it is built out of the palette's own Ink, Bistre,
+ * Coffee, Sand and Cream rather than out of white and black.
+ */
+
+.boot {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--bg-app);
+  /* Fades itself out of existence. The screen underneath is already painted, so
+     this is a reveal rather than a load — nothing is waiting on the fade. */
+  animation: boot-out var(--duration-normal) var(--ease-out) 2.2s both;
+}
+
+@keyframes boot-out {
+  to { opacity: 0; visibility: hidden; }
+}
+
+.flap {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: clamp(1.4rem, 4.2vw, 2.6rem);
+  /* Tracking is size-specific and this is large type, so it tightens rather
+     than opening up (apple-design 15). The original ran +0.035em at every size. */
+  letter-spacing: -0.01em;
+  line-height: 1;
+  font-weight: var(--weight-semibold);
+  font-variant-numeric: tabular-nums;
+  white-space: pre;
+  user-select: none;
+}
+
+/* The announced phrase. Present for assistive tech, never painted. */
+.flap-live {
+  position: absolute;
+  width: 1px; height: 1px;
+  margin: -1px; padding: 0; border: 0;
+  overflow: hidden; clip-path: inset(50%);
+  white-space: nowrap;
+}
+
+.flap-tile {
+  position: relative;
+  width: 0.78em;
+  height: 1.08em;
+  overflow: hidden;
+  border-radius: var(--radius-sm);
+  background: var(--bg-elevated);
+  perspective: 520px;
+  transform-style: preserve-3d;
+  isolation: isolate;
+}
+
+/* The seam. A real board has a physical gap across the middle of every tile,
+   and without it the two halves read as one flat rectangle. */
+.flap-tile::before {
+  content: '';
+  position: absolute;
+  top: calc(50% - 0.5px);
+  left: 0;
+  z-index: 8;
+  width: 100%;
+  height: 1px;
+  background: var(--bg-sunken);
+  pointer-events: none;
+}
+
+/* The bevel, as one hairline rather than the original's stacked white/black
+   insets — those read as plastic against a warm ground. */
+.flap-tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 9;
+  border: 1px solid var(--separator);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+.flap-half,
+.flap-leaf {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 50%;
+  overflow: hidden;
+  background: var(--bg-elevated);
+  backface-visibility: hidden;
+}
+
+.flap-half--top,
+.flap-leaf--front { top: 0; }
+
+/* The lower half sits in its own shadow. Mixing toward Ink rather than black
+   keeps it inside the palette instead of going grey. */
+.flap-half--bottom,
+.flap-leaf--back {
+  bottom: 0;
+  background: color-mix(in srgb, var(--bg-elevated) 84%, var(--bg-app));
+}
+
+.flap-char {
+  position: absolute;
+  left: 0;
+  width: 100%;
+  height: 200%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
+.flap-half--top .flap-char,
+.flap-leaf--front .flap-char { top: 0; }
+
+.flap-half--bottom .flap-char,
+.flap-leaf--back .flap-char { bottom: 0; }
+
+/* Only transform and filter animate here, both compositor-friendly. */
+.flap-leaf {
+  z-index: 6;
+  will-change: transform, filter;
+  transform-style: preserve-3d;
+}
+
+.flap-leaf--front {
+  transform-origin: center bottom;
+  animation: flap-front 0.11s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+.flap-leaf--back {
+  transform-origin: center top;
+  transform: rotateX(90deg);
+  animation: flap-back 0.11s cubic-bezier(0.23, 1, 0.32, 1) both;
+}
+
+@keyframes flap-front {
+  0%   { transform: rotateX(0deg);   filter: brightness(1.08); }
+  100% { transform: rotateX(-90deg); filter: brightness(0.52); }
+}
+
+@keyframes flap-back {
+  0%, 45% { transform: rotateX(90deg); filter: brightness(0.58); }
+  100%    { transform: rotateX(0deg);  filter: brightness(1); }
+}
+
+/* The tumble is the one thing here that is purely vestibular, so it goes. The
+   board still changes phrase — the component swaps the glyphs directly — and
+   the screen still fades out, because opacity aids comprehension. */
+@media (prefers-reduced-motion: reduce) {
+  .flap-leaf { animation: none; }
+  .boot { animation-duration: 1ms; }
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .boot { background: var(--bg-app); }
+}
+
+@media (prefers-contrast: more) {
+  .flap-tile::after { border-color: var(--separator-opaque); }
+  .flap-char { color: var(--label); }
+}

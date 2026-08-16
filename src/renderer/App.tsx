@@ -1,6 +1,7 @@
 import { VaultPane } from './panes/vault/VaultPane.js'
 import { AgentCorner } from './panes/corner/AgentCorner.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
+import { LoadingScreen } from './LoadingScreen.js'
 
 /**
  * The vault IS the app — it owns the whole window. The agent corner floats over
@@ -13,6 +14,11 @@ import { ErrorBoundary } from './ErrorBoundary.js'
 export function App(): React.ReactElement {
   return (
     <div className="app">
+      {/* Overlays the whole window and removes itself. Deliberately OUTSIDE the
+          error boundaries and mounted last: it must never be able to keep the
+          vault from mounting behind it, and the panes below are already loading
+          while it plays. */}
+      <LoadingScreen />
       <section className="pane-vault">
         <ErrorBoundary name="vault">
           <VaultPane />

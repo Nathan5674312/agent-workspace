@@ -254,7 +254,6 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   align-items: flex-end;
   gap: var(--space-1);
   text-align: right;
-  max-width: 22rem;
   font-size: var(--text-xs);
   line-height: var(--leading-body);
   color: var(--label-quaternary);
@@ -262,18 +261,41 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
 }
 .art-credit:hover { color: var(--label-tertiary); }
 
-/* At rest the signature is the ONLY thing on screen. The claim and the name
-   both sit hidden above and below it and resolve together on hover.
-
-   `visibility` rather than `display` so both keep their boxes: the signature
-   does not move when they appear, so the mark you aimed at is still under the
-   pointer. Layout that jumps on hover is the cheapest way to make a UI feel
-   loose, and here it would also mean the hover target escapes the cursor. */
+/**
+ * At rest the signature is the ONLY thing here. The claim and the name stack
+ * ABOVE it and resolve together on hover.
+ *
+ * Both are taken OUT OF FLOW, and that is the fix for two bugs at once. They
+ * used to be `visibility: hidden` in normal flow, chosen so the signature would
+ * not move when they appeared — but hidden-in-flow still reserves the box. That
+ * left the signature floating in the middle of ~57px of empty space (it read as
+ * sitting too high), and it left the `<aside>` sized to the full name string,
+ * so a ~180x57px invisible rectangle over the canvas corner swallowed clicks:
+ * a node under it could not be dragged and a backlink under it could not be
+ * followed.
+ *
+ * Absolute positioning gives the no-jump guarantee for free — an out-of-flow
+ * element cannot move its siblings — while collapsing the aside to exactly the
+ * signature. They stack upward because the credit is anchored to the bottom of
+ * the canvas and there is no room below it.
+ *
+ * They stay hit-testable once visible, which is deliberate: it keeps `:hover`
+ * alive as the pointer travels from the signature up to the Instagram link.
+ */
 .art-credit-claim,
 .art-credit-line {
+  position: absolute;
+  right: 0;
+  white-space: nowrap;
   opacity: 0;
   visibility: hidden;
   transition: opacity var(--duration-fast) var(--ease-out);
+}
+.art-credit-line {
+  bottom: 100%;
+}
+.art-credit-claim {
+  bottom: calc(100% + 1.5em);
 }
 .art-credit-claim {
   font-size: var(--text-xs);
@@ -588,7 +610,6 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
     animation-iteration-count: 1 !important;
   }
   button:active:not(:disabled),
-  .claude-session-item:active { transform: none; }
   /* The corner still ARRIVES — it just arrives without travelling. A card that
      only becomes visible via animation must never be animated to nothing. */
   .corner-container {
@@ -611,7 +632,6 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
      content, so they simply stop. The text stays fully legible because the
      sweep is replaced by a flat label colour rather than being left mid-
      gradient — an animation-dependent element must never vanish. */
-  .claude-greeting::before { animation: none; }
   .shining-text {
     animation: none;
     background: none;
@@ -623,7 +643,6 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
 
 /* Transparency off means frosted goes solid — raise opacity, drop the blur. */
 @media (prefers-reduced-transparency: reduce) {
-  .claude-top-rail, .claude-composer, .claude-account-row,
   .vault-ribbon, .vault-sidebar, .vault-tab-bar {
     background: var(--bg-elevated);
     backdrop-filter: none;
@@ -631,13 +650,32 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   }
 }
 
-/* More contrast means real borders and near-solid grounds. */
+/**
+ * More contrast means real borders and near-solid grounds.
+ *
+ * These used to be the Apple cool-white ramp — `rgba(235,235,245,0.85)` and
+ * friends — left behind when the label ramp moved to solid palette colours.
+ * That was worse than untidy. It threw the warm palette away in the one mode a
+ * user reaches for when they need to read, put cool blue-white text on a warm
+ * Ink ground, and reinstated OPACITY: GraphView reads `--label-secondary` for
+ * its node fill, so translucent labels made node discs see-through again and
+ * links showed through the circles they end in. It also silently falsified
+ * docs/ACCESSIBILITY.md, which quotes measured ratios that were not in force.
+ *
+ * The palette already contains its own higher-contrast answer: move each label
+ * one step UP the ramp toward the light end. Every value stays solid, stays in
+ * the palette, and its ratio against Ink is the measured one from the colour
+ * note — so the accessibility claim stays true in this mode too.
+ */
 @media (prefers-contrast: more) {
   :root {
-    --label-secondary: rgba(235, 235, 245, 0.85);
-    --label-tertiary: rgba(235, 235, 245, 0.7);
-    --separator: rgba(255, 255, 255, 0.3);
+    --label-secondary: #d8b493; /* Sand  — 10.0:1, up from Tan  at 7.4:1 */
+    --label-tertiary: #ba9b7d; /* Tan   —  7.4:1, up from Clay at 5.0:1 */
+    --label-quaternary: #987d65; /* Clay  —  5.0:1, up from Taupe at 3.7:1 */
+    /* A solid hairline instead of an 8% film. Taupe is decorative-only by the
+       palette's rules, which is exactly what a separator is. */
+    --separator: #806854;
   }
   button, input, textarea, select { border: 1px solid var(--separator); }
-  .claude-session-item--active, .vault-tab--active { outline: 1px solid var(--label-secondary); }
+  .vault-tab--active { outline: 1px solid var(--label-secondary); }
 }

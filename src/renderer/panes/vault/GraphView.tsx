@@ -81,6 +81,8 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       node: token('--label-secondary', 'CanvasText'),
       hot: token('--accent', 'Highlight'),
       label: token('--label-secondary', 'CanvasText'),
+      /** The window ground, for refilling the erased disc under each node. */
+      ground: token('--bg-app', 'Canvas'),
     }
 
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
@@ -334,6 +336,45 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
 
       const dim = hover !== null
 
+      /**
+       * A held node reads as LIFTED — it grows toward the finger.
+       *
+       * Intermediate states should point at the outcome, and the outcome of
+       * holding a node is picking it up. A shrink would be right for a button,
+       * which is a surface you push into; this is an object you take hold of,
+       * and the two want opposite signs.
+       */
+      const drawRadius = (n: Node) => radius(n) * (pressed?.id === n.id ? 1.35 : 1)
+
+      /**
+       * The halos, FIRST — before the links, not after the erase.
+       *
+       * They were painted last, between the erase and the nodes, and that put
+       * a 3.2x-radius pool of near-opaque ground on top of every link END. A
+       * leaf node's halo reaches ~15.5 units against a 52-unit rest length, so
+       * roughly 60% of a typical link sat under it; and `forceCollide` lets
+       * node centres sit ~22 units apart, which is inside BOTH halos, so links
+       * inside a dense cluster disappeared completely and connected notes read
+       * as unconnected dots — exactly where the structure is worth seeing.
+       *
+       * Painting first fixes that: the halo quietens the ARTWORK, which is all
+       * it was ever for, and the links then draw over it at full strength. The
+       * hairline gap the erase leaves is refilled with ground below, so moving
+       * this up costs nothing it was previously buying.
+       *
+       * Alpha is deliberately NOT modulated by hover, unlike the nodes and
+       * links. Dimming halos with their nodes would let the artwork surge back
+       * across the canvas the instant the pointer touched anything and recede
+       * when it left — a flash of background on every hover. Quieting the
+       * artwork is a property of where the nodes ARE, not of which one is
+       * under the cursor, so it holds still.
+       */
+      ctx.globalAlpha = HALO_ALPHA
+      for (const n of nodes) {
+        const R = drawRadius(n) * HALO_SCALE
+        ctx.drawImage(halo, n.x! - R, n.y! - R, R * 2, R * 2)
+      }
+
       ctx.lineWidth = 0.7 / k
       for (const l of links) {
         const lit = dim && (l.source.id === hover!.id || l.target.id === hover!.id)
@@ -371,16 +412,6 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
        * rule is concerned (test/review-s2-vault-pane.test.mjs). The system
        * colour keywords are the same idiom the token fallbacks above use.
        */
-      /**
-       * A held node reads as LIFTED — it grows toward the finger.
-       *
-       * Intermediate states should point at the outcome, and the outcome of
-       * holding a node is picking it up. A shrink would be right for a button,
-       * which is a surface you push into; this is an object you take hold of,
-       * and the two want opposite signs.
-       */
-      const drawRadius = (n: Node) => radius(n) * (pressed?.id === n.id ? 1.35 : 1)
-
       ctx.globalCompositeOperation = 'destination-out'
       ctx.fillStyle = 'CanvasText'
       ctx.globalAlpha = 1
@@ -392,30 +423,21 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       ctx.globalCompositeOperation = 'source-over'
 
       /**
-       * The halo, painted AFTER the erase and BEFORE the nodes. Both halves of
-       * that sentence are load-bearing.
+       * Refill the erased disc with ground.
        *
-       * AFTER, because `destination-out` erases everything already on the
-       * canvas within its radius — including a halo drawn earlier. Painting
-       * the halo first leaves a 1.5px annulus of bare artwork ringing every
-       * node, which is precisely the hard-edged sticker look this is meant to
-       * avoid. Painting it after instead fills that hairline gap with ground,
-       * so the gap reads as a gap rather than as the drawing poking through.
-       *
-       * BEFORE the nodes, so the node disc sits on top of its own pool and
-       * nothing softens the node itself.
-       *
-       * Alpha is deliberately NOT modulated by hover, unlike the nodes and
-       * links below. Dimming the halos with their nodes would let the artwork
-       * surge back across the whole canvas the instant the pointer touches
-       * anything, and recede again when it leaves — a flash of background on
-       * every hover. Quieting the artwork is a property of where the nodes
-       * ARE, not of which one is under the cursor, so it holds still.
+       * The erase above removes everything within `radius + 1.5` — including
+       * the halo — so without this the hairline gap between a link and the
+       * circle it ends in shows bare artwork through it, which is the
+       * hard-edged sticker look the halo exists to avoid. This is what the old
+       * ordering bought by painting the halo last, kept here at the erase's own
+       * radius so it fills the gap without reaching the links.
        */
       ctx.globalAlpha = HALO_ALPHA
+      ctx.fillStyle = COL.ground
       for (const n of nodes) {
-        const R = drawRadius(n) * HALO_SCALE
-        ctx.drawImage(halo, n.x! - R, n.y! - R, R * 2, R * 2)
+        ctx.beginPath()
+        ctx.arc(n.x!, n.y!, drawRadius(n) + 1.5 / k, 0, Math.PI * 2)
+        ctx.fill()
       }
 
       for (const n of nodes) {

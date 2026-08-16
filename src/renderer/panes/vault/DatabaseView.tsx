@@ -1,5 +1,16 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, FileText, Search, Unlink } from 'lucide-react'
+import {
+  Calendar,
+  ChevronDown,
+  ChevronRight,
+  FileText,
+  LayoutGrid,
+  Search,
+  Table,
+  Columns3,
+  Unlink,
+  type LucideIcon,
+} from 'lucide-react'
 import {
   areaOf,
   statusTone,
@@ -30,6 +41,24 @@ import {
  * (`SaveConflict`) that a table cell has nowhere to show. That is a feature,
  * not a missing afternoon.
  */
+
+/**
+ * The four view shapes on the roadmap. Only `table` is built; the other three
+ * are switchable and say so.
+ *
+ * They share one row set and one filter deliberately — that is the whole claim
+ * of "many views, same rows". Building board/calendar/gallery is a rendering
+ * job against `filtered` below, not a second query path, and keeping the
+ * switcher here is what makes that obvious to whoever picks it up.
+ */
+type ViewMode = 'table' | 'board' | 'calendar' | 'gallery'
+
+const VIEW_MODES: { key: ViewMode; label: string; Icon: LucideIcon; built: boolean }[] = [
+  { key: 'table', label: 'Table', Icon: Table, built: true },
+  { key: 'board', label: 'Board', Icon: Columns3, built: false },
+  { key: 'calendar', label: 'Calendar', Icon: Calendar, built: false },
+  { key: 'gallery', label: 'Gallery', Icon: LayoutGrid, built: false },
+]
 
 type SortKey = 'title' | 'area' | 'type' | 'status' | 'updated'
 type GroupKey = 'area' | 'type' | 'status' | 'none'
@@ -79,6 +108,7 @@ export function DatabaseView({
   const [desc, setDesc] = useState(false)
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set())
   const [orphansOnly, setOrphansOnly] = useState(false)
+  const [mode, setMode] = useState<ViewMode>('table')
 
   // Changing the grouping rebuilds every section, so collapse state from the
   // old grouping names nothing. Kept, it silently hides sections in the new one.
@@ -150,6 +180,24 @@ export function DatabaseView({
 
   return (
     <div className="db-view">
+      <div className="db-modes" role="tablist" aria-label="Database view">
+        {VIEW_MODES.map(({ key, label, Icon, built }) => (
+          <button
+            key={key}
+            role="tab"
+            type="button"
+            className={`db-mode ${mode === key ? 'active' : ''}`}
+            aria-selected={mode === key}
+            onClick={() => setMode(key)}
+            title={built ? label : `${label} — not built yet`}
+          >
+            <Icon size={13} aria-hidden="true" />
+            {label}
+            {!built && <span className="db-mode-dot" aria-hidden="true" />}
+          </button>
+        ))}
+      </div>
+
       <div className="db-toolbar">
         <label className="db-search">
           <Search size={13} aria-hidden="true" />
@@ -196,6 +244,15 @@ export function DatabaseView({
         </span>
       </div>
 
+      {mode !== 'table' ? (
+        <div className="db-empty db-empty--placeholder">
+          <strong>{VIEW_MODES.find((v) => v.key === mode)?.label}</strong> is not built yet.
+          <span>
+            The rows, the filter and the grouping above are shared — this view is a
+            rendering of the same {shown} notes, not a second query.
+          </span>
+        </div>
+      ) : (
       <div className="db-scroll">
         <table className="db-table">
           <thead>
@@ -318,6 +375,7 @@ export function DatabaseView({
 
         {shown === 0 && <div className="db-empty">Nothing matches.</div>}
       </div>
+      )}
     </div>
   )
 }

@@ -25,7 +25,8 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import { useVault } from './useVault.js'
-import { LeftRibbon } from './LeftRibbon.js'
+import { LeftRibbon, ribbonLabel } from './LeftRibbon.js'
+import { SidebarPlaceholder } from './SidebarPlaceholder.js'
 import { ExplorerHeader } from './ExplorerHeader.js'
 import { FolderTree } from './FolderTree.js'
 import { VaultSwitcher } from './VaultSwitcher.js'
@@ -342,7 +343,7 @@ export function VaultPane(): React.ReactElement {
         <LeftRibbon activeView={activeRibbon} onViewChange={setActiveRibbon} />
 
         <div className="vault-sidebar">
-          {activeRibbon === 'files' && (
+          {activeRibbon === 'files' ? (
             <>
               <ExplorerHeader
                 onNewNote={handleNewNote}
@@ -357,6 +358,12 @@ export function VaultPane(): React.ReactElement {
                 onToggle={handleToggleFolder}
               />
             </>
+          ) : (
+            /* Every non-files ribbon icon used to fall through to nothing, so
+               the sidebar went blank while the icon reported itself pressed.
+               The `else` is the fix; the panel says which feature the icon is a
+               promise of, read from the roadmap. */
+            <SidebarPlaceholder view={activeRibbon} label={ribbonLabel(activeRibbon)} />
           )}
 
           <VaultSwitcher

@@ -34,6 +34,15 @@ const VIEWS: { id: string; label: string; Icon: LucideIcon }[] = [
   { id: 'plugins', label: 'Plugins', Icon: Blocks },
 ]
 
+/**
+ * The label a ribbon id announces itself with. Exported so the placeholder
+ * panel titles itself with the SAME string the icon's tooltip and accessible
+ * name use — two spellings of one control is how a UI starts feeling sloppy.
+ */
+export function ribbonLabel(id: string): string {
+  return VIEWS.find((v) => v.id === id)?.label ?? id
+}
+
 export function LeftRibbon({ activeView, onViewChange }: LeftRibbonProps) {
   return (
     <nav className="vault-ribbon" aria-label="Vault views">

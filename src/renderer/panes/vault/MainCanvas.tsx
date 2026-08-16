@@ -4,6 +4,7 @@ import { Editor } from './Editor.js'
 import { GraphView } from './GraphView.js'
 import { DatabaseView } from './DatabaseView.js'
 import { InboxView } from './InboxView.js'
+import { RoadmapView } from './RoadmapView.js'
 import type { VaultNoteMeta, InboxItem } from '../../../shared/notemeta.js'
 import { ArrowLeft, ArrowRight, Ellipsis } from 'lucide-react'
 
@@ -56,7 +57,9 @@ export function MainCanvas({
   canGoBack,
   canGoForward,
 }: MainCanvasProps) {
-  const [view, setView] = useState<'editor' | 'graph' | 'database' | 'inbox'>('editor')
+  const [view, setView] = useState<
+    'editor' | 'graph' | 'database' | 'inbox' | 'roadmap'
+  >('editor')
   const [graph, setGraph] = useState<VaultGraph | null>(null)
   const [loadingGraph, setLoadingGraph] = useState(false)
   const [graphError, setGraphError] = useState<string | null>(null)
@@ -195,7 +198,9 @@ export function MainCanvas({
               ? 'Database view'
               : view === 'inbox'
                 ? 'Inbox'
-                : (note?.title ?? 'No note selected')}
+                : view === 'roadmap'
+                  ? 'Roadmap'
+                  : (note?.title ?? 'No note selected')}
         </span>
         <button className="vault-note-menu" aria-label="More options" title="More options">
           <Ellipsis size={15} aria-hidden="true" />
@@ -236,6 +241,15 @@ export function MainCanvas({
             <span className="vault-view-badge">{inbox.length}</span>
           )}
         </button>
+        {/* Roadmap needs no loading state and no data plumbing: it renders a
+            static manifest from shared/roadmap.ts. Last in the strip because it
+            is about the app, not about the vault. */}
+        <button
+          className={`vault-view-button ${view === 'roadmap' ? 'active' : ''}`}
+          onClick={() => setView('roadmap')}
+        >
+          Roadmap
+        </button>
         {isDirty && (
           <span className="vault-canvas-dirty-warning">
             Unsaved changes are kept while you switch views
@@ -244,7 +258,9 @@ export function MainCanvas({
       </div>
 
       <div className="vault-view-content">
-        {view === 'inbox' ? (
+        {view === 'roadmap' ? (
+          <RoadmapView />
+        ) : view === 'inbox' ? (
           <InboxView
             items={inbox}
             loading={loadingInbox}

@@ -5,7 +5,12 @@ import type {
   VaultTreeNode,
   VaultGraph,
 } from '../../../shared/ipc.js'
-import { toMeta, type VaultNoteMeta } from '../../../shared/notemeta.js'
+import {
+  toMeta,
+  parseProposal,
+  type VaultNoteMeta,
+  type InboxItem,
+} from '../../../shared/notemeta.js'
 
 export function useVault() {
   const [tree, setTree] = useState<VaultTreeNode | null>(null)
@@ -61,6 +66,29 @@ export function useVault() {
     return rows.map(toMeta).filter((n): n is VaultNoteMeta => n !== null)
   }, [])
 
+  /**
+   * Everything waiting in Inbox/, newest last.
+   *
+   * Built from `tree()` + `read()` rather than the server's own /inbox endpoint,
+   * which returns all ten in ONE call. That is the better call and it is not
+   * made here for a boring reason: it needs a new IPC channel, and `CH` lives
+   * in shared/ipc.ts, which currently holds another agent's uncommitted work.
+   * Ten reads is affordable; taking their file is not. Swap this for /inbox
+   * once that lands.
+   */
+  const getInbox = useCallback(async (): Promise<InboxItem[]> => {
+    const t = await window.api.vault.tree()
+    const dir = t.children?.find((c) => c.kind === 'folder' && c.name === 'Inbox')
+    const files = (dir?.children ?? []).filter((c) => c.kind === 'note')
+    const bodies = await Promise.all(
+      // One unreadable capture must not blank the whole queue.
+      files.map((f) => window.api.vault.read(f.path).catch(() => null)),
+    )
+    return bodies
+      .filter((b): b is VaultNoteBody => b !== null)
+      .map((b) => parseProposal(b.path, b.text))
+  }, [])
+
   const getBacklinks = useCallback((path: string): Promise<string[]> => {
     return window.api.vault.backlinks(path)
   }, [])
@@ -73,6 +101,7 @@ export function useVault() {
     saveNote,
     getGraph,
     getNotes,
+    getInbox,
     getBacklinks,
   }
 }

@@ -389,6 +389,7 @@ export function VaultPane(): React.ReactElement {
             onConflict={handleConflict}
             getGraph={vault.getGraph}
             getNotes={vault.getNotes}
+            getInbox={vault.getInbox}
             backlinks={backlinks}
             onBack={goBack}
             onForward={goForward}

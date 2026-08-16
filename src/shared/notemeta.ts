@@ -86,6 +86,74 @@ export function statusTone(status: string): 'live' | 'stop' | 'soon' | 'none' {
 }
 
 /**
+ * One captured item waiting in Inbox/, as the agent left it.
+ *
+ * These are PROPOSALS, not filed notes: the capture path writes where it thinks
+ * the note should go and stops, so a human can agree or correct. That is the
+ * whole reason the folder exists, and nothing in this app rendered it until
+ * now — ten items have been sitting there since 2026-08-06.
+ */
+export type InboxItem = {
+  path: string
+  /** `proposed_title`, or the filename when the capture had no heading to copy. */
+  title: string
+  /** Where the agent wants it to go. `''` when it did not venture a guess. */
+  folder: string
+  /** The runner-up folders, in rank order. */
+  alternatives: string[]
+  type: string
+  captured: string
+  /** The note itself, frontmatter stripped. */
+  body: string
+}
+
+/**
+ * Read one inbox capture.
+ *
+ * A deliberately small frontmatter reader, matching the one that WROTE these
+ * files (`bench/writer.py` parse_fm): flat `key: value`, quotes stripped. Not a
+ * YAML parser, because a YAML parser would be a dependency and a lie — nothing
+ * writes nested frontmatter here, and pretending to support it would invite it.
+ *
+ * Everything is optional. One of the ten items on disk has no frontmatter at
+ * all ("george flowberry broke"), and a capture queue that throws on the
+ * scruffiest thing in it is useless precisely when it matters.
+ */
+export function parseProposal(path: string, text: string): InboxItem {
+  const stem = path.split('/').pop()!.replace(/\.md$/i, '')
+  const empty: InboxItem = {
+    path, title: stem, folder: '', alternatives: [], type: '', captured: '',
+    body: text.trim(),
+  }
+  if (!text.startsWith('---')) return empty
+  const end = text.indexOf('\n---', 3)
+  if (end === -1) return empty
+
+  const fm: Record<string, string> = {}
+  for (const line of text.slice(3, end).split('\n')) {
+    if (!line.includes(':') || /^[\s\-#]/.test(line)) continue
+    const cut = line.indexOf(':')
+    fm[line.slice(0, cut).trim()] = line.slice(cut + 1).trim().replace(/^"|"$/g, '')
+  }
+
+  return {
+    path,
+    title: fm.proposed_title || stem,
+    folder: fm.proposed_folder || '',
+    // `alternatives: [System, Business]` — a bare inline list, not JSON, so it
+    // is split rather than parsed.
+    alternatives: (fm.alternatives || '')
+      .replace(/^\[|\]$/g, '')
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean),
+    type: fm.proposed_type || '',
+    captured: fm.captured || '',
+    body: text.slice(end + 4).trim(),
+  }
+}
+
+/**
  * Normalise one row off the wire.
  *
  * Every field is defended even though the server sends all of them, because the

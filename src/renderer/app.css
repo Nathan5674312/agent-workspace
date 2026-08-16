@@ -911,3 +911,65 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
 @media (prefers-reduced-motion: reduce) {
   .db-chip:active { transform: none; }
 }
+
+/* ---------------------------------------------------------------- inbox view
+ *
+ * Human oversight of agent work: what was captured and where it wants to go,
+ * before anyone agrees. The one surface a coding agent does not have.
+ */
+
+/* A count on the tab, because a queue nobody can see the size of is a queue
+   nobody opens. Tabular figures so 9 -> 10 does not shift the tab width. */
+.vault-view-badge {
+  margin-left: var(--space-2); padding: 0 var(--space-2);
+  border-radius: 999px;
+  background: var(--accent); color: var(--label-on-accent);
+  font-size: var(--text-xs); font-variant-numeric: tabular-nums;
+}
+
+.inbox-view { display: flex; flex-direction: column; gap: var(--space-4); height: 100%;
+  min-height: 0; overflow: auto; }
+.inbox-head { display: flex; align-items: baseline; gap: var(--space-3); flex: none; }
+.inbox-count { font-weight: var(--weight-semibold); color: var(--label); }
+.inbox-hint { color: var(--label-quaternary); font-size: var(--text-xs); }
+
+.inbox-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column;
+  gap: var(--space-3); }
+
+/* Each capture is a card, not a row: it carries a title, a proposal and a body
+   preview, and cramming that into a table row would misrepresent it as
+   something already filed. */
+.inbox-item { padding: var(--space-4); border-radius: var(--radius-md);
+  background: var(--material-light); border: 1px solid var(--separator);
+  display: flex; flex-direction: column; gap: var(--space-2); }
+
+.inbox-open { display: flex; align-items: baseline; gap: var(--space-3); width: 100%;
+  padding: 0; background: none; text-align: left; }
+.inbox-open:hover { background: none; }
+.inbox-open:active { background: none; transform: none; }
+.inbox-title { font-weight: var(--weight-medium); color: var(--label); }
+.inbox-date { color: var(--label-quaternary); font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums; margin-left: auto; }
+
+.inbox-proposal { display: flex; align-items: center; gap: var(--space-2); flex-wrap: wrap;
+  color: var(--label-quaternary); }
+/* The proposed destination is the decision being reviewed, so it is the one
+   thing here that gets the accent. The alternatives stay plain text: they are
+   context for the decision, not competing choices of equal weight. */
+.inbox-target { color: var(--accent); background: color-mix(in srgb, var(--accent) 12%, transparent); }
+.inbox-alts { font-size: var(--text-xs); color: var(--label-quaternary); }
+
+/* Two lines of the note. Enough to recognise the thought, not enough to read
+   it here instead of opening it. */
+.inbox-body {
+  margin: 0; color: var(--label-tertiary); font-size: var(--text-sm); line-height: 1.4;
+  display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden;
+}
+
+.inbox-zero { display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: var(--space-3); height: 100%; color: var(--label-quaternary); text-align: center; }
+.inbox-zero p { margin: 0; font-size: var(--text-sm); max-width: 24rem; }
+
+@media (prefers-reduced-transparency: reduce) {
+  .inbox-item { background: var(--bg-elevated); }
+}

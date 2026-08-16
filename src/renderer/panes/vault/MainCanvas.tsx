@@ -3,7 +3,8 @@ import type { VaultNoteBody, VaultGraph } from '../../../shared/ipc.js'
 import { Editor } from './Editor.js'
 import { GraphView } from './GraphView.js'
 import { DatabaseView } from './DatabaseView.js'
-import type { VaultNoteMeta } from '../../../shared/notemeta.js'
+import { InboxView } from './InboxView.js'
+import type { VaultNoteMeta, InboxItem } from '../../../shared/notemeta.js'
 import { ArrowLeft, ArrowRight, Ellipsis } from 'lucide-react'
 
 /**
@@ -22,6 +23,7 @@ export interface MainCanvasProps {
   onConflict: (diskMtime: number, diskText: string) => void
   getGraph: () => Promise<VaultGraph>
   getNotes: () => Promise<VaultNoteMeta[]>
+  getInbox: () => Promise<InboxItem[]>
   backlinks: string[]
   /** Resolves false when the open was refused — a conflict dialog, a declined
    *  discard, or a failed read. Callers must not commit a view change until
@@ -44,6 +46,7 @@ export function MainCanvas({
   onConflict,
   getGraph,
   getNotes,
+  getInbox,
   backlinks,
   onOpenNote,
   onOpenWikilink,
@@ -53,13 +56,16 @@ export function MainCanvas({
   canGoBack,
   canGoForward,
 }: MainCanvasProps) {
-  const [view, setView] = useState<'editor' | 'graph' | 'database'>('editor')
+  const [view, setView] = useState<'editor' | 'graph' | 'database' | 'inbox'>('editor')
   const [graph, setGraph] = useState<VaultGraph | null>(null)
   const [loadingGraph, setLoadingGraph] = useState(false)
   const [graphError, setGraphError] = useState<string | null>(null)
   const [notes, setNotes] = useState<VaultNoteMeta[] | null>(null)
   const [loadingNotes, setLoadingNotes] = useState(false)
   const [notesError, setNotesError] = useState<string | null>(null)
+  const [inbox, setInbox] = useState<InboxItem[] | null>(null)
+  const [loadingInbox, setLoadingInbox] = useState(false)
+  const [inboxError, setInboxError] = useState<string | null>(null)
 
   /**
    * Always re-fetch. This used to early-return whenever `graph` was non-null,
@@ -116,6 +122,24 @@ export function MainCanvas({
     }
   }
 
+  /**
+   * Re-fetch every time, for the strongest version of the reason the other two
+   * have: this queue's whole job is to tell you what arrived since you last
+   * looked. A cached inbox is a lie about the present.
+   */
+  const handleSwitchToInbox = async () => {
+    setView('inbox')
+    try {
+      setLoadingInbox(true)
+      setInboxError(null)
+      setInbox(await getInbox())
+    } catch (e) {
+      setInboxError(String(e))
+    } finally {
+      setLoadingInbox(false)
+    }
+  }
+
   return (
     <div className="vault-main-canvas">
       {/* Note header — back / forward, the title, and the view menu, in the
@@ -148,7 +172,9 @@ export function MainCanvas({
             ? 'Graph view'
             : view === 'database'
               ? 'Database view'
-              : (note?.title ?? 'No note selected')}
+              : view === 'inbox'
+                ? 'Inbox'
+                : (note?.title ?? 'No note selected')}
         </span>
         <button className="vault-note-menu" aria-label="More options" title="More options">
           <Ellipsis size={15} aria-hidden="true" />
@@ -176,6 +202,19 @@ export function MainCanvas({
         >
           {loadingNotes ? 'Loading...' : 'Database'}
         </button>
+        <button
+          className={`vault-view-button ${view === 'inbox' ? 'active' : ''}`}
+          onClick={handleSwitchToInbox}
+          disabled={loadingInbox}
+        >
+          {loadingInbox ? 'Loading...' : 'Inbox'}
+          {/* The count is the point of a queue: it has to be legible without
+              opening the tab, or nobody opens the tab. Only shown once loaded
+              — a badge that says 0 before it has looked is a false all-clear. */}
+          {inbox && inbox.length > 0 && (
+            <span className="vault-view-badge">{inbox.length}</span>
+          )}
+        </button>
         {isDirty && (
           <span className="vault-canvas-dirty-warning">
             Unsaved changes are kept while you switch views
@@ -184,7 +223,20 @@ export function MainCanvas({
       </div>
 
       <div className="vault-view-content">
-        {view === 'database' ? (
+        {view === 'inbox' ? (
+          <InboxView
+            items={inbox}
+            loading={loadingInbox}
+            error={inboxError}
+            // Opening a capture is reading it, not filing it: the note stays in
+            // Inbox/ until something actually moves it.
+            onOpenNote={async (path) => {
+              const opened = await onOpenNote(path)
+              if (opened) setView('editor')
+              return opened
+            }}
+          />
+        ) : view === 'database' ? (
           <DatabaseView
             notes={notes}
             loading={loadingNotes}

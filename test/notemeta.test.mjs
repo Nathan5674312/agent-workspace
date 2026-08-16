@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { areaOf, toMeta, statusTone, NONE } from '../src/shared/notemeta.ts'
+import { areaOf, toMeta, statusTone, parseProposal, NONE } from '../src/shared/notemeta.ts'
 
 test('areaOf collapses 99 folders onto a groupable axis', async (t) => {
   await t.test('a nested folder becomes its first segment', () => {
@@ -120,5 +120,53 @@ test('statusTone reads freeform status prose', async (t) => {
     // "— ACTIVE" must not read as "" and fall through to none.
     assert.equal(statusTone('— ACTIVE'), 'live')
     assert.equal(statusTone('  2026 blocked'), 'stop')
+  })
+})
+
+test('parseProposal reads what an agent left in the Inbox', async (t) => {
+  // Verbatim shape of a real capture on disk.
+  const real = [
+    '---',
+    'proposed_title: "Daily Market Analysis Routine"',
+    'proposed_folder: Trading',
+    'alternatives: [System, Business]',
+    'proposed_type: playbook',
+    'captured: 2026-08-06',
+    '---',
+    '',
+    'The system must never ask the user to maintain it.',
+  ].join('\n')
+
+  await t.test('the proposal is extracted whole', () => {
+    const p = parseProposal('Inbox/20260806-130827.md', real)
+    assert.equal(p.title, 'Daily Market Analysis Routine')
+    assert.equal(p.folder, 'Trading')
+    assert.deepEqual(p.alternatives, ['System', 'Business'])
+    assert.equal(p.type, 'playbook')
+    assert.equal(p.captured, '2026-08-06')
+    assert.equal(p.body, 'The system must never ask the user to maintain it.')
+    assert.ok(!p.body.includes('---'), 'frontmatter leaked into the body')
+  })
+
+  await t.test('a capture with NO frontmatter still renders', () => {
+    // One of the ten real items is exactly this. A queue that throws on the
+    // scruffiest thing in it is useless precisely when it matters.
+    const p = parseProposal('Inbox/20260806-125145.md', 'george flowberry broke')
+    assert.equal(p.title, '20260806-125145', 'should fall back to the filename')
+    assert.equal(p.folder, '')
+    assert.deepEqual(p.alternatives, [])
+    assert.equal(p.body, 'george flowberry broke')
+  })
+
+  await t.test('an unterminated frontmatter block is not swallowed', () => {
+    // Without the end-marker check, everything after `---` would vanish.
+    const p = parseProposal('Inbox/x.md', '---\nproposed_folder: Trading\nno end marker')
+    assert.equal(p.folder, '', 'must not trust a block that never closed')
+    assert.ok(p.body.includes('no end marker'), 'body was swallowed')
+  })
+
+  await t.test('an empty alternatives list yields no empty strings', () => {
+    const p = parseProposal('Inbox/x.md', '---\nalternatives: []\n---\nbody')
+    assert.deepEqual(p.alternatives, [], 'split produced a phantom entry')
   })
 })

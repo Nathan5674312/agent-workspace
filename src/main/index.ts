@@ -1,6 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
 import { registerIpc } from './ipc.js'
+import { checkRoots } from './vault.js'
 
 /**
  * Only http(s) may be handed to the OS. `new URL` is the parser, not a regex —
@@ -65,6 +66,10 @@ function createWindow(): BrowserWindow {
 void app.whenReady().then(() => {
   registerIpc()
   createWindow()
+  // Diagnostic only, and deliberately not awaited: a slow or absent note server
+  // must never hold up the window. Warns once at boot if the app's vault
+  // directory and the server's root are not the same vault.
+  void checkRoots().then((msg) => msg && console.warn(msg))
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

@@ -377,3 +377,46 @@ test('scrub() does not eat our own single-segment paths', async () => {
 
   await mock.close()
 })
+
+/**
+ * checkRoots() — the two vault roots are configured independently and nothing
+ * verified they matched. These pin the three answers it can give.
+ */
+test('checkRoots() detects a disagreement between the two vault roots', async (t) => {
+  const mock = await startMockVault({
+    notes: {
+      'Home.md': { text: '# Home', mtime: 1 },
+      'Projects/AI.md': { text: '# AI', mtime: 2 },
+    },
+  })
+  vault._setBaseForTest(mock.url)
+
+  await t.test('agreeing roots report nothing', async () => {
+    vault._setVaultDirForTest(await makeScratchVault(['Home.md', 'Projects/AI.md']))
+    assert.equal(await vault.checkRoots(), null)
+  })
+
+  await t.test('one stale row is not a mismatch', async () => {
+    // Home.md is gone from disk but Projects/AI.md is there. Testing a single
+    // note would call this two different vaults; sampling must not.
+    vault._setVaultDirForTest(await makeScratchVault(['Projects/AI.md']))
+    assert.equal(await vault.checkRoots(), null)
+  })
+
+  await t.test('a genuinely different root is reported with the path', async () => {
+    const wrong = await makeScratchVault(['Somewhere Else.md'])
+    vault._setVaultDirForTest(wrong)
+    const msg = await vault.checkRoots()
+    assert.ok(msg, 'divergent roots went unreported')
+    assert.ok(msg.includes(wrong), `message does not name the directory: ${msg}`)
+  })
+
+  await mock.close()
+
+  await t.test('a dead server is unanswerable, not a mismatch', async () => {
+    // The server being down is read()'s error to raise, not this one's. A boot
+    // warning here would fire every time the app started first.
+    vault._setVaultDirForTest(await makeScratchVault(['Home.md']))
+    assert.equal(await vault.checkRoots(), null)
+  })
+})

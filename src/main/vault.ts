@@ -189,6 +189,53 @@ export async function list(): Promise<VaultNote[]> {
   })
 }
 
+/**
+ * Startup coherence check for the two vault roots.
+ *
+ * `tree()` reads the folder structure off disk from VAULT_DIR. Every read and
+ * write goes through the server, which has its own root. Nothing made the two
+ * agree, so when they diverge the explorer lists notes that `read()` then 400s
+ * on — and the failure reads as a broken note rather than a misconfigured root.
+ *
+ * The server exposes no endpoint for its root (checked: server.py's do_GET
+ * serves /, /inbox, /notes and /note only), so this asks the question the one
+ * way available — take notes the server says it has and look for them under
+ * ours. `/notes` is already implemented as `list()`, so this costs one HTTP
+ * call and a few stats.
+ *
+ * Returns null when the roots agree OR when the question cannot be answered:
+ * server down, or an empty index. A missing answer is not a mismatch, and a
+ * false alarm here would send someone chasing a config bug that does not exist.
+ *
+ * The message carries VAULT_DIR unscrubbed. That is deliberate — the whole
+ * point is to name the wrong directory, and this string is for the main-process
+ * console, not the renderer. Do not forward it over IPC without scrub().
+ */
+export async function checkRoots(): Promise<string | null> {
+  // Only the server being unreachable is swallowed. A malformed index is
+  // list()'s problem and it already returns [] for that.
+  const notes = await list().catch(() => [])
+  if (notes.length === 0) return null
+
+  const { access } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+
+  // Sample rather than test one. A single note can legitimately be missing —
+  // deleted between the server building its index and this stat — and one
+  // stale row must not be reported as two different vaults.
+  const sample = notes.slice(0, 5)
+  for (const n of sample) {
+    const hit = await access(join(VAULT_DIR, n.path)).then(() => true, () => false)
+    if (hit) return null
+  }
+  return (
+    `vault: the note server and this app are pointed at different vaults. ` +
+    `None of ${sample.length} note(s) the server lists (e.g. "${sample[0].path}") ` +
+    `exist under ${VAULT_DIR}. The explorer will list notes that fail to open. ` +
+    `Fix VAULT in note-system/app/server.py or AGENT_WORKSPACE_VAULT_DIR.`
+  )
+}
+
 export async function read(path: string): Promise<VaultNoteBody> {
   // requirePath was defined and then never called by anything — a guard that
   // looked like it was protecting these two entry points and was not. tsc

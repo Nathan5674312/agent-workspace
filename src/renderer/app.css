@@ -679,3 +679,103 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   button, input, textarea, select { border: 1px solid var(--separator); }
   .vault-tab--active { outline: 1px solid var(--label-secondary); }
 }
+
+/* ------------------------------------------------------------- database view
+ *
+ * The Notion half. The graph shows how notes connect; this shows what they are.
+ *
+ * It is a real <table>: these are tabular rows with a header that sorts them,
+ * which is what the element is for. A grid of divs would have cost the free
+ * semantics (aria-sort, row/column association, header association for anyone
+ * on a screen reader) and bought nothing.
+ */
+.db-view { --db-head-h: 2rem; display: flex; flex-direction: column; height: 100%; min-height: 0; gap: var(--space-3); }
+
+.db-toolbar { display: flex; align-items: center; gap: var(--space-2); flex: none; flex-wrap: wrap; }
+
+.db-search { display: flex; align-items: center; gap: var(--space-2); flex: 1 1 200px; min-width: 160px;
+  padding: 0 var(--space-3); border-radius: var(--radius-md); background: var(--fill-selected); color: var(--label-tertiary); }
+.db-search input { flex: 1; min-width: 0; padding: var(--space-2) 0; border: 0; background: none;
+  color: var(--label); font: inherit; }
+.db-search input:focus { outline: none; }
+/* The search type's native clear affordance is a different metaphor per engine
+   and does not match anything else here. */
+.db-search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
+
+.db-control { display: flex; align-items: center; gap: var(--space-2); color: var(--label-tertiary);
+  font-size: var(--text-xs); white-space: nowrap; }
+.db-control select { padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-sm);
+  background: var(--fill-selected); color: var(--label); font: inherit; }
+
+.db-chip { display: inline-flex; align-items: center; gap: var(--space-1);
+  padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm);
+  color: var(--label-tertiary); font-size: var(--text-xs); white-space: nowrap; }
+.db-chip.active { color: var(--label); background: var(--fill-selected); }
+
+.db-count { margin-left: auto; color: var(--label-quaternary); font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
+
+.db-scroll { flex: 1; min-height: 0; overflow: auto; }
+
+.db-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+
+/* Sticky header, so the sort control stays reachable 258 rows down. `thead th`
+   rather than the row: only cells generate boxes that can stick. */
+.db-table thead th { position: sticky; top: 0; z-index: 2; text-align: left; font-weight: inherit;
+  color: var(--label-quaternary); background: var(--bg-app); padding: 0;
+  border-bottom: 1px solid var(--separator); }
+.db-table thead th button { display: flex; align-items: center; gap: var(--space-1); width: 100%;
+  padding: var(--space-2) var(--space-3); color: inherit; font: inherit; text-align: left; }
+.db-table thead th button:hover { color: var(--label-secondary); }
+.db-sort { font-size: 0.9em; }
+
+/* Group headers sit BELOW the column header when both are stuck, hence top:
+   var(--db-head-h) and the lower z-index. That offset is a measurement of the
+   column header, not a step on the spacing scale, so it is not a --space-*. */
+.db-group th { position: sticky; top: var(--db-head-h); z-index: 1; padding: 0; background: var(--bg-app);
+  text-align: left; font-weight: inherit; }
+.db-group button { display: flex; align-items: center; gap: var(--space-2); width: 100%;
+  padding: var(--space-3) var(--space-3) var(--space-1); color: var(--label-secondary); font: inherit; }
+.db-group-name { font-size: var(--text-xs); letter-spacing: var(--tracking-caps); text-transform: uppercase; }
+.db-group-count { color: var(--label-quaternary); font-variant-numeric: tabular-nums; }
+
+.db-row { cursor: pointer; }
+.db-row:hover { background: var(--fill-hover); }
+.db-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
+.db-row td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--separator);
+  vertical-align: middle; }
+
+/* Fixed proportions, so switching group-by does not reflow every column width
+   and make the table appear to jump. */
+.db-col-title { width: 42%; }
+.db-col-area, .db-col-type, .db-col-status { width: 16%; }
+.db-col-updated { width: 10%; color: var(--label-quaternary); font-variant-numeric: tabular-nums;
+  white-space: nowrap; }
+
+.db-col-title { display: table-cell; }
+.db-title { color: var(--label); }
+.db-row:hover .db-title { color: var(--label); }
+
+.db-orphan { margin-left: var(--space-2); color: var(--label-quaternary); vertical-align: -1px; }
+
+/* Values are chips, not bare text, because Area/Type/Status are enumerations —
+   the shape says "this is one of a set" before the word is read. Truncation is
+   deliberate: one status in this vault is a full sentence, and the column must
+   not resize itself around the worst-behaved value in the data. */
+.db-tag { display: inline-block; max-width: 100%; padding: 1px var(--space-2);
+  border-radius: var(--radius-sm); background: var(--fill-selected); color: var(--label-secondary);
+  font-size: var(--text-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+  vertical-align: middle; }
+.db-tag-status { color: var(--label); }
+
+.db-empty { padding: var(--space-6) var(--space-3); color: var(--label-quaternary);
+  font-size: var(--text-sm); }
+
+/* The table owns its own scrolling, so the pane-level scroll mask (which fades
+   the first 40px) would eat the sticky header. Same exemption the graph takes. */
+.vault-view-content:has(.db-view) {
+  -webkit-mask-image: none;
+  mask-image: none;
+  animation: none;
+  overflow: hidden;
+}

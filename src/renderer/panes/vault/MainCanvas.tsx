@@ -2,6 +2,8 @@ import { useState } from 'react'
 import type { VaultNoteBody, VaultGraph } from '../../../shared/ipc.js'
 import { Editor } from './Editor.js'
 import { GraphView } from './GraphView.js'
+import { DatabaseView } from './DatabaseView.js'
+import type { VaultNoteMeta } from '../../../shared/notemeta.js'
 import { ArrowLeft, ArrowRight, Ellipsis } from 'lucide-react'
 
 /**
@@ -19,6 +21,7 @@ export interface MainCanvasProps {
   onSave: (text: string, mtime: number) => Promise<void>
   onConflict: (diskMtime: number, diskText: string) => void
   getGraph: () => Promise<VaultGraph>
+  getNotes: () => Promise<VaultNoteMeta[]>
   backlinks: string[]
   onOpenNote: (path: string) => void
   onOpenWikilink: (name: string) => void
@@ -37,6 +40,7 @@ export function MainCanvas({
   onSave,
   onConflict,
   getGraph,
+  getNotes,
   backlinks,
   onOpenNote,
   onOpenWikilink,
@@ -46,10 +50,13 @@ export function MainCanvas({
   canGoBack,
   canGoForward,
 }: MainCanvasProps) {
-  const [view, setView] = useState<'editor' | 'graph'>('editor')
+  const [view, setView] = useState<'editor' | 'graph' | 'database'>('editor')
   const [graph, setGraph] = useState<VaultGraph | null>(null)
   const [loadingGraph, setLoadingGraph] = useState(false)
   const [graphError, setGraphError] = useState<string | null>(null)
+  const [notes, setNotes] = useState<VaultNoteMeta[] | null>(null)
+  const [loadingNotes, setLoadingNotes] = useState(false)
+  const [notesError, setNotesError] = useState<string | null>(null)
 
   /**
    * Always re-fetch. This used to early-return whenever `graph` was non-null,
@@ -76,6 +83,28 @@ export function MainCanvas({
       setGraphError(String(e))
     } finally {
       setLoadingGraph(false)
+    }
+  }
+
+  /**
+   * Same contract as the graph: always re-fetch, never memo up here.
+   *
+   * A cached note list is worse than a cached graph, not better. Frontmatter is
+   * exactly what this view exists to show, so an edit to `status:` that the
+   * table keeps showing the old value for is the stale-status-board failure the
+   * database view was built to end. The main process already memoises with a
+   * TTL and invalidates on our own saves.
+   */
+  const handleSwitchToDatabase = async () => {
+    setView('database')
+    try {
+      setLoadingNotes(true)
+      setNotesError(null)
+      setNotes(await getNotes())
+    } catch (e) {
+      setNotesError(String(e))
+    } finally {
+      setLoadingNotes(false)
     }
   }
 
@@ -107,7 +136,11 @@ export function MainCanvas({
           </button>
         </div>
         <span className="vault-note-title">
-          {view === 'graph' ? 'Graph view' : (note?.title ?? 'No note selected')}
+          {view === 'graph'
+            ? 'Graph view'
+            : view === 'database'
+              ? 'Database view'
+              : (note?.title ?? 'No note selected')}
         </span>
         <button className="vault-note-menu" aria-label="More options" title="More options">
           <Ellipsis size={15} aria-hidden="true" />
@@ -128,6 +161,13 @@ export function MainCanvas({
         >
           {loadingGraph ? 'Loading...' : 'Graph'}
         </button>
+        <button
+          className={`vault-view-button ${view === 'database' ? 'active' : ''}`}
+          onClick={handleSwitchToDatabase}
+          disabled={loadingNotes}
+        >
+          {loadingNotes ? 'Loading...' : 'Database'}
+        </button>
         {isDirty && (
           <span className="vault-canvas-dirty-warning">
             Unsaved changes are kept while you switch views
@@ -136,7 +176,20 @@ export function MainCanvas({
       </div>
 
       <div className="vault-view-content">
-        {view === 'editor' ? (
+        {view === 'database' ? (
+          <DatabaseView
+            notes={notes}
+            loading={loadingNotes}
+            error={notesError}
+            onOpenNote={(path) => {
+              // Same reasoning as the graph's click: loading the note is only
+              // half of "open". Without the view switch it opens behind the
+              // table and the click reads as broken even though it worked.
+              onOpenNote(path)
+              setView('editor')
+            }}
+          />
+        ) : view === 'editor' ? (
           <Editor
             note={note}
             text={text}

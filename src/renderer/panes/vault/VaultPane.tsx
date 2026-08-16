@@ -379,6 +379,7 @@ export function VaultPane(): React.ReactElement {
             onSave={handleSave}
             onConflict={handleConflict}
             getGraph={vault.getGraph}
+            getNotes={vault.getNotes}
             backlinks={backlinks}
             onBack={goBack}
             onForward={goForward}

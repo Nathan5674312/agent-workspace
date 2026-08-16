@@ -15,6 +15,7 @@ import type {
   VaultTreeNode,
 } from '../shared/ipc.js'
 import { parseWikilinks } from '../shared/wikilink.ts'
+import type { VaultNoteMeta } from '../shared/notemeta.ts'
 
 let BASE = 'http://127.0.0.1:8765'
 
@@ -158,7 +159,7 @@ function requireMtime(mtime: unknown): number {
 
 const titleOf = (p: string) => p.split('/').pop()!.replace(/\.md$/i, '')
 
-export async function list(): Promise<VaultNote[]> {
+export async function list(): Promise<VaultNoteMeta[]> {
   // The server's /notes shape is its own; normalise to VaultNote here so the
   // renderer never sees two spellings of the same thing.
   const raw = await req<unknown>('/notes')
@@ -178,6 +179,19 @@ export async function list(): Promise<VaultNote[]> {
     return [{
       path,
       title: String(o.title ?? titleOf(path)),
+      // Carried through rather than dropped. /notes has always returned folder,
+      // type and orphan; this function normalised them away, so the renderer
+      // could not group or filter without re-reading all 258 notes itself.
+      // status/updated were added to server.py's note_list() for the same
+      // reason -- the frontmatter is already parsed there.
+      // Widening the row does NOT break the narrower VaultNote consumers: the
+      // extra keys ride along and are ignored by everything that does not ask.
+      folder: typeof o.folder === 'string' ? o.folder : '(root)',
+      type: typeof o.type === 'string' ? o.type : '',
+      status: typeof o.status === 'string' ? o.status : '',
+      updated: typeof o.updated === 'string' ? o.updated : '',
+      depth: typeof o.depth === 'number' ? o.depth : null,
+      orphan: o.orphan === true,
       // TRAP for the next caller: /notes carries no mtime (server.py builds the
       // row without one), so this is always 0. A row from here is fine to open
       // or to draw, but its mtime is NOT a version — feeding it to save() 409s

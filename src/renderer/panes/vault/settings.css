@@ -1,0 +1,147 @@
+/**
+ * Settings modal. Imported by SettingsDialog.tsx, not by main.tsx — this file
+ * exists so the modal's styles arrive with the component instead of joining the
+ * app-wide sheet.
+ *
+ * Values come from tokens.css only. Nothing here invents a colour, a radius or
+ * a duration; the palette is monochrome by design (tokens.css §4b) so emphasis
+ * is luminance and weight, never a hue.
+ */
+
+.settings-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 200; /* over .pane-corner (100), which floats above the vault */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-6);
+  /* Ink at high alpha rather than neutral black: a grey scrim on a warm ground
+     reads as a dead pixel layer. */
+  background: rgba(22, 12, 8, 0.6);
+  backdrop-filter: var(--blur-regular);
+  -webkit-backdrop-filter: var(--blur-regular);
+}
+
+.settings-dialog {
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-6);
+  background: var(--bg-elevated);
+  border: 1px solid var(--separator);
+  /* The bright top edge is what makes an elevated surface read as glass rather
+     than as a lighter rectangle. */
+  box-shadow: var(--shadow-lg), inset 0 1px 0 var(--edge-highlight);
+  border-radius: var(--radius-xl);
+  color: var(--label);
+}
+
+/* The wrapper takes focus on open so the trap has a start; that focus is
+   programmatic, not a tab stop, and the ring on a whole panel is noise. */
+.settings-dialog:focus {
+  outline: none;
+}
+
+.settings-title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
+  line-height: var(--leading-title);
+}
+
+.settings-field {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+}
+
+.settings-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.settings-label {
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+}
+
+.settings-change {
+  flex: none;
+  color: var(--label);
+  background: var(--material-light);
+}
+
+/* Mono, and wrapping on separators rather than mid-word: a vault path is a
+   sequence of segments and breaking it anywhere else makes it unreadable. */
+.settings-path {
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--label-secondary);
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-sunken);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-md);
+  overflow-wrap: anywhere;
+}
+
+.settings-path-inline {
+  font-family: var(--font-mono);
+  color: var(--label-secondary);
+  overflow-wrap: anywhere;
+}
+
+.settings-hint,
+.settings-pending,
+.settings-mismatch,
+.settings-error {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+
+.settings-hint {
+  color: var(--label-tertiary);
+}
+
+/* Pending is a live consequence of something the user just did, so it carries
+   full-strength ink where the standing hint does not. */
+.settings-pending {
+  color: var(--label);
+}
+
+.settings-mismatch,
+.settings-error {
+  padding: var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--material-light);
+  /* A left edge, not a fill: the warning colours in tokens.css are marked
+     PROPOSED, so nothing load-bearing rests on them and the message stays
+     distinguishable by structure alone. */
+  border-left: 2px solid var(--warning);
+  color: var(--label-secondary);
+}
+
+.settings-error {
+  border-left-color: var(--danger);
+}
+
+.settings-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--separator);
+}
+
+.settings-close {
+  color: var(--label);
+  background: var(--material-light);
+  padding: var(--space-3) var(--space-5);
+}

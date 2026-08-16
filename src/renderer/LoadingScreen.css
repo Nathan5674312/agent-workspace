@@ -21,7 +21,7 @@
   background: var(--bg-app);
   /* Fades itself out of existence. The screen underneath is already painted, so
      this is a reveal rather than a load — nothing is waiting on the fade. */
-  animation: boot-out var(--duration-normal) var(--ease-out) 2.2s both;
+  animation: boot-out var(--duration-normal) var(--ease-out) 2.65s both;
 }
 
 @keyframes boot-out {
@@ -130,7 +130,10 @@
 .flap-half--bottom .flap-char,
 .flap-leaf--back .flap-char { bottom: 0; }
 
-/* Only transform and filter animate here, both compositor-friendly. */
+/* Only transform and filter animate here, both compositor-friendly.
+   0.07s MUST equal FLIP_DURATION in LoadingScreen.tsx. The JS replaces the leaf
+   element every step, so a CSS duration longer than the step leaves every flap
+   cut off part-way through its turn — which reads as a stutter, not a flip. */
 .flap-leaf {
   z-index: 6;
   will-change: transform, filter;
@@ -139,13 +142,13 @@
 
 .flap-leaf--front {
   transform-origin: center bottom;
-  animation: flap-front 0.11s cubic-bezier(0.23, 1, 0.32, 1) both;
+  animation: flap-front 0.07s cubic-bezier(0.23, 1, 0.32, 1) both;
 }
 
 .flap-leaf--back {
   transform-origin: center top;
   transform: rotateX(90deg);
-  animation: flap-back 0.11s cubic-bezier(0.23, 1, 0.32, 1) both;
+  animation: flap-back 0.07s cubic-bezier(0.23, 1, 0.32, 1) both;
 }
 
 @keyframes flap-front {

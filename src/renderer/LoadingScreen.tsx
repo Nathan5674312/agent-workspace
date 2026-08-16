@@ -25,18 +25,49 @@ import './LoadingScreen.css'
  */
 
 const CHARSET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
-/** Intermediate glyphs each changed tile flips through before it lands. */
-const FLIPS_PER_CHAR = 6
-/** Seconds per flap. */
-const FLIP_DURATION = 0.11
-/** Seconds between adjacent tiles starting their cascade. */
-const STAGGER = 0.045
-/** Fixed tile count, so the board does not resize between phrases. */
-const WIDTH = 13
+/**
+ * Intermediate glyphs every tile tumbles through before it lands.
+ *
+ * The whole board scrambles and then lands AT ONCE, so this number is the only
+ * thing setting how long the scramble reads for: 18 x 70ms = ~1.26s. At the
+ * original 6 x 110ms it was over before you could focus on it.
+ */
+const FLIPS_PER_CHAR = 18
+/** Seconds per flap. Must match the flap-front/flap-back durations in the CSS. */
+const FLIP_DURATION = 0.07
+/** Milliseconds a landed phrase is held before the board scrambles again. */
+const HOLD_MS = 1500
+/**
+ * Minimum time the boot screen stays up.
+ *
+ * Sized to the animation, not guessed: the opening scramble is
+ * (FLIPS_PER_CHAR + 1) x FLIP_DURATION = ~1.33s, and the phrase then needs to
+ * be READABLE once it lands, which the first version never allowed for -- it
+ * resolved and vanished inside a blink. Opening + a beat to read it + the fade.
+ * Kept in sync with the boot-out delay in LoadingScreen.css.
+ */
+const BOOT_MIN_MS = 3000
 
 const sampleChar = () => CHARSET.charAt(Math.floor(Math.random() * CHARSET.length))
 
-const pad = (phrase: string) => phrase.padEnd(WIDTH, ' ').slice(0, WIDTH)
+const randomPhrase = (width: number) =>
+  Array.from({ length: width }, sampleChar).join('')
+
+/**
+ * Centre the phrase in a fixed-width board.
+ *
+ * Was `padEnd`, which is two bugs. The obvious one: every phrase shorter than
+ * the board carried its blank tiles on the right, so the text sat visibly left
+ * of centre — 'VAULT ONLINE' in 13 tiles was off by half a tile.
+ *
+ * The quiet one: the width was a hardcoded 13 and the `.slice()` that enforced
+ * it silently truncated 'AGENT WORKSPACE' to 'AGENT WORKSPA'. The width is now
+ * derived from the longest phrase, so the slice can never cut a word again.
+ */
+const padCentre = (phrase: string, width: number) => {
+  const left = Math.floor((width - phrase.length) / 2)
+  return phrase.padStart(phrase.length + Math.max(0, left), ' ').padEnd(width, ' ')
+}
 
 type Tile = { current: string; next: string; flipping: boolean; tick: number }
 
@@ -61,8 +92,19 @@ function SplitFlapText({ phrases }: { phrases: string[] }) {
   const timer = useRef<number | null>(null)
   const currentText = useRef('')
 
-  const padded = useMemo(() => phrases.map(pad), [phrases])
-  const [tiles, setTiles] = useState<Tile[]>(() => createTiles(padded[0] ?? ''))
+  /** Wide enough for the longest phrase, so nothing is ever cut. */
+  const width = useMemo(
+    () => phrases.reduce((m, p) => Math.max(m, p.length), 1),
+    [phrases],
+  )
+  const padded = useMemo(
+    () => phrases.map((p) => padCentre(p, width)),
+    [phrases, width],
+  )
+  // Opens on nonsense, deliberately. The board is a mechanism; watching it
+  // resolve out of noise is the whole effect, and starting on the finished
+  // phrase threw that away on the one appearance that matters most.
+  const [tiles, setTiles] = useState<Tile[]>(() => createTiles(randomPhrase(width)))
 
   useEffect(() => {
     const stop = () => {
@@ -73,15 +115,9 @@ function SplitFlapText({ phrases }: { phrases: string[] }) {
     }
     stop()
 
-    const first = padded[0] ?? ''
-    currentText.current = first
-    setTiles(createTiles(first))
-    if (padded.length <= 1) return stop
-
     let index = 0
     let cancelled = false
     const flipMs = FLIP_DURATION * 1000
-    const staggerMs = STAGGER * 1000
 
     const animateTo = (target: string): number => {
       if (reduced) {
@@ -92,21 +128,26 @@ function SplitFlapText({ phrases }: { phrases: string[] }) {
         return 0
       }
 
-      const from = pad(currentText.current)
-      const plans = target
-        .split('')
-        .map((ch, i) => {
-          if (from[i] === ch) return null
-          const seq = Array.from({ length: FLIPS_PER_CHAR }, sampleChar).concat(ch)
-          return { i, from: from[i] ?? ' ', target: ch, seq, start: i * staggerMs, step: -1, done: false }
-        })
-        .filter((p): p is NonNullable<typeof p> => p !== null)
-
-      if (plans.length === 0) {
-        currentText.current = target
-        setTiles(createTiles(target))
-        return 0
-      }
+      const from = padCentre(currentText.current.trim(), width)
+      /**
+       * EVERY tile tumbles, and they all start and land on the same frame.
+       *
+       * The original skipped tiles whose letter was not changing and staggered
+       * the rest left-to-right, which is what a real departure board does when
+       * one flight changes. It is the wrong read for a boot screen: the board
+       * dribbled into place a letter at a time and half the tiles never moved.
+       * Scrambling the whole board and snapping it shut in one beat is the
+       * effect worth having — noise, then a word.
+       */
+      const plans = target.split('').map((ch, i) => ({
+        i,
+        from: from[i] ?? ' ',
+        target: ch,
+        seq: Array.from({ length: FLIPS_PER_CHAR }, sampleChar).concat(ch),
+        step: -1,
+        done: false,
+        start: 0,
+      }))
 
       const total = plans.reduce((m, p) => Math.max(m, p.start + p.seq.length * flipMs), 0)
       const startedAt = performance.now()
@@ -168,16 +209,22 @@ function SplitFlapText({ phrases }: { phrases: string[] }) {
       timer.current = window.setTimeout(() => {
         if (cancelled) return
         index = (index + 1) % padded.length
-        schedule(1600 + animateTo(padded[index]))
+        schedule(HOLD_MS + animateTo(padded[index]))
       }, delay)
     }
-    schedule(1100)
+
+    // The opening scramble runs IMMEDIATELY rather than after a delay: the
+    // board is already showing noise, and the first thing it should do is
+    // resolve. Everything after that is on the hold cycle.
+    currentText.current = randomPhrase(width)
+    const opening = animateTo(padded[0] ?? '')
+    if (padded.length > 1) schedule(HOLD_MS + opening)
 
     return () => {
       cancelled = true
       stop()
     }
-  }, [padded, reduced])
+  }, [padded, width, reduced])
 
   const settled = tiles.map((t) => t.current).join('').trimEnd()
 
@@ -234,7 +281,7 @@ export function LoadingScreen(): React.ReactElement | null {
 
   useEffect(() => {
     let cancelled = false
-    const floor = new Promise<void>((r) => setTimeout(r, 2600))
+    const floor = new Promise<void>((r) => setTimeout(r, BOOT_MIN_MS))
     const ready = window.api.vault.tree().then(
       () => undefined,
       () => undefined,

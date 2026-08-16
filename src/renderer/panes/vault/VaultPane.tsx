@@ -32,6 +32,7 @@ import { VaultSwitcher } from './VaultSwitcher.js'
 import { TabBar } from './TabBar.js'
 import { MainCanvas } from './MainCanvas.js'
 import { ConflictDialog } from './ConflictDialog.js'
+import { SettingsDialog } from './SettingsDialog.js'
 import { ArtCredit } from './ArtCredit.js'
 import {
   collectFolderPaths,
@@ -51,6 +52,7 @@ export function VaultPane(): React.ReactElement {
   const [tabs, setTabs] = useState([{ id: 'default', name: 'Universal Vault' }])
   const [activeTabId, setActiveTabId] = useState('default')
   const [conflictOpen, setConflictOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [conflictData, setConflictData] = useState<{
     diskMtime: number
     diskText: string
@@ -358,7 +360,7 @@ export function VaultPane(): React.ReactElement {
           )}
 
           <VaultSwitcher
-            onSettings={() => console.log('Settings')}
+            onSettings={() => setSettingsOpen(true)}
             onHelp={() => console.log('Help')}
           />
         </div>
@@ -415,6 +417,11 @@ export function VaultPane(): React.ReactElement {
         onKeepDisk={handleKeepDisk}
         onMerge={handleMerge}
       />
+
+      {/* Same level as the conflict dialog, and unmounted when closed so its
+          "read settings on open" effect runs on every open. Nothing here can
+          discard the edit buffer, so it needs no dirty guard. */}
+      <SettingsDialog isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }

@@ -33,6 +33,60 @@ export type VaultLink = { from: string; to: string }
 
 export type VaultGraph = { nodes: string[]; links: VaultLink[] }
 
+// ------------------------------------------------------------------- settings
+
+/**
+ * App settings. ONE setting in v1: the vault folder.
+ *
+ * The renderer never sends a path across this boundary — `pickVaultDir()` opens
+ * the OS folder picker in the MAIN process and returns the result. A settings
+ * call that accepted an arbitrary renderer-supplied directory would be a way to
+ * point the app's file reads anywhere on disk.
+ */
+export type AppSettings = {
+  /** Absolute path of the vault root the running app is actually using. */
+  vaultDir: string
+  /**
+   * A folder chosen for next launch, when it differs from `vaultDir`. Null when
+   * there is nothing pending — a vault change applies on restart, never live.
+   */
+  pendingVaultDir: string | null
+  /**
+   * The startup vault-root mismatch warning from `vault.checkRoots()`, or null
+   * when the roots agree or the question could not be answered. Read-only
+   * diagnostic: it is recorded at boot, not recomputed per read.
+   */
+  rootMismatch: string | null
+}
+
+// ------------------------------------------------------------- claude (pane 1)
+
+export type SessionId = string
+
+export type Session = {
+  id: SessionId
+  title: string
+  /** Project scope this session is bound to (absolute path). */
+  cwd: string
+  status: 'idle' | 'running' | 'awaiting-permission' | 'error'
+  updatedAt: number
+}
+
+export type ChatBlock =
+  | { kind: 'text'; text: string }
+  | { kind: 'thinking'; text: string }
+  | { kind: 'tool_use'; id: string; name: string; input: unknown }
+  | { kind: 'tool_result'; id: string; content: string; isError?: boolean }
+
+export type ChatMessage = {
+  id: string
+  role: 'user' | 'assistant'
+  blocks: ChatBlock[]
+  at: number
+}
+
+export type PermissionMode = 'ask' | 'accept-edits' | 'bypass'
+
 // ---------------------------------------------------- agent corner
 
 /**
@@ -92,15 +146,26 @@ export const CH = {
   vaultGraph: 'vault:graph',
   vaultBacklinks: 'vault:backlinks',
 
+  claudeNewSession: 'claude:new-session',
+  claudeSend: 'claude:send',
+  claudeInterrupt: 'claude:interrupt',
+  claudeHistory: 'claude:history',
+  claudeSetPermissionMode: 'claude:set-permission-mode',
+
   cornerItems: 'corner:items',
   cornerDecide: 'corner:decide',
   cornerDismiss: 'corner:dismiss',
   networkTrust: 'network:trust',
   networkTrustCurrent: 'network:trust-current',
+
+  settingsGet: 'settings:get',
+  settingsPickVaultDir: 'settings:pick-vault-dir',
 } as const
 
 /** main -> renderer pushes. */
 export const EV = {
+  claudeMessage: 'claude:message',
+  claudeSessionUpdate: 'claude:session-update',
   cornerPush: 'corner:push',
   cornerResolved: 'corner:resolved',
   networkChanged: 'network:changed',
@@ -128,5 +193,13 @@ export type Api = {
     /** Marks the CURRENT network trusted/untrusted. Human action only. */
     trust(trusted: boolean): Promise<NetworkTrust>
     onChanged(cb: (t: NetworkTrust) => void): () => void
+  }
+  settings: {
+    get(): Promise<AppSettings>
+    /**
+     * Opens the OS folder picker and persists the choice. Returns the settings
+     * as they now stand — unchanged if the picker was cancelled.
+     */
+    pickVaultDir(): Promise<AppSettings>
   }
 }

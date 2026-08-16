@@ -33,6 +33,23 @@ export function _setVaultDirForTest(dir: string) {
   VAULT_DIR = dir
 }
 
+/**
+ * The same setter under a production name, for the persisted `vaultDir` setting
+ * (src/main/settings.ts). It is an alias rather than a second variable because
+ * there is exactly one vault root and two of them would drift.
+ *
+ * Only safe to call BEFORE anything reads the vault — at boot, from
+ * applySettings(). Changing it later leaves the graph memo, the open buffer and
+ * every path in the renderer's nav trail pointing at the old vault, which is
+ * why the settings modal applies a change on restart instead.
+ */
+export { _setVaultDirForTest as setVaultDir }
+
+/** The vault root currently in use. Read by the settings modal. */
+export function getVaultDir(): string {
+  return VAULT_DIR
+}
+
 /** For tests only: override the vault base URL. */
 export function _setBaseForTest(url: string) {
   BASE = url

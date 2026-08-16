@@ -41,6 +41,12 @@ const api: Api = {
     trust: (trusted) => ipcRenderer.invoke(CH.networkTrust, trusted),
     onChanged: (cb) => on(EV.networkChanged, cb),
   },
+  settings: {
+    get: () => ipcRenderer.invoke(CH.settingsGet),
+    // No argument on purpose: the picker runs in main, so the renderer cannot
+    // nominate a directory for the app to read from.
+    pickVaultDir: () => ipcRenderer.invoke(CH.settingsPickVaultDir),
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

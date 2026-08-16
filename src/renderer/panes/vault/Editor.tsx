@@ -75,19 +75,31 @@ export function Editor({
 
   return (
     <div className="vault-editor">
+      {/* The button is the ACTION and the span is the STATE. They used to say the
+          same word twice — a button reading "Saved" beside a label reading "Up to
+          date" is one fact wearing two hats, and neither told you what clicking
+          would do. */}
       <div className="vault-editor-actions">
         <button
           className="vault-editor-save"
           onClick={handleSave}
           disabled={!isDirty || saving}
         >
-          {saving ? 'Saving...' : isDirty ? 'Save' : 'Saved'}
+          {saving ? 'Saving…' : 'Save'}
         </button>
-        <span className="vault-editor-status" data-dirty={isDirty}>
-          {isDirty ? 'Unsaved changes' : 'Up to date'}
+        <span className="vault-editor-status" data-dirty={isDirty} aria-live="polite">
+          {isDirty ? 'Unsaved changes' : 'Saved'}
         </span>
-        {error && <div className="vault-editor-error">{error}</div>}
       </div>
+
+      {/* Out of the actions row: an error is a banner about the last attempt, not
+          a third control sitting beside the button. Inside the flex row it was
+          squeezed onto one line next to the status. */}
+      {error && (
+        <div className="vault-editor-error" role="alert">
+          {error}
+        </div>
+      )}
 
       <textarea
         className="vault-editor-textarea"

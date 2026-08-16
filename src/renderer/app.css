@@ -120,6 +120,9 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   -webkit-backdrop-filter: var(--blur-regular);
   border-right: 1px solid var(--separator);
 }
+/* Same selected treatment as .vault-tab--active; the base button rule already
+   supplies the radius and the transition. */
+.vault-ribbon-icon--active { color: var(--label); background: var(--fill-selected); }
 
 .vault-sidebar {
   width: 15rem; flex: none;
@@ -164,6 +167,16 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   border-top: 1px solid var(--separator);
 }
 .vault-switcher-name { flex: 1; min-width: 0; font-weight: var(--weight-medium); font-size: var(--text-sm); }
+/* Both actions are the SAME square box, centred. The global button rule sizes
+   to content with asymmetric padding, so a 14px inline SVG and a "?" glyph each
+   sat on their own baseline at their own width — which is why the gear rode
+   high beside the name. Equal boxes put both marks on one optical centre. */
+.vault-switcher-actions { display: flex; align-items: center; gap: var(--space-1); flex: none; }
+.vault-switcher-button {
+  display: inline-flex; align-items: center; justify-content: center;
+  width: var(--space-6); height: var(--space-6);
+  padding: 0;
+}
 
 .vault-main {
   flex: 1; min-width: 0; display: flex; flex-direction: column; min-height: 0;
@@ -484,11 +497,22 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
 }
 /* The graph view owns its whole pane, so the canvas parent must not pad it. */
 .vault-view-content:has(.vault-graph-view) { padding: 0; overflow: hidden; }
+/* The note itself, and it should read as the main event.
+ *
+ * `max(24rem, 52vh)` rather than a flat 24rem: on this window the fixed height
+ * left the textarea shorter than the wikilink list under it, so a note's
+ * metadata occupied more of the canvas than the note. The rem floor is what
+ * keeps a larger system text size from being squeezed (apple-design 15) — a
+ * bare vh would shrink the writing surface on a short window.
+ *
+ * `resize: vertical` stays: it is the user's own control over that balance. */
 .vault-editor-textarea {
-  width: 100%; min-height: 24rem; resize: vertical;
+  width: 100%; min-height: max(24rem, 52vh); resize: vertical;
+  padding: var(--space-4) var(--space-5);
   font-family: var(--font-mono);
   line-height: var(--leading-body);
   border-radius: var(--radius-lg);
+  tab-size: 2;
 }
 .vault-open-error {
   margin: var(--space-4);
@@ -677,7 +701,8 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
     --separator: #806854;
   }
   button, input, textarea, select { border: 1px solid var(--separator); }
-  .vault-tab--active { outline: 1px solid var(--label-secondary); }
+  .vault-tab--active,
+  .vault-ribbon-icon--active { outline: 1px solid var(--label-secondary); }
 }
 
 /* ------------------------------------------------------------- database view
@@ -994,3 +1019,190 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
               opacity var(--duration-fast) var(--ease-out);
 }
 .art-credit[data-occluded] { opacity: 0; pointer-events: none; }
+
+/* ------------------------------------------------------------------- editor
+ *
+ * The note editor. Still a plain <textarea> by the v1 cut — nothing here adds
+ * behaviour, it only gives the parts a hierarchy.
+ *
+ * What was wrong: the save control and its status said the same thing in the
+ * same voice; the Links and Backlinks lists rendered as browser-default <ul>
+ * (disc bullets, 40px indent — the only bullets anywhere in this app) stacked
+ * one above the other, so on a real note the metadata was three times the
+ * height of the note; and the empty, error, discarded and hint states had no
+ * rules at all, so they inherited body copy and read as content.
+ *
+ * Revised against apple-design 15 (hierarchy from weight and case, not size),
+ * 1 (feedback on press), 12 (materials) and 14 (the three reduced-* signals).
+ */
+
+/* Sections, not a stack of loose boxes. The gap binds the toolbar to the
+   textarea it acts on (16: place a control next to what it affects); the
+   larger break before the links says they are a different thing. */
+.vault-editor { display: flex; flex-direction: column; gap: var(--space-4); }
+
+.vault-editor-actions {
+  display: flex; align-items: center; gap: var(--space-4); flex: none;
+}
+
+/* There is no accent HUE in this palette — emphasis is luminance (tokens.css
+   §meaning). So the one thing worth doing gets the brightest surface in the
+   app, and only while it is worth doing: filled Cream when there is something
+   to save, a quiet film when there is not. That single control carries the
+   dirty state at a glance, from across the room. */
+.vault-editor-save {
+  padding: var(--space-2) var(--space-5);
+  border-radius: var(--radius-md);
+  font-weight: var(--weight-medium);
+  background: var(--accent);
+  color: var(--label-on-accent);
+}
+/* The global button:hover repaints to --fill-hover/--label, which would strip
+   the fill off. Hover holds; the press is where the feedback lives. */
+.vault-editor-save:hover:not(:disabled) {
+  background: var(--accent);
+  color: var(--label-on-accent);
+}
+/* 1: on pointer-DOWN. Sand recedes under the finger, as --accent-pressed is
+   named for. The 0.97 scale comes from the global rule. */
+.vault-editor-save:active:not(:disabled) { background: var(--accent-pressed); }
+.vault-editor-save:disabled { background: var(--material-light); }
+
+/* A caps micro-label, matching .db-group-name and the .artifact-title rule at
+   the top of this file — state ABOUT the note, so it must not look like text
+   IN the note. Positive tracking because capitals set tight are unreadable.
+   The dot is the peripheral read; the words are the confirmation. */
+.vault-editor-status {
+  display: inline-flex; align-items: center; gap: var(--space-2);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--label-quaternary);
+}
+.vault-editor-status::before {
+  content: ''; flex: none;
+  width: 6px; height: 6px; border-radius: 999px;
+  background: currentColor;
+}
+.vault-editor-status[data-dirty='true'] { color: var(--label-secondary); }
+.vault-editor-status[data-dirty='true']::before { background: var(--accent); }
+
+/* Same tinted-wash treatment as .db-tone-stop and .vault-open-error: colour on
+   the text with a low-alpha ground, never a saturated fill. A failed save is
+   already alarming without the surface shouting too. */
+.vault-editor-error {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--danger) 16%, transparent);
+  color: var(--danger);
+  font-size: var(--text-sm);
+}
+
+/* Side by side, and each column collapses to full width when the pane is
+   narrow. Stacked, the two lists pushed the note off the top of the canvas. */
+.vault-editor-links {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(18rem, 1fr));
+  gap: var(--space-4) var(--space-6);
+  align-items: start;
+  margin-top: var(--space-3);
+}
+
+/* The h1,h2,h3 rule made these semibold body copy, which is the same weight as
+   a heading inside the note — two different documents shouting equally. Caps
+   at --text-xs with a hairline reads as a section marker instead. */
+.vault-editor-links-title {
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--label-tertiary);
+  padding-bottom: var(--space-2);
+  margin-bottom: var(--space-2);
+  border-bottom: 1px solid var(--separator);
+}
+
+.vault-editor-links-list { list-style: none; margin: 0; padding: 0; }
+.vault-editor-links-empty { font-size: var(--text-sm); color: var(--label-quaternary); }
+
+/* 15: leading tracks size inversely, and tightens for dense lists — 1.47 is
+   book copy and it was why 30 wikilinks filled a screen. Same "a real button
+   that must not look like one" treatment as .db-title and .inbox-open. */
+.vault-editor-link-button {
+  display: block; width: 100%; text-align: left;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-sm);
+  font-size: var(--text-sm);
+  line-height: 1.35;
+  color: var(--label-secondary);
+  /* Backlinks are full vault paths. Wrapping beats widening the column. */
+  overflow-wrap: anywhere;
+}
+.vault-editor-link-button:hover { background: var(--fill-hover); color: var(--accent); }
+/* No scale: at --text-sm the 0.97 from the global rule visibly resamples the
+   glyphs. The background does the work, and it lands on press. */
+.vault-editor-link-button:active { background: var(--fill-active); transform: none; }
+
+/* Recoverable text, so it is a real surface rather than loose paragraphs — but
+   --material-light, the lightest weight, because it is subordinate to the note
+   and stacking anything heavier here would read as a second editor. */
+.vault-editor-discarded {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--material-light);
+  border: 1px solid var(--separator);
+}
+.vault-editor-discarded-summary { font-size: var(--text-sm); color: var(--label-secondary); }
+.vault-editor-discarded-summary:hover { color: var(--label); }
+.vault-editor-discarded-text {
+  width: 100%; min-height: 8rem; margin-top: var(--space-3); resize: vertical;
+  font-family: var(--font-mono); font-size: var(--text-sm);
+  background: var(--bg-sunken); color: var(--label-tertiary);
+}
+
+/* A caption about the syntax, not a line of the note. Quaternary is
+   decorative-only by the palette's rules, which is exactly what a hint is. */
+.vault-editor-hints {
+  margin-top: var(--space-3);
+  padding-top: var(--space-3);
+  border-top: 1px solid var(--separator);
+  font-size: var(--text-xs);
+  color: var(--label-quaternary);
+}
+.vault-editor-hint { font-family: var(--font-mono); }
+
+/* Lives in MainCanvas, not the editor, but it is part of the same affordance
+   and it had no rule at all — full-weight body copy in the view-tab row,
+   saying "Unsaved changes" a second time and louder than the status that owns
+   that job. Demoted to a caption: it is reassurance about switching views, and
+   reassurance should be quiet. Left of the editor's own indicator in the
+   reading order, so it must not outrank it. */
+.vault-canvas-dirty-warning {
+  margin-left: var(--space-3);
+  font-size: var(--text-xs);
+  color: var(--label-quaternary);
+}
+
+/* Centred, because "no note selected" is the state of the whole canvas, not a
+   sentence pinned to its top-left corner. Matches .inbox-zero. */
+.vault-editor-empty {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%; min-height: 12rem;
+  font-size: var(--text-sm);
+  color: var(--label-quaternary);
+}
+
+/* 14. Three independent signals. Motion needs nothing here — the only press
+   transform is the global button rule, which the reduced-motion block already
+   neutralises by name. */
+@media (prefers-reduced-transparency: reduce) {
+  .vault-editor-discarded { background: var(--bg-elevated); }
+  .vault-editor-save:disabled { background: var(--bg-elevated); }
+}
+@media (prefers-contrast: more) {
+  /* The global rule puts a 1px border on every button in this mode. On a list
+     of thirty text links that draws thirty boxes; the contrast that mode is
+     asking for belongs on the text, so the label moves up the ramp instead. */
+  .vault-editor-link-button { border: none; color: var(--label); }
+}

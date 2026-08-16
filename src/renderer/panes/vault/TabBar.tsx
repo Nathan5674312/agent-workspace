@@ -25,7 +25,7 @@ export function TabBar({
         {tabs.map((tab) => (
           <button
             key={tab.id}
-            className={`vault-tab ${activeTabId === tab.id ? 'active' : ''}`}
+            className={`vault-tab ${activeTabId === tab.id ? 'vault-tab--active' : ''}`}
             onClick={() => onTabChange(tab.id)}
           >
             {tab.name}

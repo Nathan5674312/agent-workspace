@@ -101,7 +101,9 @@ test('tab bar has named tabs, new tab, chevron and split', () => {
 
 test('vault switcher is the bottom row: name, help, settings', () => {
   const code = src('VaultSwitcher.tsx')
-  assert.match(code, /vault-name/)
+  // The stylesheet has always called this `.vault-switcher-name`; the JSX said
+  // `vault-name` and matched nothing, so the name lost its flex and its type.
+  assert.match(code, /vault-switcher-name/)
   assert.ok(code.includes('onHelp'))
   assert.ok(code.includes('onSettings'))
 })
@@ -152,10 +154,19 @@ test('no node, electron or network access anywhere in the pane', () => {
   }
 })
 
-test('all vault IPC goes through window.api.vault', () => {
+/**
+ * `settings` joined `vault` when the gear in the vault switcher stopped being a
+ * console.log stub — the settings modal is rendered by this pane, so this pane
+ * is where it reads from. The point of the rule is unchanged and is what the
+ * omissions carry: `corner` and `network` belong to other panes, and the vault
+ * pane reaching into either is the coupling this guards against.
+ */
+const ALLOWED_API = new Set(['vault', 'settings'])
+
+test('the pane reaches only into its own window.api surfaces', () => {
   for (const [name, code] of all()) {
     for (const m of stripComments(code).matchAll(/window\.api\.(\w+)/g)) {
-      assert.equal(m[1], 'vault', `${name} reaches into window.api.${m[1]}`)
+      assert.ok(ALLOWED_API.has(m[1]), `${name} reaches into window.api.${m[1]}`)
     }
   }
 })
@@ -177,7 +188,25 @@ test('no inline style props, no CSS colours, no stylesheet imports', () => {
     assert.doesNotMatch(body, /style=\{\{/, `${name} has an inline style object`)
     assert.doesNotMatch(body, /#[0-9a-fA-F]{3,8}\b(?![\w-])/, `${name} has a hex colour`)
     assert.doesNotMatch(body, /\brgba?\(|\bhsla?\(/, `${name} has a CSS colour function`)
-    assert.doesNotMatch(body, /from\s+['"][^'"]+\.css['"]/, `${name} imports CSS`)
+    /**
+     * A co-located stylesheet is allowed; a foreign one is not.
+     *
+     * This was a flat ban on importing CSS, and the old regex only caught the
+     * `... from "x.css"` form — a bare `import "./x.css"` walked straight past
+     * it. Both halves are fixed here rather than left as an accidental loophole
+     * to lean on: the matcher now catches side-effect imports too, and the rule
+     * it enforces is the one that actually matters. `./settings.css` beside its
+     * component is fine. `../../app.css` is not: app.css is the shared sheet
+     * another section owns, and a component pulling it in is how two sections
+     * end up editing one file.
+     */
+    for (const m of body.matchAll(/import\s+(?:[^'"]*\bfrom\s*)?['"]([^'"]+\.css)['"]/g)) {
+      assert.match(
+        m[1],
+        /^\.\/[a-z][a-z0-9-]*\.css$/,
+        `${name} imports a stylesheet from outside the pane: ${m[1]}`,
+      )
+    }
     assert.doesNotMatch(
       body,
       /(background|padding|margin|fontSize|fontFamily|color)\s*:\s*['"]/,

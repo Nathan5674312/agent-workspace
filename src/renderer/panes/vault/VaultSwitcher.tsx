@@ -12,9 +12,9 @@ export interface VaultSwitcherProps {
 export function VaultSwitcher({ onSettings, onHelp }: VaultSwitcherProps) {
   return (
     <div className="vault-switcher">
-      <div className="vault-name">Universal Vault</div>
-      {/* Both were console.log stubs. Disabled until there is something behind
-          them — there are no app settings and no help content to show. */}
+      <div className="vault-switcher-name">Universal Vault</div>
+      {/* Help is still a console.log stub and stays disabled — there is no help
+          content to show. Settings now opens the real modal. */}
       <div className="vault-switcher-actions">
         <button
           className="vault-switcher-button"
@@ -27,8 +27,8 @@ export function VaultSwitcher({ onSettings, onHelp }: VaultSwitcherProps) {
         <button
           className="vault-switcher-button"
           onClick={onSettings}
-          disabled
-          title="Not implemented yet"
+          title="Settings"
+          aria-label="Settings"
         >
           <Settings size={14} aria-hidden="true" />
         </button>

@@ -3,6 +3,7 @@ import { CH } from '../shared/ipc.js'
 import * as vault from './vault.js'
 import * as corner from './corner.js'
 import * as network from './network.js'
+import * as settings from './settings.js'
 
 /**
  * True only for the window's top-level frame.
@@ -55,6 +56,7 @@ export function registerIpc(): void {
 
   corner.register(handle)
   network.register(handle)
+  settings.register(handle)
 }
 
 export type Handle = typeof handle

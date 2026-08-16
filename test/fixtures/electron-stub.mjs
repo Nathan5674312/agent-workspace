@@ -32,6 +32,15 @@ export const BrowserWindow = {
 }
 
 /**
+ * There is no OS folder picker under `node --test`. "Cancelled" is the only
+ * honest stand-in: it is a real outcome of showOpenDialog, and it is the one
+ * that must leave settings.json untouched.
+ */
+export const dialog = {
+  showOpenDialog: async () => ({ canceled: true, filePaths: [] }),
+}
+
+/**
  * Registered handlers are kept so a test can invoke the REAL wrapper that
  * src/main/ipc.ts installed — including its sender-frame check — with a
  * synthetic event. Recording is inert for suites that ignore it.
@@ -50,6 +59,7 @@ export const ipcRenderer = { invoke() {}, on() {}, removeListener() {} }
 export default {
   app,
   shell,
+  dialog,
   BrowserWindow,
   ipcMain,
   contextBridge,

@@ -40,7 +40,7 @@ export function LeftRibbon({ activeView, onViewChange }: LeftRibbonProps) {
       {VIEWS.map(({ id, label, Icon }) => (
         <button
           key={id}
-          className={`vault-ribbon-icon ${activeView === id ? 'active' : ''}`}
+          className={`vault-ribbon-icon ${activeView === id ? 'vault-ribbon-icon--active' : ''}`}
           onClick={() => onViewChange(id)}
           // The button carries the accessible name; the icon is decorative and
           // must not announce itself twice.

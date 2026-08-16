@@ -2,6 +2,7 @@ import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
 import { registerIpc } from './ipc.js'
 import { checkRoots } from './vault.js'
+import { applySettings, setRootMismatch } from './settings.js'
 
 /**
  * Only http(s) may be handed to the OS. `new URL` is the parser, not a regex —
@@ -64,6 +65,11 @@ function createWindow(): BrowserWindow {
 }
 
 void app.whenReady().then(() => {
+  // FIRST, before any handler or window can read the vault: a persisted
+  // vaultDir has to be in place before the first tree() call, or the app boots
+  // into the env default and only agrees with the setting after a second
+  // restart. Synchronous by design — it is one small file read.
+  applySettings()
   registerIpc()
   createWindow()
   // Diagnostic only, and deliberately not awaited: a slow or absent note server
@@ -73,7 +79,20 @@ void app.whenReady().then(() => {
   // to throw, so without it a diagnostic whose whole promise is that it "must
   // never hold up the window" could instead take the main process down.
   void checkRoots()
-    .then((msg) => msg && console.warn(msg))
+    .then((msg) => {
+      // Kept so the settings modal can show the message the console already
+      // got, instead of paying for a second full check every time it opens.
+      //
+      // vault.ts:224 says not to forward this string to the renderer without
+      // scrub(), because it names VAULT_DIR and with it the OS username. That
+      // reasoning does not survive this feature: the settings modal shows the
+      // vault directory as its whole content, so the path is crossing the
+      // bridge either way — and scrubbing it to `<path>` here would produce a
+      // warning that names no directory, sitting directly under the directory
+      // it is about. Nothing else may forward it.
+      setRootMismatch(msg)
+      if (msg) console.warn(msg)
+    })
     .catch(() => {})
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()

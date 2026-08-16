@@ -28,10 +28,26 @@
   to { opacity: 0; visibility: hidden; }
 }
 
+/**
+ * Separate cells, but CUT INTO the ground rather than sitting on top of it.
+ *
+ * The stock split-flap tile is a raised glossy chip: soft rounded corners, a
+ * white inset highlight along the top, a black one along the bottom, and a drop
+ * shadow underneath. That combination is the component's signature and it is
+ * why it reads as borrowed. It is also the opposite of how this app draws
+ * everything else — nothing here is raised, and nothing here is glossy.
+ *
+ * So the cells keep their separation and lose the chrome. Each is a flush
+ * aperture: the ground colour showing through a hairline aperture, squared off
+ * rather than pill-soft, with no highlight, no bevel and no shadow. The only
+ * modelling left is the faint tonal step between the upper and lower half,
+ * which is the one piece of shading that is doing real work — it is what makes
+ * the flap read as a flap.
+ */
 .flap {
   display: inline-flex;
   align-items: center;
-  gap: 0.35rem;
+  gap: 0.22em;
   font-family: var(--font-mono, ui-monospace, monospace);
   font-size: clamp(1.4rem, 4.2vw, 2.6rem);
   /* Tracking is size-specific and this is large type, so it tightens rather
@@ -55,39 +71,43 @@
 
 .flap-tile {
   position: relative;
-  width: 0.78em;
-  height: 1.08em;
+  /* Taller than it is wide, like a real board cell. The stock ratio is closer
+     to square, which is part of why it reads as a chip. */
+  width: 0.72em;
+  height: 1.16em;
   overflow: hidden;
-  border-radius: var(--radius-sm);
-  background: var(--bg-elevated);
+  /* Squared, not pill-soft. 2px is enough to stop the corner looking cut. */
+  border-radius: 2px;
   perspective: 520px;
   transform-style: preserve-3d;
   isolation: isolate;
 }
 
-/* The seam. A real board has a physical gap across the middle of every tile,
-   and without it the two halves read as one flat rectangle. */
+/* The aperture edge. One hairline, drawn over the halves so the cell reads as
+   an opening in a surface rather than an object with an outline. */
+.flap-tile::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  z-index: 10;
+  border: 1px solid var(--separator);
+  border-radius: inherit;
+  pointer-events: none;
+}
+
+/* The seam, kept faint. It has to be legible enough to say "this splits" and
+   quiet enough not to become the loudest line on screen — at full strength,
+   fifteen of them across a dark ground is a barcode. */
 .flap-tile::before {
   content: '';
   position: absolute;
   top: calc(50% - 0.5px);
   left: 0;
-  z-index: 8;
+  z-index: 9;
   width: 100%;
   height: 1px;
   background: var(--bg-sunken);
-  pointer-events: none;
-}
-
-/* The bevel, as one hairline rather than the original's stacked white/black
-   insets — those read as plastic against a warm ground. */
-.flap-tile::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 9;
-  border: 1px solid var(--separator);
-  border-radius: inherit;
+  opacity: 0.75;
   pointer-events: none;
 }
 
@@ -98,19 +118,21 @@
   width: 100%;
   height: 50%;
   overflow: hidden;
-  background: var(--bg-elevated);
+  /* The GROUND colour, not an elevated one. That is what makes the cell read as
+     cut into the surface instead of laid on top of it. */
+  background: var(--bg-app);
   backface-visibility: hidden;
 }
 
 .flap-half--top,
 .flap-leaf--front { top: 0; }
 
-/* The lower half sits in its own shadow. Mixing toward Ink rather than black
-   keeps it inside the palette instead of going grey. */
+/* The lower half sits in its own shadow — the only shading kept, because it is
+   the part that makes a flap look like a flap. */
 .flap-half--bottom,
 .flap-leaf--back {
   bottom: 0;
-  background: color-mix(in srgb, var(--bg-elevated) 84%, var(--bg-app));
+  background: color-mix(in srgb, var(--bg-app) 82%, var(--bg-sunken));
 }
 
 .flap-char {

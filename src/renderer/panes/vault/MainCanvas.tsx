@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { VaultNoteBody, VaultGraph } from '../../../shared/ipc.js'
 import { Editor } from './Editor.js'
 import { GraphView } from './GraphView.js'
@@ -121,6 +121,27 @@ export function MainCanvas({
       setLoadingNotes(false)
     }
   }
+
+  /**
+   * Opening a note from ANYWHERE brings the editor forward.
+   *
+   * The sidebar tree, the tab bar and the back/forward arrows all call
+   * `openNote` in <VaultPane>, which loads the note into the buffer — and then
+   * nothing happened, because `view` lives here and none of them can reach it.
+   * Clicking CLAUDE.md while the graph was open genuinely worked and was
+   * completely invisible, which reads as a dead button.
+   *
+   * Keyed on the PATH rather than the note object: `handleSave` replaces
+   * `selectedNote` with a new object on every save, and on the object identity
+   * this would drag the user out of the graph each time they hit save.
+   *
+   * The graph and the database set the view themselves before this runs, so for
+   * those two it is a no-op. This is the catch-all for every other entry point.
+   */
+  const openPath = note?.path
+  useEffect(() => {
+    if (openPath) setView('editor')
+  }, [openPath])
 
   /**
    * Re-fetch every time, for the strongest version of the reason the other two

@@ -214,24 +214,47 @@ export async function list(): Promise<VaultNote[]> {
 export async function checkRoots(): Promise<string | null> {
   // Only the server being unreachable is swallowed. A malformed index is
   // list()'s problem and it already returns [] for that.
-  const notes = await list().catch(() => [])
+  const notes = await list().catch((): VaultNote[] => [])
   if (notes.length === 0) return null
 
   const { access } = await import('node:fs/promises')
   const { join } = await import('node:path')
 
-  // Sample rather than test one. A single note can legitimately be missing —
-  // deleted between the server building its index and this stat — and one
-  // stale row must not be reported as two different vaults.
-  const sample = notes.slice(0, 5)
+  // Sample rather than test one: a note can legitimately be missing, deleted
+  // between the server building its index and this stat, and one stale row must
+  // not be reported as two different vaults.
+  //
+  // Spread the sample across the list instead of taking the first N. A fixed
+  // prefix is the SAME notes every boot, so a bulk rename or move of whatever
+  // happens to sort first — an index the server has not rebuilt yet — reports
+  // "different vaults" deterministically. Striding samples the whole vault, so
+  // a stale corner cannot masquerade as a wrong root.
+  const WANT = 9
+  const step = Math.max(1, Math.floor(notes.length / WANT))
+  const sample: VaultNote[] = []
+  for (let i = 0; i < notes.length && sample.length < WANT; i += step) sample.push(notes[i])
+
+  let hits = 0
+  const misses: string[] = []
   for (const n of sample) {
     const hit = await access(join(VAULT_DIR, n.path)).then(() => true, () => false)
-    if (hit) return null
+    if (hit) hits++
+    else if (misses.length < 2) misses.push(n.path)
   }
+
+  // Majority, not "any one hit". The old rule was that a single surviving file
+  // proved the roots agreed, which fails the exact case this function is for:
+  // PARTIALLY overlapping roots — the app pointed at a sibling or a parent of
+  // the server's vault. One coincidentally shared filename (Home.md, README.md)
+  // bought silence while every other note still 400d on open, which is the
+  // "broken note, not broken config" confusion the check exists to end.
+  if (hits * 2 > sample.length) return null
+
   return (
     `vault: the note server and this app are pointed at different vaults. ` +
-    `None of ${sample.length} note(s) the server lists (e.g. "${sample[0].path}") ` +
-    `exist under ${VAULT_DIR}. The explorer will list notes that fail to open. ` +
+    `Only ${hits} of ${sample.length} notes the server lists exist under ` +
+    `${VAULT_DIR} (missing e.g. ${misses.map((m) => `"${m}"`).join(', ')}). ` +
+    `The explorer will list notes that fail to open. ` +
     `Fix VAULT in note-system/app/server.py or AGENT_WORKSPACE_VAULT_DIR.`
   )
 }

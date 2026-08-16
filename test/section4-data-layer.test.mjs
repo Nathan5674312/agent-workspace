@@ -380,27 +380,48 @@ test('scrub() does not eat our own single-segment paths', async () => {
 
 /**
  * checkRoots() — the two vault roots are configured independently and nothing
- * verified they matched. These pin the three answers it can give.
+ * verified they matched. These pin every answer it can give, including the two
+ * kinds of wrong answer it must not give: a false alarm on a stale index, and
+ * silence on roots that only partially overlap.
  */
+const ROOT_FIXTURE = [
+  'Home.md',
+  'AGENTS.md',
+  'Projects/AI.md',
+  'Projects/Tools.md',
+  'Business/Plan.md',
+  'Trading/ICT.md',
+]
+
 test('checkRoots() detects a disagreement between the two vault roots', async (t) => {
   const mock = await startMockVault({
-    notes: {
-      'Home.md': { text: '# Home', mtime: 1 },
-      'Projects/AI.md': { text: '# AI', mtime: 2 },
-    },
+    notes: Object.fromEntries(
+      ROOT_FIXTURE.map((p, i) => [p, { text: `# ${p}`, mtime: i + 1 }]),
+    ),
   })
   vault._setBaseForTest(mock.url)
 
   await t.test('agreeing roots report nothing', async () => {
-    vault._setVaultDirForTest(await makeScratchVault(['Home.md', 'Projects/AI.md']))
+    vault._setVaultDirForTest(await makeScratchVault(ROOT_FIXTURE))
     assert.equal(await vault.checkRoots(), null)
   })
 
   await t.test('one stale row is not a mismatch', async () => {
-    // Home.md is gone from disk but Projects/AI.md is there. Testing a single
-    // note would call this two different vaults; sampling must not.
-    vault._setVaultDirForTest(await makeScratchVault(['Projects/AI.md']))
+    // Five of six on disk. A note deleted between the server building its index
+    // and this stat is routine, and must never be reported as a wrong root.
+    vault._setVaultDirForTest(await makeScratchVault(ROOT_FIXTURE.slice(1)))
     assert.equal(await vault.checkRoots(), null)
+  })
+
+  await t.test('a partially overlapping root IS reported', async () => {
+    // The case the first version got wrong. One coincidentally shared filename
+    // used to buy silence, while every other note still 400d on open — the
+    // "broken note, not broken config" confusion this check exists to end.
+    const partial = await makeScratchVault(['Home.md'])
+    vault._setVaultDirForTest(partial)
+    const msg = await vault.checkRoots()
+    assert.ok(msg, 'a single shared filename silenced a genuinely wrong root')
+    assert.ok(msg.includes(partial), `message does not name the directory: ${msg}`)
   })
 
   await t.test('a genuinely different root is reported with the path', async () => {
@@ -414,9 +435,11 @@ test('checkRoots() detects a disagreement between the two vault roots', async (t
   await mock.close()
 
   await t.test('a dead server is unanswerable, not a mismatch', async () => {
-    // The server being down is read()'s error to raise, not this one's. A boot
-    // warning here would fire every time the app started first.
-    vault._setVaultDirForTest(await makeScratchVault(['Home.md']))
+    // The scratch vault deliberately shares NO filename with the fixture. With
+    // an overlapping one this assertion passed whether or not mock.close() did
+    // anything — null is also the answer for agreeing roots, so the test could
+    // not tell the dead-server path from the happy path and proved neither.
+    vault._setVaultDirForTest(await makeScratchVault(['Unrelated Note.md']))
     assert.equal(await vault.checkRoots(), null)
   })
 })

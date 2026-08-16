@@ -69,7 +69,12 @@ void app.whenReady().then(() => {
   // Diagnostic only, and deliberately not awaited: a slow or absent note server
   // must never hold up the window. Warns once at boot if the app's vault
   // directory and the server's root are not the same vault.
-  void checkRoots().then((msg) => msg && console.warn(msg))
+  // The .catch is not decoration. Node's default for an unhandled rejection is
+  // to throw, so without it a diagnostic whose whole promise is that it "must
+  // never hold up the window" could instead take the main process down.
+  void checkRoots()
+    .then((msg) => msg && console.warn(msg))
+    .catch(() => {})
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow()
   })

@@ -7,7 +7,7 @@
  */
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { areaOf, toMeta, NONE } from '../src/shared/notemeta.ts'
+import { areaOf, toMeta, statusTone, NONE } from '../src/shared/notemeta.ts'
 
 test('areaOf collapses 99 folders onto a groupable axis', async (t) => {
   await t.test('a nested folder becomes its first segment', () => {
@@ -85,5 +85,40 @@ test('toMeta survives a note server it does not control', async (t) => {
 
   await t.test('NONE is a non-empty label for the empty bucket', () => {
     assert.ok(NONE.length > 0)
+  })
+})
+
+test('statusTone reads freeform status prose', async (t) => {
+  await t.test('the real values in this vault land in the right bucket', () => {
+    assert.equal(statusTone('ACTIVE'), 'live')
+    assert.equal(statusTone('CATALOGUED'), 'live')
+    // A full sentence. An exact-match lookup table would miss every one of these.
+    assert.equal(
+      statusTone('FIXED on disk 2026-08-10 — live server still runs the old code'),
+      'live',
+    )
+    assert.equal(statusTone('SPEC — not built'), 'soon')
+    assert.equal(statusTone('PLAN — design only, not started'), 'soon')
+    assert.equal(statusTone('PARKED — not started'), 'soon')
+    assert.equal(statusTone('blocked-on-domain-access'), 'stop')
+  })
+
+  await t.test('an unknown word gets no tone rather than a guessed one', () => {
+    // A wrong colour asserts something about the note nobody wrote.
+    assert.equal(statusTone('north-star'), 'none')
+    assert.equal(statusTone('banana'), 'none')
+    assert.equal(statusTone(''), 'none')
+  })
+
+  await t.test('separator and case do not matter, only the leading word', () => {
+    for (const s of ['blocked', 'BLOCKED', 'Blocked: waiting', 'blocked—on—x', 'blocked_on_x']) {
+      assert.equal(statusTone(s), 'stop', `failed on ${JSON.stringify(s)}`)
+    }
+  })
+
+  await t.test('a leading non-letter does not shift the word that is read', () => {
+    // "— ACTIVE" must not read as "" and fall through to none.
+    assert.equal(statusTone('— ACTIVE'), 'live')
+    assert.equal(statusTone('  2026 blocked'), 'stop')
   })
 })

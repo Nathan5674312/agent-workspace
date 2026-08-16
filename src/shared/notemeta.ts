@@ -53,6 +53,39 @@ export function areaOf(n: { folder: string }): string {
 }
 
 /**
+ * Status → one of four tones.
+ *
+ * Status is the column people scan, and it was the flattest thing on screen:
+ * ACTIVE, PARKED and blocked-on-domain-access rendered identically, so the
+ * column carried no information until you read every cell. Apple's feedback
+ * taxonomy is status / completion / warning / error, and that is what these are.
+ *
+ * Keyed off the FIRST word, not the whole string, because this vault's statuses
+ * are freeform prose — 12 distinct values including a full sentence ("FIXED on
+ * disk 2026-08-10 — live server still runs the old code until restart"). A
+ * lookup table of exact values would miss every one of them, and would rot the
+ * first time someone typed a new status. The first word is what the author
+ * chose to lead with, so it is the part carrying the state.
+ *
+ * Unknown words get the neutral tone rather than a guess. A wrong colour is
+ * worse than no colour: it asserts something about the note that nobody wrote.
+ */
+const TONE_WORDS: Record<string, 'live' | 'stop' | 'soon'> = {
+  active: 'live', live: 'live', running: 'live', shipped: 'live',
+  done: 'live', fixed: 'live', complete: 'live', catalogued: 'live',
+  blocked: 'stop', failed: 'stop', broken: 'stop', stale: 'stop', abandoned: 'stop',
+  plan: 'soon', spec: 'soon', brief: 'soon', idea: 'soon',
+  draft: 'soon', proposed: 'soon', parked: 'soon', paused: 'soon',
+}
+
+export function statusTone(status: string): 'live' | 'stop' | 'soon' | 'none' {
+  // Split on anything that is not a letter, so this survives "PARKED — not
+  // started", "blocked-on-domain-access" and "north-star" alike.
+  const first = status.toLowerCase().split(/[^a-z]+/).filter(Boolean)[0]
+  return (first && TONE_WORDS[first]) || 'none'
+}
+
+/**
  * Normalise one row off the wire.
  *
  * Every field is defended even though the server sends all of them, because the

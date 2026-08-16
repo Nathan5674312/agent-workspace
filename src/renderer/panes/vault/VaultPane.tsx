@@ -164,14 +164,23 @@ export function VaultPane(): React.ReactElement {
     }
   }
 
-  const openNote = async (path: string) => {
-    if (!(await loadNote(path))) return
+  /**
+   * Returns whether the note actually opened.
+   *
+   * It used to return nothing, so every caller assumed success. `loadNote`
+   * declines on three real paths -- an open conflict dialog, a declined
+   * discard prompt, and a failed read -- and a caller that switches view
+   * regardless yanks the user somewhere they just said no to.
+   */
+  const openNote = async (path: string): Promise<boolean> => {
+    if (!(await loadNote(path))) return false
     // Browser semantics: opening from the tree truncates any forward history.
     // Trail and cursor move together, both read from the same `n`.
     setNav((n) => ({
       trail: [...n.trail.slice(0, n.index + 1), path],
       index: n.index + 1,
     }))
+    return true
   }
 
   const goBack = async () => {

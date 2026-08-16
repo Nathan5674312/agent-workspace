@@ -23,7 +23,10 @@ export interface MainCanvasProps {
   getGraph: () => Promise<VaultGraph>
   getNotes: () => Promise<VaultNoteMeta[]>
   backlinks: string[]
-  onOpenNote: (path: string) => void
+  /** Resolves false when the open was refused — a conflict dialog, a declined
+   *  discard, or a failed read. Callers must not commit a view change until
+   *  this says the note is actually open. */
+  onOpenNote: (path: string) => Promise<boolean>
   onOpenWikilink: (name: string) => void
   discarded: { label: string; text: string } | null
   onBack: () => void
@@ -92,8 +95,13 @@ export function MainCanvas({
    * A cached note list is worse than a cached graph, not better. Frontmatter is
    * exactly what this view exists to show, so an edit to `status:` that the
    * table keeps showing the old value for is the stale-status-board failure the
-   * database view was built to end. The main process already memoises with a
-   * TTL and invalidates on our own saves.
+   * database view was built to end.
+   *
+   * There is NO cache behind this. `vault.ts` memoises `graph()` only
+   * (GRAPH_TTL_MS, invalidated by save); `list()` does a fresh HTTP round trip
+   * to the note server on every tab switch. That is affordable at 258 notes and
+   * is the correct default for a view whose whole job is to be current -- but
+   * do not read this as "something upstream is caching for me".
    */
   const handleSwitchToDatabase = async () => {
     setView('database')
@@ -181,12 +189,14 @@ export function MainCanvas({
             notes={notes}
             loading={loadingNotes}
             error={notesError}
-            onOpenNote={(path) => {
-              // Same reasoning as the graph's click: loading the note is only
-              // half of "open". Without the view switch it opens behind the
-              // table and the click reads as broken even though it worked.
-              onOpenNote(path)
-              setView('editor')
+            onOpenNote={async (path) => {
+              // Loading the note is only half of "open" -- without the view
+              // switch it opens behind the table and the click reads as broken
+              // even though it worked. But the switch is CONDITIONAL: openNote
+              // resolves false when the user declined a discard prompt or a
+              // conflict dialog is up, and switching anyway drags them out of
+              // the table they were reading into an editor they refused.
+              if (await onOpenNote(path)) setView('editor')
             }}
           />
         ) : view === 'editor' ? (
@@ -207,12 +217,13 @@ export function MainCanvas({
         ) : (
           <GraphView
             graph={graph}
-            onOpenNote={(path) => {
+            onOpenNote={async (path) => {
               // Loading the note is only half of "open". Without the view
               // switch the note opens behind the graph and nothing appears to
               // happen — the click reads as broken even though it worked.
-              onOpenNote(path)
-              setView('editor')
+              // Conditional for the same reason as the table: a refused open
+              // must not move the user.
+              if (await onOpenNote(path)) setView('editor')
             }}
           />
         )}

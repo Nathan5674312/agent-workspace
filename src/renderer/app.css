@@ -688,59 +688,134 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
  * which is what the element is for. A grid of divs would have cost the free
  * semantics (aria-sort, row/column association, header association for anyone
  * on a screen reader) and bought nothing.
+ *
+ * Revised against the apple-design skill (12 materials, 15 typography,
+ * 1 response, 14 reduced-*). What changed and why is noted at each rule.
  */
-.db-view { --db-head-h: 2rem; display: flex; flex-direction: column; height: 100%; min-height: 0; gap: var(--space-3); }
+.db-view {
+  /* The column header's height, which the group headers stick directly below.
+     Not a step on the spacing scale, so deliberately not a --space-*.
+
+     This is DECLARED and then enforced on the th, rather than guessed to match
+     whatever the content happens to measure. It was 2rem against a real header
+     of 22.84px, so a 9px band of rows scrolled through the gap between the two
+     sticky layers. A guessed constant that must equal a computed height is a
+     bug waiting on the next type change; making the header actually be this
+     tall is the only version that stays true.
+
+     In rem, not px, so it scales with the user's text size (apple-design 15). */
+  --db-head-h: 1.75rem;
+  display: flex; flex-direction: column; height: 100%; min-height: 0;
+  gap: var(--space-3);
+}
 
 .db-toolbar { display: flex; align-items: center; gap: var(--space-2); flex: none; flex-wrap: wrap; }
 
-.db-search { display: flex; align-items: center; gap: var(--space-2); flex: 1 1 200px; min-width: 160px;
-  padding: 0 var(--space-3); border-radius: var(--radius-md); background: var(--fill-selected); color: var(--label-tertiary); }
+/* Capped, not greedy. `flex: 1 1 200px` let the filter field eat every spare
+   pixel and shove the group control and the count into the far corner, which
+   read as "the search box is the feature". It is one control among three. */
+.db-search {
+  display: flex; align-items: center; gap: var(--space-2);
+  flex: 1 1 200px; min-width: 160px; max-width: 22rem;
+  padding: 0 var(--space-3); border-radius: var(--radius-md);
+  background: var(--material-light); color: var(--label-tertiary);
+}
 .db-search input { flex: 1; min-width: 0; padding: var(--space-2) 0; border: 0; background: none;
   color: var(--label); font: inherit; }
 .db-search input:focus { outline: none; }
-/* The search type's native clear affordance is a different metaphor per engine
+.db-search:focus-within { color: var(--label-secondary); box-shadow: 0 0 0 2px var(--accent) inset; }
+/* The search type native clear affordance is a different metaphor per engine
    and does not match anything else here. */
 .db-search input::-webkit-search-cancel-button { -webkit-appearance: none; appearance: none; }
 
 .db-control { display: flex; align-items: center; gap: var(--space-2); color: var(--label-tertiary);
   font-size: var(--text-xs); white-space: nowrap; }
 .db-control select { padding: var(--space-1) var(--space-2); border: 0; border-radius: var(--radius-sm);
-  background: var(--fill-selected); color: var(--label); font: inherit; }
+  background: var(--material-light); color: var(--label); font: inherit; }
 
 .db-chip { display: inline-flex; align-items: center; gap: var(--space-1);
   padding: var(--space-1) var(--space-2); border-radius: var(--radius-sm);
   color: var(--label-tertiary); font-size: var(--text-xs); white-space: nowrap; }
 .db-chip.active { color: var(--label); background: var(--fill-selected); }
+/* apple-design 1: feedback on pointer-DOWN, not on release. Waiting for click
+   to show anything reads as dead. */
+.db-chip:active { transform: scale(0.97); }
 
 .db-count { margin-left: auto; color: var(--label-quaternary); font-size: var(--text-xs);
   font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .db-scroll { flex: 1; min-height: 0; overflow: auto; }
 
-.db-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm); }
+/* apple-design 15: leading tracks size inversely, and tightens for dense,
+   information-heavy UI. The table inherited --leading-body (1.47), which is
+   book copy, not 258 rows of metadata -- it was the main reason the rows read
+   loose and unpolished. */
+.db-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm);
+  line-height: 1.35; }
 
-/* Sticky header, so the sort control stays reachable 258 rows down. `thead th`
-   rather than the row: only cells generate boxes that can stick. */
-.db-table thead th { position: sticky; top: 0; z-index: 2; text-align: left; font-weight: inherit;
-  color: var(--label-quaternary); background: var(--bg-app); padding: 0;
-  border-bottom: 1px solid var(--separator); }
+/* apple-design 12: floating chrome is a translucent MATERIAL with content
+   passing under it, not an opaque strip that punches a hole in the artwork.
+   `thead th` rather than the row: only cells generate boxes that can stick. */
+.db-table thead th {
+  position: sticky; top: 0; z-index: 2;
+  /* Enforces the contract --db-head-h describes. Without this the group headers
+     stick below a height nobody guaranteed. */
+  height: var(--db-head-h);
+  text-align: left; padding: 0;
+  color: var(--label-tertiary);
+  background: var(--material-regular);
+  backdrop-filter: var(--blur-regular);
+  -webkit-backdrop-filter: var(--blur-regular);
+  /* An inset shadow, NOT border-bottom. With `border-collapse: collapse` the
+     border belongs to the table rather than the cell, so it does not travel
+     with a position:sticky cell -- the rule vanished the moment you scrolled
+     and rows slid under a header with no visible edge. A shadow is painted by
+     the cell and sticks with it. */
+  box-shadow: inset 0 -1px 0 var(--separator);
+  /* 12 vibrancy: over a translucent surface, flat low-contrast grey text goes
+     illegible. Weight and a touch of tracking buy back what translucency costs,
+     without making the header shout. */
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  font-size: var(--text-xs);
+  text-transform: uppercase;
+}
 .db-table thead th button { display: flex; align-items: center; gap: var(--space-1); width: 100%;
   padding: var(--space-2) var(--space-3); color: inherit; font: inherit; text-align: left; }
 .db-table thead th button:hover { color: var(--label-secondary); }
-.db-sort { font-size: 0.9em; }
+.db-sort { font-size: 0.9em; color: var(--accent); }
 
-/* Group headers sit BELOW the column header when both are stuck, hence top:
-   var(--db-head-h) and the lower z-index. That offset is a measurement of the
-   column header, not a step on the spacing scale, so it is not a --space-*. */
-.db-group th { position: sticky; top: var(--db-head-h); z-index: 1; padding: 0; background: var(--bg-app);
-  text-align: left; font-weight: inherit; }
+/* The Updated column is right-aligned so the dates form a clean edge; its
+   HEADER has to follow it or the column reads as misaligned. Needs this
+   specificity because `.db-table thead th` (0,2,1) outranks the bare
+   `.db-col-updated` (0,1,0) that aligns the data cells, and the header button
+   is a flex container so text-align alone would not move it. */
+.db-table thead th.db-col-updated { text-align: right; }
+.db-table thead th.db-col-updated button { justify-content: flex-end; }
+
+/* Group headers sit BELOW the column header when both are stuck, hence
+   var(--db-head-h) and the lower z-index. Same material treatment: they are
+   floating chrome too, and an opaque one would tear a rectangle out of the
+   artwork every 20 rows. */
+.db-group th {
+  position: sticky; top: var(--db-head-h); z-index: 1; padding: 0;
+  background: var(--material-regular);
+  backdrop-filter: var(--blur-regular);
+  -webkit-backdrop-filter: var(--blur-regular);
+  text-align: left; font-weight: inherit;
+}
 .db-group button { display: flex; align-items: center; gap: var(--space-2); width: 100%;
-  padding: var(--space-3) var(--space-3) var(--space-1); color: var(--label-secondary); font: inherit; }
-.db-group-name { font-size: var(--text-xs); letter-spacing: var(--tracking-caps); text-transform: uppercase; }
-.db-group-count { color: var(--label-quaternary); font-variant-numeric: tabular-nums; }
+  padding: var(--space-4) var(--space-3) var(--space-2); color: var(--label-secondary); font: inherit; }
+.db-group-name { font-size: var(--text-xs); letter-spacing: var(--tracking-caps);
+  text-transform: uppercase; font-weight: var(--weight-semibold); }
+/* 15: hierarchy from weight, not size alone. The count is subordinate to the
+   name, so it drops in colour rather than shrinking further. */
+.db-group-count { color: var(--label-quaternary); font-variant-numeric: tabular-nums;
+  font-weight: var(--weight-regular); }
 
 .db-row { cursor: pointer; }
 .db-row:hover { background: var(--fill-hover); }
+.db-row:active { background: var(--fill-active); }   /* 1: on press, not release */
 .db-row:focus-visible { outline: 2px solid var(--accent); outline-offset: -2px; }
 .db-row td { padding: var(--space-2) var(--space-3); border-bottom: 1px solid var(--separator);
   vertical-align: middle; }
@@ -749,24 +824,59 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
    and make the table appear to jump. */
 .db-col-title { width: 42%; }
 .db-col-area, .db-col-type, .db-col-status { width: 16%; }
-.db-col-updated { width: 10%; color: var(--label-quaternary); font-variant-numeric: tabular-nums;
-  white-space: nowrap; }
+/* Dates form a column edge only if they are aligned to one. */
+.db-col-updated { width: 10%; text-align: right; color: var(--label-quaternary);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
 
-.db-col-title { display: table-cell; }
-.db-title { color: var(--label); }
-.db-row:hover .db-title { color: var(--label); }
+.db-icon { color: var(--label-quaternary); margin-right: var(--space-2); vertical-align: -2px;
+  flex: none; }
+/* The title is a real <button> so the keyboard can reach it without the row
+   having to lie about being one. It must not LOOK like a button: strip the
+   global control padding and background, keep only the focus ring.
+   15 again: emphasise with WEIGHT. The title is the row's identity and the
+   only thing that should carry any at this size. */
+.db-title {
+  display: inline; padding: 0; border-radius: 0; text-align: left;
+  background: none; color: var(--label);
+  font-weight: var(--weight-medium);
+}
+.db-title:hover { background: none; color: var(--label); }
+/* The global button rule scales 0.97 on press. On a text label inside a row
+   that makes the glyphs visibly resample — the same reason .vault-tree-item
+   opts out. The row's own :active carries the feedback instead. */
+.db-title:active { background: none; transform: none; }
+
+/* Area is plain text now. Three chip columns gave three different meanings one
+   visual weight; demoting Area lets Status be the thing the eye finds. */
+.db-col-area { color: var(--label-tertiary); }
 
 .db-orphan { margin-left: var(--space-2); color: var(--label-quaternary); vertical-align: -1px; }
 
-/* Values are chips, not bare text, because Area/Type/Status are enumerations —
-   the shape says "this is one of a set" before the word is read. Truncation is
-   deliberate: one status in this vault is a full sentence, and the column must
-   not resize itself around the worst-behaved value in the data. */
+/* An absent value is an answer, and should look like one. A blank cell reads as
+   a rendering failure -- which matters here because 190 of 258 notes have no
+   type, so blank was the dominant visual. */
+.db-blank { color: var(--label-quaternary); opacity: 0.5; }
+
+/* Values are chips because Type and Status are enumerations -- the shape says
+   "one of a set" before the word is read. Truncation is deliberate: one status
+   in this vault is a full sentence, and a column must not resize itself around
+   the worst-behaved value in its data. */
 .db-tag { display: inline-block; max-width: 100%; padding: 1px var(--space-2);
   border-radius: var(--radius-sm); background: var(--fill-selected); color: var(--label-secondary);
   font-size: var(--text-xs); white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
   vertical-align: middle; }
-.db-tag-status { color: var(--label); }
+
+/* Status tones. Apple feedback taxonomy is status / completion / warning /
+   error; these are the three states a note can be in, plus neutral for a value
+   nobody has taught us to read.
+   Colour is carried on the TEXT and a tinted wash, not a saturated fill: at
+   --text-xs a solid semantic background is a stoplight in the middle of a
+   reading surface. The tone should be findable when scanned and quiet when not.
+   --success/--warning/--danger are the palette own semantic tokens. */
+.db-tone-live { color: var(--success); background: color-mix(in srgb, var(--success) 14%, transparent); }
+.db-tone-soon { color: var(--warning); background: color-mix(in srgb, var(--warning) 14%, transparent); }
+.db-tone-stop { color: var(--danger);  background: color-mix(in srgb, var(--danger) 16%, transparent); }
+.db-tone-none { color: var(--label-secondary); background: var(--fill-selected); }
 
 .db-empty { padding: var(--space-6) var(--space-3); color: var(--label-quaternary);
   font-size: var(--text-sm); }
@@ -778,4 +888,26 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   mask-image: none;
   animation: none;
   overflow: hidden;
+}
+
+/* apple-design 14. Three independent signals, and translucency is the one that
+   actually applies to a static table -- there is no motion here to reduce
+   beyond the press feedback, and a contrast request wants the material gone and
+   a real edge in its place. */
+@media (prefers-reduced-transparency: reduce) {
+  .db-table thead th, .db-group th {
+    background: var(--bg-app);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+}
+@media (prefers-contrast: more) {
+  .db-table thead th, .db-group th { background: var(--bg-app); backdrop-filter: none;
+    -webkit-backdrop-filter: none; }
+  .db-row td { border-bottom-color: var(--separator-opaque); }
+  .db-blank { opacity: 1; }
+  .db-col-area { color: var(--label-secondary); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .db-chip:active { transform: none; }
 }

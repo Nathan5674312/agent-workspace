@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react'
-import { ChevronDown, ChevronRight, Search, Unlink } from 'lucide-react'
+import { ChevronDown, ChevronRight, FileText, Search, Unlink } from 'lucide-react'
 import {
   areaOf,
+  statusTone,
   NONE,
   type VaultNoteMeta,
 } from '../../../shared/notemeta.js'
@@ -54,6 +55,10 @@ function field(n: VaultNoteMeta, key: SortKey): string {
   if (key === 'title') return n.title
   return n[key]
 }
+
+/* statusTone lives in shared/notemeta.ts, not here: it is logic about
+   frontmatter values, the same as areaOf, and a .tsx module cannot be imported
+   by the node --test suite (type stripping does not handle JSX). */
 
 export interface DatabaseViewProps {
   notes: VaultNoteMeta[] | null
@@ -240,20 +245,32 @@ export function DatabaseView({
                     <tr
                       key={n.path}
                       className="db-row"
-                      tabIndex={0}
-                      role="button"
                       title={n.path}
+                      // Mouse convenience only. The row carries NO role and no
+                      // tabIndex: overriding a <tr>'s implicit `row` role with
+                      // `button` leaves the rowgroup without valid row children
+                      // and assistive tech loses the row/column-header
+                      // association that using a real <table> bought in the
+                      // first place. The keyboard path is the button below.
                       onClick={() => onOpenNote(n.path)}
-                      // A row that only responds to a mouse is not a control.
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          onOpenNote(n.path)
-                        }
-                      }}
                     >
                       <td className="db-col-title">
-                        <span className="db-title">{n.title}</span>
+                        {/* An anchor for the eye at the start of every row. At
+                            258 rows the title alone gives the scan nothing to
+                            land on. */}
+                        <FileText size={13} className="db-icon" aria-hidden="true" />
+                        {/* The real control. A focusable element inside the
+                            cell keeps the row a row, and gives keyboard users
+                            the note's name as the accessible name rather than
+                            a nameless "button". */}
+                        <button type="button" className="db-title" onClick={(e) => {
+                          // The row's own onClick would otherwise fire too and
+                          // open the note twice.
+                          e.stopPropagation()
+                          onOpenNote(n.path)
+                        }}>
+                          {n.title}
+                        </button>
                         {n.orphan && (
                           <Unlink
                             size={11}
@@ -262,20 +279,36 @@ export function DatabaseView({
                           />
                         )}
                       </td>
-                      <td className="db-col-area">
-                        <span className="db-tag">{areaOf(n)}</span>
-                      </td>
+                      {/* Area is plain text, not a chip. Chips on all three
+                          columns gave Area, Type and Status one visual weight,
+                          so none of them read as more important than the
+                          others. And when the table is grouped BY area, every
+                          row repeats its own group heading -- 57 identical
+                          chips inside "Business". It stays for sorting and for
+                          the ungrouped view, dimmed to what it is worth. */}
+                      <td className="db-col-area">{areaOf(n)}</td>
                       <td className="db-col-type">
-                        {n.type ? <span className="db-tag">{n.type}</span> : ''}
+                        {/* 190 of 258 notes have no type. A truly empty cell
+                            reads as a rendering failure; an em-dash reads as an
+                            answer. */}
+                        {n.type ? (
+                          <span className="db-tag">{n.type}</span>
+                        ) : (
+                          <span className="db-blank">{NONE}</span>
+                        )}
                       </td>
                       <td className="db-col-status">
                         {n.status ? (
-                          <span className="db-tag db-tag-status">{n.status}</span>
+                          <span className={`db-tag db-tone-${statusTone(n.status)}`}>
+                            {n.status}
+                          </span>
                         ) : (
-                          ''
+                          <span className="db-blank">{NONE}</span>
                         )}
                       </td>
-                      <td className="db-col-updated">{n.updated}</td>
+                      <td className="db-col-updated">
+                        {n.updated || <span className="db-blank">{NONE}</span>}
+                      </td>
                     </tr>
                   ))}
               </tbody>

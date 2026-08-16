@@ -1,3 +1,5 @@
+import { useEffect, useRef, useState } from 'react'
+
 /**
  * Attribution for the canvas artwork.
  *
@@ -47,15 +49,116 @@ export const ARTWORK = {
   claim: 'Original artwork, drawn by hand',
 }
 
+/**
+ * Tags that PAINT something. A hit on one of these means the credit is sitting
+ * on top of content; a hit on a layout container means the space is free.
+ *
+ * Deliberately tag-based rather than a list of this app's class names. The
+ * credit should not need editing every time a view is added — DIV, UL, TABLE,
+ * TBODY and SECTION are boxes, and the things inside them are what you can see.
+ */
+const INK = new Set([
+  'TD', 'TH', 'LI', 'P', 'A', 'SPAN', 'EM', 'STRONG', 'BUTTON', 'INPUT',
+  'TEXTAREA', 'CANVAS', 'IMG', 'SVG', 'PATH', 'CODE', 'PRE', 'H1', 'H2', 'H3',
+])
+
+/**
+ * Whether anything is currently drawn underneath the credit.
+ *
+ * Hit-tests three points across the credit's own box rather than one: the mark
+ * is wider than it is tall, and a single centre probe called it clear while the
+ * left half sat over a table cell.
+ *
+ * `elementsFromPoint` returns the stack topmost-first, so the credit and its own
+ * children are skipped and the first thing below them is what is really there.
+ */
+function isOccluded(el: HTMLElement): boolean {
+  const r = el.getBoundingClientRect()
+  if (r.width === 0 || r.height === 0) return false
+  const y = r.top + r.height / 2
+  for (const x of [r.left + 2, r.left + r.width / 2, r.right - 2]) {
+    for (const hit of document.elementsFromPoint(x, y)) {
+      if (el.contains(hit)) continue // the credit itself
+      if (INK.has(hit.tagName)) return true
+      break // first thing under the credit decides this point
+    }
+  }
+  return false
+}
+
+/**
+ * Hides the credit while content is under it, and brings it back when the space
+ * clears — scrolling past the end of a short table, an empty editor, switching
+ * back to a view with room.
+ *
+ * Watched via scroll (capture, so inner scrollers count), resize, and a
+ * MutationObserver for view switches and late-arriving data. All three funnel
+ * into one rAF-debounced check, so a 258-row render costs one hit-test per
+ * frame at most.
+ */
+function useOccluded(ref: React.RefObject<HTMLElement | null>): boolean {
+  const [occluded, setOccluded] = useState(false)
+
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+    let frame = 0
+    const check = () => {
+      frame = 0
+      setOccluded(isOccluded(el))
+    }
+    /**
+     * Double rAF, and it is not superstition. A MutationObserver fires during
+     * React's commit, so a single rAF runs BEFORE the browser has laid the new
+     * view out — the hit-test then reads the old geometry, and because nothing
+     * schedules another pass the wrong answer sticks until the user happens to
+     * scroll. Measured exactly that: switching to the table left the credit
+     * showing, switching back to an empty editor left it hidden.
+     *
+     * The second frame runs after paint, when the layout is real.
+     */
+    const schedule = () => {
+      if (!frame) frame = requestAnimationFrame(() => requestAnimationFrame(check))
+    }
+
+    schedule()
+    // Capture phase: scroll does not bubble, and every view here scrolls inside
+    // its own container rather than the window.
+    window.addEventListener('scroll', schedule, true)
+    window.addEventListener('resize', schedule)
+    const host = el.parentElement ?? document.body
+    const mo = new MutationObserver(schedule)
+    mo.observe(host, { childList: true, subtree: true })
+
+    return () => {
+      if (frame) cancelAnimationFrame(frame)
+      window.removeEventListener('scroll', schedule, true)
+      window.removeEventListener('resize', schedule)
+      mo.disconnect()
+    }
+  }, [ref])
+
+  return occluded
+}
+
 export function ArtCredit(): React.ReactElement | null {
   const { artist, instagram, title, claim } = ARTWORK
+  const ref = useRef<HTMLElement | null>(null)
+  // Called before the early return: a hook cannot run conditionally, and the
+  // artist check below can flip between renders.
+  const occluded = useOccluded(ref)
   if (!artist.trim()) return null
 
   const handle = instagram.trim().replace(/^@/, '')
   const url = handle ? `https://instagram.com/${handle}` : null
 
   return (
-    <aside className="art-credit" aria-label="Artwork credit">
+    <aside
+      ref={ref}
+      className="art-credit"
+      data-occluded={occluded || undefined}
+      aria-label="Artwork credit"
+    >
       <span className="art-credit-claim">{claim}</span>
       {/*
        * Her actual signature, as a CSS mask rather than an <img>. A mask is

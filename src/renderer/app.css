@@ -973,3 +973,24 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
 @media (prefers-reduced-transparency: reduce) {
   .inbox-item { background: var(--bg-elevated); }
 }
+
+/* The credit yields to content.
+ *
+ * It sits in the bottom-right of the canvas, which is also where a table's last
+ * row, an inbox card and a long note all end up — so it was reading as a mark
+ * printed on top of the work rather than beside it. It fades out while anything
+ * is drawn underneath and returns when the space clears.
+ *
+ * Opacity only, per the header rules: it is the one property that can animate
+ * off the main thread, and a credit that reflows the layout as it goes would be
+ * worse than one that overlaps. `visibility` stays out of it deliberately — the
+ * box must keep its size or the hit-test in ArtCredit.tsx has nothing to
+ * measure, and the credit would flicker between hidden and shown forever.
+ *
+ * Not display:none for the same reason, and pointer-events:none so an invisible
+ * credit cannot swallow a click meant for the row underneath it. */
+.art-credit {
+  transition: color var(--duration-fast) var(--ease-out),
+              opacity var(--duration-fast) var(--ease-out);
+}
+.art-credit[data-occluded] { opacity: 0; pointer-events: none; }

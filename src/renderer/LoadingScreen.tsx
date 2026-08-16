@@ -260,7 +260,14 @@ function SplitFlapText({ phrases }: { phrases: string[] }) {
   )
 }
 
-const PHRASES = ['VAULT ONLINE', 'READING NOTES', 'AGENT WORKSPACE']
+/**
+ * The board's copy. First one is what you actually read — the others only
+ * appear if the vault is slow enough to still be loading.
+ *
+ * Kept to A–Z and spaces: CHARSET is the alphabet, so a digit or punctuation
+ * would land on a tile that never tumbled to it and break the illusion.
+ */
+const PHRASES = ['SYSTEMS READY', 'READING NOTES', 'AGENT WORKSPACE']
 
 /**
  * Holds the boot screen over the app until the vault tree resolves.

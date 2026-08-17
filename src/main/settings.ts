@@ -13,7 +13,13 @@
 import { app, dialog, BrowserWindow } from 'electron'
 import { readFileSync, writeFileSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
-import { CH, type AppSettings } from '../shared/ipc.js'
+import {
+  CH,
+  ARTWORK_OPACITY_MAX,
+  DEFAULT_APPEARANCE,
+  type Appearance,
+  type AppSettings,
+} from '../shared/ipc.js'
 import { getVaultDir, setVaultDir } from './vault.js'
 import type { Handle } from './ipc.js'
 
@@ -22,6 +28,7 @@ const settingsPath = join(app.getPath('userData'), 'settings.json')
 /** Exactly what lives in settings.json. Absent keys mean "use the default". */
 interface Stored {
   vaultDir?: string
+  appearance?: Appearance
 }
 
 /** The last thing loaded from or written to disk. */
@@ -53,11 +60,49 @@ function load(): Stored {
   try {
     const parsed: unknown = JSON.parse(readFileSync(settingsPath, 'utf8'))
     if (typeof parsed !== 'object' || parsed === null) return {}
-    const dir = (parsed as Record<string, unknown>).vaultDir
-    return typeof dir === 'string' && dir !== '' ? { vaultDir: dir } : {}
+    const raw = parsed as Record<string, unknown>
+    const out: Stored = {}
+    const dir = raw.vaultDir
+    if (typeof dir === 'string' && dir !== '') out.vaultDir = dir
+    // Absent stays absent, so state() falls through to DEFAULT_APPEARANCE and
+    // an untouched settings.json keeps no appearance key at all.
+    if (raw.appearance !== undefined) out.appearance = sanitize(raw.appearance)
+    return out
   } catch {
     // Missing file on first run, or corrupt. Both mean "no persisted setting".
     return {}
+  }
+}
+
+/**
+ * Coerce anything into a complete, in-range Appearance.
+ *
+ * ONE function for BOTH trust boundaries — the file on disk and the renderer's
+ * argument — because they are the same problem: a value that never went through
+ * the slider. A field that does not validate falls back to its default rather
+ * than rejecting the whole object, so a hand-edited settings.json costs the user
+ * the one bad field, not every appearance setting they had.
+ */
+function sanitize(v: unknown): Appearance {
+  const o = (typeof v === 'object' && v !== null ? v : {}) as Record<string, unknown>
+  const pick = <T extends string>(value: unknown, allowed: readonly T[], fallback: T): T =>
+    allowed.includes(value as T) ? (value as T) : fallback
+  const opacity = o.artworkOpacity
+  return {
+    contrast: pick(o.contrast, ['system', 'more'] as const, DEFAULT_APPEARANCE.contrast),
+    transparency: pick(
+      o.transparency,
+      ['system', 'reduced'] as const,
+      DEFAULT_APPEARANCE.transparency,
+    ),
+    motion: pick(o.motion, ['system', 'reduced'] as const, DEFAULT_APPEARANCE.motion),
+    artwork: typeof o.artwork === 'boolean' ? o.artwork : DEFAULT_APPEARANCE.artwork,
+    // Number.isFinite rejects NaN and both infinities; JSON can carry neither,
+    // but the renderer's argument can, and NaN would survive a bare clamp.
+    artworkOpacity:
+      typeof opacity === 'number' && Number.isFinite(opacity)
+        ? Math.min(Math.max(opacity, 0), ARTWORK_OPACITY_MAX)
+        : DEFAULT_APPEARANCE.artworkOpacity,
   }
 }
 
@@ -95,7 +140,19 @@ function state(): AppSettings {
     vaultDir: active,
     pendingVaultDir: stored !== null && stored !== active ? stored : null,
     rootMismatch,
+    appearance: current.appearance ?? DEFAULT_APPEARANCE,
   }
+}
+
+/**
+ * Persist the appearance overrides. Unlike the vault folder, these apply LIVE —
+ * they are CSS custom properties and attributes, so nothing has to be rebuilt to
+ * honour them and there is no unsaved state to lose.
+ */
+function setAppearance(a: Appearance): AppSettings {
+  current = { ...current, appearance: sanitize(a) }
+  save(current)
+  return state()
 }
 
 async function pickVaultDir(): Promise<AppSettings> {
@@ -124,4 +181,5 @@ async function pickVaultDir(): Promise<AppSettings> {
 export function register(handle: Handle): void {
   handle(CH.settingsGet, () => state())
   handle(CH.settingsPickVaultDir, () => pickVaultDir())
+  handle(CH.settingsSetAppearance, (a: Appearance) => setAppearance(a))
 }

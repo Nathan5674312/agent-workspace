@@ -36,12 +36,53 @@ export type VaultGraph = { nodes: string[]; links: VaultLink[] }
 // ------------------------------------------------------------------- settings
 
 /**
- * App settings. ONE setting in v1: the vault folder.
+ * Appearance overrides.
+ *
+ * Every field's `'system'` means NO override: the renderer sets no attribute at
+ * all, so the `@media (prefers-contrast: more)` / `(prefers-reduced-*)` blocks
+ * already in app.css keep running untouched. That is the whole design — the OS
+ * preference is the default and this is an escape hatch on top of it, never a
+ * replacement for it.
+ */
+export type Appearance = {
+  /** `'more'` mirrors `@media (prefers-contrast: more)`. */
+  contrast: 'system' | 'more'
+  /** `'reduced'` mirrors `@media (prefers-reduced-transparency: reduce)`. */
+  transparency: 'system' | 'reduced'
+  /** `'reduced'` mirrors `@media (prefers-reduced-motion: reduce)`. */
+  motion: 'system' | 'reduced'
+  /** False sets `--canvas-art: none`. */
+  artwork: boolean
+  /** Overrides `--canvas-art-opacity`. 0 to ARTWORK_OPACITY_MAX. */
+  artworkOpacity: number
+}
+
+/**
+ * The ceiling on the artwork slider, and it is not arbitrary: tokens.css says
+ * the palette's contrast ratios were measured against a flat Ink ground, so
+ * anything above ~0.20 lightens that ground and erodes every measured ratio in
+ * the app. The slider stops here and main.ts clamps to it, because a value that
+ * arrives from disk has not been through the slider.
+ */
+export const ARTWORK_OPACITY_MAX = 0.2
+
+/** Matches tokens.css: artwork on at `--canvas-art-opacity: 0.16`. */
+export const DEFAULT_APPEARANCE: Appearance = {
+  contrast: 'system',
+  transparency: 'system',
+  motion: 'system',
+  artwork: true,
+  artworkOpacity: 0.16,
+}
+
+/**
+ * App settings: the vault folder, plus the appearance overrides.
  *
  * The renderer never sends a path across this boundary — `pickVaultDir()` opens
  * the OS folder picker in the MAIN process and returns the result. A settings
  * call that accepted an arbitrary renderer-supplied directory would be a way to
- * point the app's file reads anywhere on disk.
+ * point the app's file reads anywhere on disk. `setAppearance()` carries no path
+ * and nothing it accepts can name a file, which is why it may take an argument.
  */
 export type AppSettings = {
   /** Absolute path of the vault root the running app is actually using. */
@@ -57,6 +98,8 @@ export type AppSettings = {
    * diagnostic: it is recorded at boot, not recomputed per read.
    */
   rootMismatch: string | null
+  /** Always present and always complete — main fills every field from defaults. */
+  appearance: Appearance
 }
 
 // ------------------------------------------------------------- claude (pane 1)
@@ -160,6 +203,7 @@ export const CH = {
 
   settingsGet: 'settings:get',
   settingsPickVaultDir: 'settings:pick-vault-dir',
+  settingsSetAppearance: 'settings:set-appearance',
 } as const
 
 /** main -> renderer pushes. */
@@ -201,5 +245,11 @@ export type Api = {
      * as they now stand — unchanged if the picker was cancelled.
      */
     pickVaultDir(): Promise<AppSettings>
+    /**
+     * Persists the appearance overrides and returns the settings as they now
+     * stand. Main validates and clamps, so what comes back may not equal what
+     * went in — render the result, not the argument.
+     */
+    setAppearance(a: Appearance): Promise<AppSettings>
   }
 }

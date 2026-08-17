@@ -1,0 +1,120 @@
+/**
+ * Appearance OVERRIDES. Imported by main.tsx after tokens.css.
+ *
+ * This file exists so that app.css does not have to be touched. It adds a
+ * second way to reach the accessibility modes app.css already implements — it
+ * does not reimplement them and it does not invent values. Every declaration
+ * below is copied from the matching `@media` block in app.css, and every value
+ * in those blocks comes from tokens.css.
+ *
+ * THE RULE THAT MAKES THIS SAFE: `'system'` sets NO attribute at all. When a
+ * user leaves a control on System there is nothing here for the selector to
+ * match, so the `@media` block in app.css is the only thing in force and the OS
+ * preference works exactly as it did before this file existed. These selectors
+ * are an escape hatch ON TOP of the media queries, never a replacement — which
+ * is why nothing here is written as `[data-motion='system'] { ... }`.
+ *
+ * Specificity note: `:root[data-*]` is one attribute selector above the bare
+ * `:root` in tokens.css, and the media blocks in app.css carry no extra weight
+ * of their own, so an override set here wins over the token default and ties
+ * with the media block it mirrors — a tie both sides of which declare the same
+ * value. Source order (this file after tokens.css) settles the rest.
+ */
+
+/* ── motion ───────────────────────────────────────────────────
+   Copied from app.css `@media (prefers-reduced-motion: reduce)`.
+   Same principle as there: the end state without the travel, never "nothing
+   happens", because content that only appears via animation would vanish. */
+
+:root[data-motion='reduced'],
+:root[data-motion='reduced'] *,
+:root[data-motion='reduced'] *::before,
+:root[data-motion='reduced'] *::after {
+  transition-duration: 1ms !important;
+  animation-duration: 1ms !important;
+  animation-iteration-count: 1 !important;
+}
+
+:root[data-motion='reduced'] button:active:not(:disabled),
+:root[data-motion='reduced'] .corner-container {
+  animation: none;
+  opacity: 1;
+  transform: none;
+  filter: none;
+}
+
+/* Scroll-driven, so the blanket 1ms above does not reach it. */
+:root[data-motion='reduced'] .vault-view-content {
+  animation: none;
+  --edge-fade: 0px;
+  -webkit-mask-image: none;
+  mask-image: none;
+}
+
+:root[data-motion='reduced'] .shining-text {
+  animation: none;
+  background: none;
+  -webkit-background-clip: initial;
+  background-clip: initial;
+  color: var(--label-secondary);
+}
+
+/* ── transparency ─────────────────────────────────────────────
+   Copied from app.css `@media (prefers-reduced-transparency: reduce)`.
+   Frosted goes solid: raise opacity, drop the blur. */
+
+:root[data-transparency='reduced'] .vault-ribbon,
+:root[data-transparency='reduced'] .vault-sidebar,
+:root[data-transparency='reduced'] .vault-tab-bar {
+  background: var(--bg-elevated);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+/* ── contrast ─────────────────────────────────────────────────
+   Copied from app.css `@media (prefers-contrast: more)`, hex for hex.
+   Each label moves one step UP the tokens.css ramp toward the light end, so
+   every value stays solid, stays in the palette, and keeps the measured ratio
+   quoted in docs/ACCESSIBILITY.md. Deliberately NOT opacity: GraphView reads
+   --label-secondary for its node fill, and a translucent label makes node discs
+   see-through. */
+
+:root[data-contrast='more'] {
+  --label-secondary: #d8b493; /* Sand  — 10.0:1, up from Tan  at 7.4:1 */
+  --label-tertiary: #ba9b7d; /* Tan   —  7.4:1, up from Clay at 5.0:1 */
+  --label-quaternary: #987d65; /* Clay  —  5.0:1, up from Taupe at 3.7:1 */
+  /* A solid hairline instead of an 8% film. Taupe is decorative-only by the
+     palette's rules, which is exactly what a separator is. */
+  --separator: #806854;
+}
+
+:root[data-contrast='more'] button,
+:root[data-contrast='more'] input,
+:root[data-contrast='more'] textarea,
+:root[data-contrast='more'] select {
+  border: 1px solid var(--separator);
+}
+
+:root[data-contrast='more'] .vault-tab--active,
+:root[data-contrast='more'] .vault-ribbon-icon--active {
+  outline: 1px solid var(--label-secondary);
+}
+
+/* ── background artwork ───────────────────────────────────────
+   The only control here with no OS preference behind it, so it has no @media
+   twin — it is a preference the app itself owns.
+   OFF empties the slot rather than hiding the layer: `none` is a valid
+   background-image (tokens.css calls this a SLOT and ships it empty), so
+   .vault-main::before keeps its scrim sibling and its stacking context and
+   simply paints nothing.
+   The OPACITY half cannot live here — it is a continuous value, not an
+   enumerable state — so appearance.ts sets --canvas-art-opacity inline on the
+   same element. Its ceiling is ARTWORK_OPACITY_MAX, and that ceiling is not
+   cosmetic: tokens.css measures the palette's contrast ratios against a FLAT
+   Ink ground, so artwork above ~0.20 lightens that ground and erodes every
+   ratio the app claims. Clamped in main (a value off disk never saw the
+   slider) and capped again on the input. */
+
+:root[data-artwork='off'] {
+  --canvas-art: none;
+}

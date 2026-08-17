@@ -46,6 +46,9 @@ const api: Api = {
     // No argument on purpose: the picker runs in main, so the renderer cannot
     // nominate a directory for the app to read from.
     pickVaultDir: () => ipcRenderer.invoke(CH.settingsPickVaultDir),
+    // Takes an argument where pickVaultDir cannot: nothing in Appearance can
+    // name a file, so it is not a way to point the app's reads anywhere.
+    setAppearance: (a) => ipcRenderer.invoke(CH.settingsSetAppearance, a),
   },
 }
 

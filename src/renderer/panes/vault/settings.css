@@ -132,6 +132,77 @@
   border-left-color: var(--danger);
 }
 
+/* ── appearance ───────────────────────────────────────────────
+   Label on the left, control on the right, one row per setting. Values from
+   tokens.css only; the controls themselves keep the platform's own rendering
+   because a hand-built select or checkbox loses keyboard and screen-reader
+   behaviour that nothing here needs to change. */
+
+.settings-appearance-grid {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+
+.settings-appearance-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-4);
+}
+
+.settings-appearance-text {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.settings-appearance-label {
+  font-size: var(--text-base);
+}
+
+.settings-appearance-hint {
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+  color: var(--label-tertiary);
+}
+
+.settings-appearance-select {
+  flex: none;
+  color: var(--label);
+  background: var(--material-light);
+  border-radius: var(--radius-md);
+  padding: var(--space-2) var(--space-3);
+}
+
+.settings-appearance-toggle,
+.settings-appearance-slider {
+  flex: none;
+  accent-color: var(--accent);
+}
+
+.settings-appearance-slider {
+  width: 8rem;
+}
+
+/* A disabled control has to LOOK unavailable, or "artwork off" reads as a
+   broken slider rather than an inapplicable one. */
+.settings-appearance-slider:disabled {
+  opacity: 0.4;
+}
+
+/* Mono and fixed-width so the row does not shift as the number changes under
+   the thumb. */
+.settings-appearance-value {
+  flex: none;
+  width: 2.5rem;
+  text-align: right;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+  color: var(--label-secondary);
+}
+
 .settings-actions {
   display: flex;
   justify-content: flex-end;

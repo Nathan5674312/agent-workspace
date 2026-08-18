@@ -49,7 +49,7 @@ import type {
   VaultTreeNode,
 } from '../shared/ipc.js'
 import { parseWikilinks } from '../shared/wikilink.ts'
-import { parseFrontmatter, type VaultNoteMeta } from '../shared/notemeta.ts'
+import { parseFrontmatter, parseList, type VaultNoteMeta } from '../shared/notemeta.ts'
 
 /**
  * The vault root on disk. Every read and every write in this file is resolved
@@ -639,6 +639,7 @@ async function scan(): Promise<{ note: VaultNoteMeta; text: string }[]> {
           type: fm.type ?? '',
           status: fm.status ?? '',
           updated: fm.updated ?? '',
+          tags: parseList(fm.tags ?? ''),
           depth: null, // filled by the BFS in buildIndex
           orphan: false,
           mtime: 0, // see the TRAP note on list()

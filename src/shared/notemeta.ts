@@ -28,6 +28,14 @@ export type VaultNoteMeta = VaultNote & {
   status: string
   /** `updated:` frontmatter as written, `''` when absent. Never parsed to a Date. */
   updated: string
+  /**
+   * `tags:` frontmatter, split. `[]` when absent.
+   *
+   * The one multi-valued property here, which is why grouping needs
+   * `groupValues` rather than a single `field()` lookup: a note with three tags
+   * belongs in three buckets, exactly as a Notion multi-select does.
+   */
+  tags: string[]
   /** Hops from Home. `null` means unreachable. */
   depth: number | null
   /** R6: not reachable from Home within 2 hops. Notion has no equivalent. */
@@ -83,6 +91,75 @@ export function statusTone(status: string): 'live' | 'stop' | 'soon' | 'none' {
   // started", "blocked-on-domain-access" and "north-star" alike.
   const first = status.toLowerCase().split(/[^a-z]+/).filter(Boolean)[0]
   return (first && TONE_WORDS[first]) || 'none'
+}
+
+/**
+ * A bare inline list off one frontmatter line: `[a, b]`, `a, b`, or `"a", "b"`.
+ *
+ * Not a YAML sequence reader. `parseFrontmatter` below is flat `key: value` by
+ * design, so a multi-line `- item` block never reaches here in the first place;
+ * this handles the one-line form the writer actually emits.
+ */
+export function parseList(raw: string): string[] {
+  return raw
+    .replace(/^\[|\]$/g, '')
+    .split(',')
+    .map((s) => s.trim().replace(/^["']|["']$/g, ''))
+    .filter(Boolean)
+}
+
+/**
+ * Type → one of four families, so the Type column carries information at a
+ * glance instead of 40-odd freeform strings all rendered identically.
+ *
+ * Same first-word keying as `statusTone`, for the same reason: these values are
+ * freeform and hyphenated (`master-index`, `design-system`), so an exact-value
+ * table would miss most of them and rot on the next new type.
+ *
+ * WHY FAMILIES ARE NOT COLOUR-CODED: the palette is monochrome by decision
+ * (`tokens.css` §meaning, and note `07 - Design - Color` §4b) — the accent is
+ * luminance, not a hue. Four coloured chips would quietly reverse that. The
+ * family is carried by an ICON plus a luminance step instead, which is also
+ * what keeps it legible for colour-blind users and at a glance in a dense table.
+ *
+ * Unknown types get `none` and render exactly as they do today. A guessed
+ * family is the same failure `statusTone` avoids: asserting something about the
+ * note that nobody wrote.
+ */
+export type TypeFamily = 'structure' | 'work' | 'reference' | 'routine' | 'none'
+
+const FAMILY_WORDS: Record<string, TypeFamily> = {
+  index: 'structure', master: 'structure', moc: 'structure',
+  map: 'structure', hub: 'structure', canvas: 'structure',
+
+  project: 'work', spec: 'work', plan: 'work', brief: 'work',
+  roadmap: 'work', task: 'work', feature: 'work', decision: 'work',
+
+  reference: 'reference', research: 'reference', landscape: 'reference',
+  doc: 'reference', design: 'reference', note: 'reference', audit: 'reference',
+
+  daily: 'routine', journal: 'routine', log: 'routine', playbook: 'routine',
+  template: 'routine', meeting: 'routine', retro: 'routine', transcript: 'routine',
+}
+
+export function typeFamily(type: string): TypeFamily {
+  const first = type.toLowerCase().split(/[^a-z]+/).filter(Boolean)[0]
+  return (first && FAMILY_WORDS[first]) || 'none'
+}
+
+/**
+ * `2026-08-15` → `2026-08`, for grouping by month.
+ *
+ * A string slice, deliberately NOT `new Date(updated)`. `updated` is
+ * frontmatter written by hand and is documented as never parsed to a Date:
+ * `new Date('2026-8-1')` and `new Date('August 2026')` both "work" and both
+ * shift under the local timezone, which would file a note into the wrong month
+ * with no way to tell from the UI. Anything that is not ISO-shaped groups as
+ * unset, which is honest.
+ */
+export function monthOf(updated: string): string {
+  const m = /^(\d{4})-(\d{2})/.exec(updated)
+  return m ? `${m[1]}-${m[2]}` : ''
 }
 
 /**
@@ -154,11 +231,7 @@ export function parseProposal(path: string, text: string): InboxItem {
     folder: fm.proposed_folder || '',
     // `alternatives: [System, Business]` — a bare inline list, not JSON, so it
     // is split rather than parsed.
-    alternatives: (fm.alternatives || '')
-      .replace(/^\[|\]$/g, '')
-      .split(',')
-      .map((s) => s.trim())
-      .filter(Boolean),
+    alternatives: parseList(fm.alternatives || ''),
     type: fm.proposed_type || '',
     captured: fm.captured || '',
     body: stripFrontmatter(text),
@@ -187,6 +260,11 @@ export function toMeta(raw: unknown): VaultNoteMeta | null {
     type: str(o.type),
     status: str(o.status),
     updated: str(o.updated),
+    // Accepts both shapes on the wire: a real array from this app's own main
+    // process, and the raw `[a, b]` string an older server would send.
+    tags: Array.isArray(o.tags)
+      ? o.tags.filter((t): t is string => typeof t === 'string' && t !== '')
+      : parseList(str(o.tags)),
     depth: typeof o.depth === 'number' ? o.depth : null,
     orphan: o.orphan === true,
   }

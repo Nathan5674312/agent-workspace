@@ -775,8 +775,13 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
    information-heavy UI. The table inherited --leading-body (1.47), which is
    book copy, not 258 rows of metadata -- it was the main reason the rows read
    loose and unpolished. */
-.db-table { width: 100%; border-collapse: collapse; font-size: var(--text-sm);
-  line-height: 1.35; }
+/* `table-layout: fixed` is what actually enforces the column proportions set
+   below. Under the default `auto`, those percentages are only hints: the browser
+   sizes each column to its widest cell, so the widths drifted with whatever the
+   filter happened to match, and no cell could truncate because none had a
+   definite width to truncate against. */
+.db-table { width: 100%; table-layout: fixed; border-collapse: collapse;
+  font-size: var(--text-sm); line-height: 1.35; }
 
 /* apple-design 12: floating chrome is a translucent MATERIAL with content
    passing under it, not an opaque strip that punches a hole in the artwork.
@@ -847,14 +852,27 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
 
 /* Fixed proportions, so switching group-by does not reflow every column width
    and make the table appear to jump. */
-.db-col-title { width: 42%; }
-.db-col-area, .db-col-type, .db-col-status { width: 16%; }
+.db-col-title { width: 30%; }
+.db-col-area { width: 10%; }
+.db-col-type { width: 13%; }
+.db-col-status { width: 15%; }
+/* Tags is the widest of the property columns because it is the only one
+   carrying more than one value per row. At 14% all three chips ellipsised to
+   "syst…" and the column stopped meaning anything. */
+.db-col-tags { width: 20%; }
 /* Dates form a column edge only if they are aligned to one. */
 .db-col-updated { width: 10%; text-align: right; color: var(--label-quaternary);
   font-variant-numeric: tabular-nums; white-space: nowrap; }
 
 .db-icon { color: var(--label-quaternary); margin-right: var(--space-2); vertical-align: -2px;
   flex: none; }
+
+/* One line per row, always. A long title used to wrap and push its own leading
+   icon onto a line of its own, so the row grew to two lines and the icon stopped
+   being the anchor it exists to be. Truncating instead is what every other
+   column here already does, and the full title is on the row's title attribute.
+   Set on the ROW cell, not the header, so the header keeps its own layout. */
+.db-row .db-col-title { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
 /* The title is a real <button> so the keyboard can reach it without the row
    having to lie about being one. It must not LOOK like a button: strip the
    global control padding and background, keep only the focus ring.
@@ -903,6 +921,105 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
 .db-tone-stop { color: var(--danger);  background: color-mix(in srgb, var(--danger) 16%, transparent); }
 .db-tone-none { color: var(--label-secondary); background: var(--fill-selected); }
 
+/* A header that does not sort is not a button. Tags is multi-valued, so sorting
+   it would mean silently picking one value to sort by (see COLUMNS). It keeps
+   the header's type and loses the affordance -- the same rule the dead-control
+   queue in docs/buttons/ exists to enforce. */
+/* Matches `thead th button` exactly, including the text-transform the UA
+   stylesheet drops on <button> but not on <span> -- without which this is the
+   one header in caps while its five siblings are not. */
+.db-th-static { display: block; width: 100%;
+  padding: var(--space-2) var(--space-3); text-transform: none; }
+
+/* ── type families ─────────────────────────────────────────────
+   The family is an ICON, never a hue. This palette is monochrome by decision
+   (tokens.css "meaning", note 07 - Design - Color §4b): the accent is the
+   brightest thing rather than a different colour, so a four-hue category scale
+   would quietly reverse a frozen call. An icon plus a luminance step does the
+   same job, survives colour-blindness, and stays legible at --text-xs.
+
+   The luminance order is deliberate and defensible, not decorative: structure
+   notes (index, MOC, hub) are navigational entry points and are what you scan
+   FOR; routine notes (daily, log, transcript) are the most numerous and the
+   least individually significant, so they recede. Status keeps the only
+   saturated colour on the row, so it stays the thing the eye finds first. */
+.db-tag svg { vertical-align: -1px; margin-right: var(--space-1); opacity: 0.75; }
+.db-fam-structure { color: var(--label); }
+.db-fam-work      { color: var(--label-secondary); }
+.db-fam-reference { color: var(--label-secondary); }
+.db-fam-routine   { color: var(--label-tertiary); }
+.db-fam-none      { color: var(--label-tertiary); }
+
+/* ── tags ──────────────────────────────────────────────────────
+   The quietest property in the row: many per note, and none of them a state.
+   Outlined rather than filled so a cell of three reads as texture until it is
+   looked at directly, instead of competing with Status. */
+.db-tags { display: inline-flex; align-items: center; gap: var(--space-1);
+  max-width: 100%; overflow: hidden; }
+/* `flex: 0 1 auto` with a max-width, NOT the inherited `max-width: 100%`: a
+   chip should render at its natural size and only ellipsise if the tag itself
+   is long. Left shrinkable, three short tags each lost half their letters. */
+.db-tag-muted { background: transparent; color: var(--label-tertiary);
+  box-shadow: inset 0 0 0 1px var(--separator-opaque);
+  flex: 0 1 auto; max-width: 8rem; }
+/* `--label-tertiary`, not quaternary. tokens.css marks quaternary "decorative
+   ONLY, never body text", and "+3" is not decoration -- it is the only thing
+   telling you the cell is hiding values. Dates get quaternary because the date
+   is still fully rendered; this is a count you cannot recover by reading. */
+.db-tag-more { color: var(--label-tertiary); font-size: var(--text-xs);
+  white-space: nowrap; flex: none; }
+
+/* ── board ─────────────────────────────────────────────────────
+   Columns scroll horizontally; each column scrolls its own cards. The header is
+   static above its scroller rather than sticky over it -- it never overlaps
+   content, so translucency would be decoration rather than hierarchy (§12). */
+.db-board { flex: 1; min-height: 0; display: flex; align-items: flex-start;
+  gap: var(--space-3); padding: var(--space-3); overflow: auto; }
+/* `min-width: 0` is load-bearing, not tidying. A flex item defaults to
+   `min-width: auto`, so a column whose widest un-breakable content (a nowrap
+   tag chip, a long title fragment) exceeds the basis grows past it -- which is
+   why Business rendered half again as wide as its neighbours. Equal columns are
+   the entire point of a board. */
+.db-board-col { flex: 0 0 15rem; min-width: 0; display: flex; flex-direction: column;
+  min-height: 0; max-height: 100%; }
+.db-board-head { display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-2); flex: none; }
+.db-board-cards { display: flex; flex-direction: column; gap: var(--space-2);
+  overflow: auto; padding: var(--space-1); }
+
+/* ── gallery ───────────────────────────────────────────────────
+   Same cards, stacked by group instead of ranged beside each other. Tracks are
+   in rem so the grid reflows with the user's text size rather than against it
+   (§15 -- scale layout WITH the text). */
+.db-gallery { flex: 1; min-height: 0; overflow: auto; padding: var(--space-3); }
+.db-gallery-head { display: flex; align-items: center; gap: var(--space-2);
+  padding: var(--space-3) var(--space-1) var(--space-2); }
+.db-gallery-grid { display: grid; gap: var(--space-2);
+  grid-template-columns: repeat(auto-fill, minmax(13rem, 1fr)); }
+
+/* ── card ──────────────────────────────────────────────────────
+   Shared by board and gallery. A raised surface with a bright top edge, which
+   is what makes it read as a material sitting above the ground rather than a
+   painted rectangle (§12, and the --edge-highlight token exists for exactly
+   this). */
+.db-card { display: flex; flex-direction: column; align-items: flex-start;
+  gap: var(--space-2); width: 100%; text-align: left; padding: var(--space-3);
+  background: var(--bg-elevated); border-radius: var(--radius-md);
+  color: var(--label-secondary);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 var(--edge-highlight); }
+.db-card:hover { background: var(--bg-elevated); box-shadow: var(--shadow-md),
+  inset 0 1px 0 var(--edge-highlight); }
+/* The global control press is scale(0.97). On a surface this large that reads
+   as the card lurching; big things move less. */
+.db-card:active { transform: scale(0.99); }
+.db-card-title { color: var(--label); font-size: var(--text-base);
+  font-weight: var(--weight-medium); line-height: var(--leading-title);
+  letter-spacing: var(--tracking-title); }
+.db-card-chips { display: flex; flex-wrap: wrap; gap: var(--space-1); max-width: 100%; }
+.db-card-foot { display: flex; align-items: center; gap: var(--space-1);
+  color: var(--label-quaternary); font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums; }
+
 .db-empty { padding: var(--space-6) var(--space-3); color: var(--label-quaternary);
   font-size: var(--text-sm); }
 
@@ -932,9 +1049,19 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   .db-row td { border-bottom-color: var(--separator-opaque); }
   .db-blank { opacity: 1; }
   .db-col-area { color: var(--label-secondary); }
+  /* A card is defined by a shadow, which is exactly what a contrast request is
+     asking us to stop relying on. Give it a real edge and drop the family
+     luminance steps back to full strength -- at high contrast the icon is
+     carrying the category on its own, which was always the intent. */
+  .db-card { box-shadow: none; outline: 1px solid var(--separator-opaque); }
+  .db-card:hover { box-shadow: none; }
+  .db-tag svg { opacity: 1; }
+  .db-fam-work, .db-fam-reference, .db-fam-routine, .db-fam-none { color: var(--label-secondary); }
+  .db-tag-muted, .db-tag-more { color: var(--label-secondary); }
 }
 @media (prefers-reduced-motion: reduce) {
   .db-chip:active { transform: none; }
+  .db-card:active { transform: none; }
 }
 
 /* ---------------------------------------------------------------- inbox view

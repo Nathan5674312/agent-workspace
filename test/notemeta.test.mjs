@@ -7,7 +7,16 @@
  */
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { areaOf, toMeta, statusTone, parseProposal, NONE } from '../src/shared/notemeta.ts'
+import {
+  areaOf,
+  toMeta,
+  statusTone,
+  parseProposal,
+  parseList,
+  typeFamily,
+  monthOf,
+  NONE,
+} from '../src/shared/notemeta.ts'
 
 test('areaOf collapses 99 folders onto a groupable axis', async (t) => {
   await t.test('a nested folder becomes its first segment', () => {
@@ -44,7 +53,9 @@ test('toMeta survives a note server it does not control', async (t) => {
   }
 
   await t.test('a complete row passes through intact', () => {
-    assert.deepEqual(toMeta(full), { ...full, mtime: 0 })
+    // `tags` is normalised to [] rather than omitted: the database maps over it
+    // on every row, so absent has to be an empty list and not undefined.
+    assert.deepEqual(toMeta(full), { ...full, mtime: 0, tags: [] })
   })
 
   await t.test('an OLDER server omitting status/updated yields blanks, not undefined', () => {
@@ -168,5 +179,79 @@ test('parseProposal reads what an agent left in the Inbox', async (t) => {
   await t.test('an empty alternatives list yields no empty strings', () => {
     const p = parseProposal('Inbox/x.md', '---\nalternatives: []\n---\nbody')
     assert.deepEqual(p.alternatives, [], 'split produced a phantom entry')
+  })
+})
+
+test('typeFamily sorts freeform types into four categories', async (t) => {
+  await t.test('hyphenated types key off their first word', () => {
+    // The reason this is not an exact-value table: the vault writes
+    // `master-index` and `design-system`, and neither would ever match.
+    assert.equal(typeFamily('master-index'), 'structure')
+    assert.equal(typeFamily('design-system'), 'reference')
+  })
+
+  await t.test('case does not matter', () => {
+    assert.equal(typeFamily('PROJECT'), 'work')
+    assert.equal(typeFamily('Daily'), 'routine')
+  })
+
+  await t.test('an unknown type is never guessed into a family', () => {
+    // Same rule statusTone holds: a wrong category asserts something about the
+    // note that nobody wrote, and renders as the plain chip instead.
+    assert.equal(typeFamily('flowberry'), 'none')
+    assert.equal(typeFamily(''), 'none')
+  })
+})
+
+test('monthOf groups dates without ever constructing one', async (t) => {
+  await t.test('an ISO date yields its year and month', () => {
+    assert.equal(monthOf('2026-08-15'), '2026-08')
+  })
+
+  await t.test('a non-ISO date groups as unset rather than shifting', () => {
+    // `new Date('2026-8-1')` parses and then moves under the local timezone,
+    // which would file a note into the wrong month with no way to see it.
+    assert.equal(monthOf('2026-8-1'), '')
+    assert.equal(monthOf('August 2026'), '')
+    assert.equal(monthOf(''), '')
+  })
+})
+
+test('parseList reads the one-line frontmatter list both ways', async (t) => {
+  await t.test('a bracketed list', () => {
+    assert.deepEqual(parseList('[design, ui]'), ['design', 'ui'])
+  })
+
+  await t.test('a bare comma list, and quoted values', () => {
+    assert.deepEqual(parseList('design, ui'), ['design', 'ui'])
+    assert.deepEqual(parseList('"design", "ui"'), ['design', 'ui'])
+  })
+
+  await t.test('empty and ragged input yield no phantom entries', () => {
+    assert.deepEqual(parseList(''), [])
+    assert.deepEqual(parseList('[]'), [])
+    assert.deepEqual(parseList('design, , ui'), ['design', 'ui'])
+  })
+})
+
+test('toMeta accepts tags from either shape on the wire', async (t) => {
+  const base = { path: 'a.md', title: 'A', folder: 'Business' }
+
+  await t.test('an array from this app own main process', () => {
+    assert.deepEqual(toMeta({ ...base, tags: ['design', 'ui'] }).tags, ['design', 'ui'])
+  })
+
+  await t.test('a raw string from an older server', () => {
+    assert.deepEqual(toMeta({ ...base, tags: '[design, ui]' }).tags, ['design', 'ui'])
+  })
+
+  await t.test('absent tags are an empty list, never undefined', () => {
+    // The database maps over this on every row; undefined would throw.
+    assert.deepEqual(toMeta(base).tags, [])
+    assert.deepEqual(toMeta({ ...base, tags: null }).tags, [])
+  })
+
+  await t.test('a ragged array drops non-strings instead of rendering them', () => {
+    assert.deepEqual(toMeta({ ...base, tags: ['ui', 3, null, ''] }).tags, ['ui'])
   })
 })

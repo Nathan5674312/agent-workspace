@@ -1,20 +1,29 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
+  BookOpen,
   Calendar,
   ChevronDown,
   ChevronRight,
   FileText,
   LayoutGrid,
+  // Aliased: a bare `Map` import shadows the global Map constructor, and the
+  // grouping below builds one.
+  Map as MapIcon,
+  Repeat,
   Search,
   Table,
   Columns3,
+  Target,
   Unlink,
   type LucideIcon,
 } from 'lucide-react'
 import {
   areaOf,
+  monthOf,
   statusTone,
+  typeFamily,
   NONE,
+  type TypeFamily,
   type VaultNoteMeta,
 } from '../../../shared/notemeta.js'
 
@@ -55,39 +64,263 @@ type ViewMode = 'table' | 'board' | 'calendar' | 'gallery'
 
 const VIEW_MODES: { key: ViewMode; label: string; Icon: LucideIcon; built: boolean }[] = [
   { key: 'table', label: 'Table', Icon: Table, built: true },
-  { key: 'board', label: 'Board', Icon: Columns3, built: false },
+  { key: 'board', label: 'Board', Icon: Columns3, built: true },
+  { key: 'gallery', label: 'Gallery', Icon: LayoutGrid, built: true },
+  // Calendar stays unbuilt on purpose. Every other view is a re-rendering of
+  // the same `groups`; a calendar is not — it needs `updated` as a real date,
+  // and `monthOf` slices the string precisely because this vault's dates are
+  // hand-written and `new Date()` on them silently shifts by timezone. Grouping
+  // by Month is the honest version of it and already exists below.
   { key: 'calendar', label: 'Calendar', Icon: Calendar, built: false },
-  { key: 'gallery', label: 'Gallery', Icon: LayoutGrid, built: false },
 ]
 
 type SortKey = 'title' | 'area' | 'type' | 'status' | 'updated'
-type GroupKey = 'area' | 'type' | 'status' | 'none'
+type GroupKey = 'area' | 'family' | 'type' | 'status' | 'tag' | 'folder' | 'month' | 'none'
 
 const GROUPS: { key: GroupKey; label: string }[] = [
   { key: 'area', label: 'Area' },
+  { key: 'family', label: 'Category' },
   { key: 'type', label: 'Type' },
   { key: 'status', label: 'Status' },
+  { key: 'tag', label: 'Tag' },
+  { key: 'folder', label: 'Folder' },
+  { key: 'month', label: 'Month' },
   { key: 'none', label: 'Nothing' },
 ]
 
-const COLUMNS: { key: SortKey; label: string; className: string }[] = [
-  { key: 'title', label: 'Name', className: 'db-col-title' },
-  { key: 'area', label: 'Area', className: 'db-col-area' },
-  { key: 'type', label: 'Type', className: 'db-col-type' },
-  { key: 'status', label: 'Status', className: 'db-col-status' },
-  { key: 'updated', label: 'Updated', className: 'db-col-updated' },
+/**
+ * `sort: false` is Tags only, and it is not an oversight. Sorting a
+ * multi-valued property means picking one of its values to sort by, which
+ * silently answers a question the user did not ask. Tags are for grouping and
+ * filtering — both of which they do, above.
+ */
+const COLUMNS: { key: SortKey | 'tags'; label: string; className: string; sort: boolean }[] = [
+  { key: 'title', label: 'Name', className: 'db-col-title', sort: true },
+  { key: 'area', label: 'Area', className: 'db-col-area', sort: true },
+  { key: 'type', label: 'Type', className: 'db-col-type', sort: true },
+  { key: 'status', label: 'Status', className: 'db-col-status', sort: true },
+  { key: 'tags', label: 'Tags', className: 'db-col-tags', sort: false },
+  { key: 'updated', label: 'Updated', className: 'db-col-updated', sort: true },
 ]
 
-/** The value a row sorts and groups by, for one column. */
+/**
+ * The four type families, their icon and their human label.
+ *
+ * Icon rather than colour is the whole point — see `typeFamily` in notemeta.ts
+ * for why this palette cannot spend a hue on a category.
+ */
+const FAMILIES: Record<Exclude<TypeFamily, 'none'>, { label: string; Icon: LucideIcon }> = {
+  structure: { label: 'Structure', Icon: MapIcon },
+  work: { label: 'Work', Icon: Target },
+  reference: { label: 'Reference', Icon: BookOpen },
+  routine: { label: 'Routine', Icon: Repeat },
+}
+
+/** The value a row sorts by, for one column. */
 function field(n: VaultNoteMeta, key: SortKey): string {
   if (key === 'area') return areaOf(n)
   if (key === 'title') return n.title
   return n[key]
 }
 
+/**
+ * The buckets one row belongs to, for the current grouping.
+ *
+ * Returns an ARRAY, not a string, because `tag` is multi-valued: a note tagged
+ * `[design, ui]` belongs under both, exactly as a Notion multi-select does.
+ * Every other axis returns one entry. This is also why the row count shown in
+ * the toolbar comes from the filtered rows and not from summing the groups —
+ * under Tag those two numbers legitimately differ.
+ */
+function groupValues(n: VaultNoteMeta, key: GroupKey): string[] {
+  switch (key) {
+    case 'area': return [areaOf(n)]
+    case 'family': {
+      const f = typeFamily(n.type)
+      return [f === 'none' ? '' : FAMILIES[f].label]
+    }
+    case 'type': return [n.type]
+    case 'status': return [n.status]
+    case 'tag': return n.tags.length ? n.tags : ['']
+    case 'folder': return [n.folder]
+    case 'month': return [monthOf(n.updated)]
+    default: return ['']
+  }
+}
+
 /* statusTone lives in shared/notemeta.ts, not here: it is logic about
    frontmatter values, the same as areaOf, and a .tsx module cannot be imported
    by the node --test suite (type stripping does not handle JSX). */
+
+/**
+ * The type, carrying its family as an icon.
+ *
+ * The icon is the category and the text is the value, so a scan down the
+ * column sorts 40-odd freeform types into four shapes without the palette
+ * having to spend a hue on it. An unknown type keeps the plain chip it has
+ * today rather than being assigned a family it did not ask for.
+ */
+function TypeChip({ type }: { type: string }) {
+  const family = typeFamily(type)
+  const meta = family === 'none' ? null : FAMILIES[family]
+  return (
+    <span
+      className={`db-tag db-fam-${family}`}
+      title={meta ? `${type} — ${meta.label}` : type}
+    >
+      {meta && <meta.Icon size={11} aria-hidden="true" />}
+      {type}
+    </span>
+  )
+}
+
+/**
+ * Tags, capped at two.
+ *
+ * Uncapped, one note with nine tags sets the row height for all 258 and the
+ * table stops being scannable. Two rather than three because the column is
+ * fixed-width: a third chip made all of them ellipsise to four letters, which
+ * is less information than showing fewer of them honestly. The full list is in
+ * the cell's title, and Group by → Tag is the real answer to "show me
+ * everything tagged X".
+ */
+const TAG_CAP = 2
+
+function TagList({ tags, blank = true }: { tags: string[]; blank?: boolean }) {
+  if (!tags.length) return blank ? <span className="db-blank">{NONE}</span> : null
+  const head = tags.slice(0, TAG_CAP)
+  const rest = tags.length - head.length
+  return (
+    <span className="db-tags" title={tags.join(', ')}>
+      {head.map((t) => (
+        <span key={t} className="db-tag db-tag-muted">
+          {t}
+        </span>
+      ))}
+      {rest > 0 && <span className="db-tag-more">+{rest}</span>}
+    </span>
+  )
+}
+
+/**
+ * One note as a card, shared by Board and Gallery.
+ *
+ * A real <button>, not a div with onClick: these views have no table row to
+ * carry the semantics the way the table's cells do, so the card itself has to
+ * be the control or the whole view falls out of the keyboard path.
+ */
+function NoteCard({
+  n,
+  onOpenNote,
+}: {
+  n: VaultNoteMeta
+  onOpenNote: (path: string) => void
+}) {
+  return (
+    <button
+      type="button"
+      className="db-card"
+      title={n.path}
+      onClick={() => onOpenNote(n.path)}
+    >
+      <span className="db-card-title">{n.title}</span>
+      {(n.type || n.status) && (
+        <span className="db-card-chips">
+          {n.type && <TypeChip type={n.type} />}
+          {n.status && (
+            <span className={`db-tag db-tone-${statusTone(n.status)}`}>{n.status}</span>
+          )}
+        </span>
+      )}
+      <TagList tags={n.tags} blank={false} />
+      <span className="db-card-foot">
+        {areaOf(n)}
+        {n.updated && ` · ${n.updated}`}
+        {n.orphan && <Unlink size={10} aria-label="Orphan" />}
+      </span>
+    </button>
+  )
+}
+
+type Group = { name: string; rows: VaultNoteMeta[] }
+
+/**
+ * Board — the same groups, laid on their side.
+ *
+ * This is the claim in the header comment made good: it renders `groups`, the
+ * identical array the table renders, so the filter, the grouping and the sort
+ * above it all keep working with no second query path.
+ *
+ * Ungrouped it would be one column of 258 cards, which is a worse table. The
+ * control that fixes it is the one already in the toolbar, so it says so rather
+ * than silently picking a grouping on the user's behalf.
+ */
+function BoardView({
+  groups,
+  grouped,
+  onOpenNote,
+}: {
+  groups: Group[]
+  grouped: boolean
+  onOpenNote: (path: string) => void
+}) {
+  if (!grouped) {
+    return (
+      <div className="db-empty db-empty--placeholder">
+        <strong>Board needs a grouping.</strong>
+        <span>Pick anything other than “Nothing” in Group by, and each value becomes a column.</span>
+      </div>
+    )
+  }
+  return (
+    <div className="db-board">
+      {groups.map((g) => (
+        <section key={g.name} className="db-board-col">
+          <header className="db-board-head">
+            <span className="db-group-name">{g.name}</span>
+            <span className="db-group-count">{g.rows.length}</span>
+          </header>
+          <div className="db-board-cards">
+            {g.rows.map((n) => (
+              <NoteCard key={n.path} n={n} onOpenNote={onOpenNote} />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  )
+}
+
+/** Gallery — the same groups as a card grid, stacked rather than side by side. */
+function GalleryView({
+  groups,
+  grouped,
+  onOpenNote,
+}: {
+  groups: Group[]
+  grouped: boolean
+  onOpenNote: (path: string) => void
+}) {
+  return (
+    <div className="db-gallery">
+      {groups.map((g) => (
+        <section key={g.name || '__all__'}>
+          {grouped && (
+            <header className="db-gallery-head">
+              <span className="db-group-name">{g.name}</span>
+              <span className="db-group-count">{g.rows.length}</span>
+            </header>
+          )}
+          <div className="db-gallery-grid">
+            {g.rows.map((n) => (
+              <NoteCard key={n.path} n={n} onOpenNote={onOpenNote} />
+            ))}
+          </div>
+        </section>
+      ))}
+    </div>
+  )
+}
 
 export interface DatabaseViewProps {
   notes: VaultNoteMeta[] | null
@@ -114,16 +347,21 @@ export function DatabaseView({
   // old grouping names nothing. Kept, it silently hides sections in the new one.
   useEffect(() => setCollapsed(new Set()), [groupBy])
 
-  const groups = useMemo(() => {
-    if (!notes) return []
+  const { groups, shown } = useMemo(() => {
+    if (!notes) return { groups: [], shown: 0 }
     const q = query.trim().toLowerCase()
 
     const rows = notes.filter((n) => {
       if (orphansOnly && !n.orphan) return false
       if (!q) return true
-      // Path is searched as well as title so "business/claude" works. This is
-      // the ONLY full-text-ish thing here; everything else queries a field.
-      return n.title.toLowerCase().includes(q) || n.path.toLowerCase().includes(q)
+      // Path and tags are searched as well as title, so "business/claude" and
+      // "#design" both work. This is the ONLY full-text-ish thing here;
+      // everything else queries a field.
+      return (
+        n.title.toLowerCase().includes(q) ||
+        n.path.toLowerCase().includes(q) ||
+        n.tags.some((t) => t.toLowerCase().includes(q))
+      )
     })
 
     const dir = desc ? -1 : 1
@@ -138,26 +376,27 @@ export function DatabaseView({
     }
 
     if (groupBy === 'none') {
-      return [{ name: '', rows: [...rows].sort(cmp) }]
+      return { groups: [{ name: '', rows: [...rows].sort(cmp) }], shown: rows.length }
     }
 
     const by = new Map<string, VaultNoteMeta[]>()
     for (const n of rows) {
-      const k = field(n, groupBy) || NONE
-      const bucket = by.get(k)
-      if (bucket) bucket.push(n)
-      else by.set(k, [n])
+      for (const raw of groupValues(n, groupBy)) {
+        const k = raw || NONE
+        const bucket = by.get(k)
+        if (bucket) bucket.push(n)
+        else by.set(k, [n])
+      }
     }
-    return [...by.entries()]
+    const groups = [...by.entries()]
       .map(([name, rs]) => ({ name, rows: rs.sort(cmp) }))
       .sort((a, b) => {
         // The empty bucket sinks, for the same reason blanks sort last.
         if ((a.name === NONE) !== (b.name === NONE)) return a.name === NONE ? 1 : -1
         return a.name.localeCompare(b.name, undefined, { numeric: true })
       })
+    return { groups, shown: rows.length }
   }, [notes, query, groupBy, sortBy, desc, orphansOnly])
-
-  const shown = groups.reduce((sum, g) => sum + g.rows.length, 0)
 
   const toggleSort = (key: SortKey) => {
     if (key === sortBy) setDesc((d) => !d)
@@ -244,7 +483,19 @@ export function DatabaseView({
         </span>
       </div>
 
-      {mode !== 'table' ? (
+      {mode === 'board' ? (
+        <BoardView
+          groups={groups}
+          grouped={groupBy !== 'none'}
+          onOpenNote={onOpenNote}
+        />
+      ) : mode === 'gallery' ? (
+        <GalleryView
+          groups={groups}
+          grouped={groupBy !== 'none'}
+          onOpenNote={onOpenNote}
+        />
+      ) : mode !== 'table' ? (
         <div className="db-empty db-empty--placeholder">
           <strong>{VIEW_MODES.find((v) => v.key === mode)?.label}</strong> is not built yet.
           <span>
@@ -262,17 +513,28 @@ export function DatabaseView({
                   key={c.key}
                   className={c.className}
                   aria-sort={
-                    sortBy === c.key ? (desc ? 'descending' : 'ascending') : 'none'
+                    c.sort && sortBy === c.key
+                      ? desc
+                        ? 'descending'
+                        : 'ascending'
+                      : 'none'
                   }
                 >
-                  <button type="button" onClick={() => toggleSort(c.key)}>
-                    {c.label}
-                    {sortBy === c.key && (
-                      <span className="db-sort" aria-hidden="true">
-                        {desc ? '↓' : '↑'}
-                      </span>
-                    )}
-                  </button>
+                  {c.sort ? (
+                    <button type="button" onClick={() => toggleSort(c.key as SortKey)}>
+                      {c.label}
+                      {sortBy === c.key && (
+                        <span className="db-sort" aria-hidden="true">
+                          {desc ? '↓' : '↑'}
+                        </span>
+                      )}
+                    </button>
+                  ) : (
+                    // Not a button, because it does nothing when pressed. The
+                    // whole point of docs/buttons/INDEX.md is that this app does
+                    // not ship controls that only look like controls.
+                    <span className="db-th-static">{c.label}</span>
+                  )}
                 </th>
               ))}
             </tr>
@@ -349,7 +611,7 @@ export function DatabaseView({
                             reads as a rendering failure; an em-dash reads as an
                             answer. */}
                         {n.type ? (
-                          <span className="db-tag">{n.type}</span>
+                          <TypeChip type={n.type} />
                         ) : (
                           <span className="db-blank">{NONE}</span>
                         )}
@@ -362,6 +624,9 @@ export function DatabaseView({
                         ) : (
                           <span className="db-blank">{NONE}</span>
                         )}
+                      </td>
+                      <td className="db-col-tags">
+                        <TagList tags={n.tags} />
                       </td>
                       <td className="db-col-updated">
                         {n.updated || <span className="db-blank">{NONE}</span>}

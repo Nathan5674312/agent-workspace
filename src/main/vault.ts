@@ -1,24 +1,47 @@
 /**
- * Vault data layer.
+ * Vault data layer. Every call here reads or writes the vault directory
+ * DIRECTLY, in the main process. No socket, nothing to start, nothing to be
+ * down.
  *
- * READS come off disk, here in the main process. `tree()`, `list()` and
- * `graph()` open no socket and need nothing running — the vault is a directory
- * of markdown and every question those three answer is answerable by reading
- * it. That was not always true: they used to be HTTP calls to
- * note-system/app/server.py on 127.0.0.1:8765, so the database and graph views
- * failed with `VaultUnavailable` whenever that separate process was not up.
- * It has since been retired.
+ * It was not always so. All of this used to be HTTP to
+ * note-system/app/server.py on 127.0.0.1:8765. `tree()`, `list()` and `graph()`
+ * came off the wire first; `read()` and `save()` stayed behind it because that
+ * server owned four things worth keeping — atomic writes, backups, the
+ * lost-update guard and the no-silent-overwrite rule — and because the guard
+ * compared a NANOSECOND mtime that could not survive a JS number. That server
+ * has since been destroyed and its source is gone, which made both reasons
+ * moot: the four behaviours are implemented in `save()` below, and the mtime
+ * problem was never mtime, it was PYTHON -> JSON -> JS. `st_mtime_ns` is
+ * ~1.7e18 against a Number.MAX_SAFE_INTEGER of 9.0e15, so it lost its low
+ * digits crossing the wire and a freshly-stat'd value never compared equal to
+ * the one the reader saw.
  *
- * WRITES still go to that server (`read()` and `save()` below), which owns
- * atomic writes, backups, the lost-update guard and the no-silent-overwrite
- * rule. Reimplementing those in Node would reintroduce bugs fixed on
- * 2026-08-08, and `save()`'s guard compares a NANOSECOND mtime that does not
- * survive a round trip through a JS number — so the read that supplies it stays
- * on the same side of the wire as the write that checks it.
+ * With both ends in Node the version stamp is `Stats.mtimeMs`: a float64 of
+ * ~1.7e12 that IS a JS number, compares `===` against a fresh stat of an
+ * unmodified file, and leaves `VaultNote.mtime: number` in the shared contract
+ * alone. `{ bigint: true }.mtimeNs` was the alternative and buys nothing here —
+ * both are capped by the filesystem's own timestamp granularity long before
+ * they are capped by their width, and a BigInt would have to be widened through
+ * the IPC contract and every renderer that touches it.
+ *
+ * The server also owned PATH CONTAINMENT (`safe()`), which is why this file
+ * used to forward the caller's path verbatim and said so. Nothing downstream
+ * guards it now, so `resolveInVault()` does, and it is the only thing between
+ * the renderer's argument and the rest of the disk.
  *
  * These calls run in the MAIN process only. The renderer has no network access
  * and no filesystem access.
  */
+import {
+  copyFileSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs'
+import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type {
   VaultGraph,
   VaultNote,
@@ -28,12 +51,10 @@ import type {
 import { parseWikilinks } from '../shared/wikilink.ts'
 import { parseFrontmatter, type VaultNoteMeta } from '../shared/notemeta.ts'
 
-let BASE = 'http://127.0.0.1:8765'
-
 /**
- * The vault root on disk, used ONLY for reading the folder structure. Every
- * write still goes through the server, which owns the atomic-write and
- * lost-update machinery. Kept overridable so tests can point at a scratch dir.
+ * The vault root on disk. Every read and every write in this file is resolved
+ * against it, and nothing may resolve outside it — see `resolveInVault()`. Kept
+ * overridable so tests can point at a scratch dir.
  */
 let VAULT_DIR =
   process.env.AGENT_WORKSPACE_VAULT_DIR ||
@@ -66,22 +87,6 @@ export function getVaultDir(): string {
   return VAULT_DIR
 }
 
-/** For tests only: override the vault base URL. */
-export function _setBaseForTest(url: string) {
-  BASE = url
-  // A different server is a different vault, so the memo cannot survive the
-  // switch. Without this the suite's later graph() cases returned the FIRST
-  // fixture's result in 0.08ms and passed without exercising anything.
-  invalidateGraph()
-}
-
-export class VaultUnavailable extends Error {
-  constructor() {
-    super('Vault server is not running on 127.0.0.1:8765.')
-    this.name = 'VaultUnavailable'
-  }
-}
-
 export class SaveConflict extends Error {
   // Declared and assigned explicitly rather than as a TS parameter property, so
   // this module can be imported directly by `node --test` under type stripping.
@@ -95,11 +100,14 @@ export class SaveConflict extends Error {
 }
 
 /**
- * The server builds its error strings from Python exceptions, and OSError /
- * FileExistsError stringify with the ABSOLUTE path they failed on. Those strings
- * are forwarded to the renderer, which is untrusted, so the vault's location on
- * disk (and with it the OS username) would cross the boundary on every missing
- * note. Keep the sentence, drop the path.
+ * Node's fs errors stringify with the ABSOLUTE path they failed on —
+ * `ENOENT: no such file or directory, open 'C:\…\Universal Vault\x.md'` — and
+ * these errors are thrown across IPC to the renderer, which is untrusted. So
+ * the vault's location on disk (and with it the OS username) would cross the
+ * boundary on every missing note. Keep the sentence, drop the path.
+ *
+ * This used to scrub Python's OSError strings for the same reason. The source
+ * changed; the leak did not.
  */
 function scrub(message: string): string {
   return (
@@ -109,48 +117,56 @@ function scrub(message: string): string {
       // Vault") — so `...\Desktop\Universal Vault\x.md` scrubbed to
       // `<path> Vault<path>`, leaking the fragment it exists to hide.
       .replace(/(?:[A-Za-z]:[\\/]|\\\\)[^'"\n]*/g, '<path>')
-      // POSIX absolute paths were not redacted at all. The server is Python on
-      // Windows today, but it stringifies whatever the OS hands it, and one
-      // day that is a WSL or container path. Two segments minimum, so this
-      // cannot eat `/notes` or `/note?path=…` out of our own error strings.
+      // POSIX absolute paths were not redacted at all. This runs on Windows
+      // today, but it redacts whatever the OS hands it, and one day that is a
+      // WSL or container path. Two segments minimum, so a lone `/…` fragment in
+      // one of our own sentences survives.
       .replace(/\/(?:[^/\s'"\n]+\/)+[^/\s'"\n]*/g, '<path>')
   )
 }
 
-async function req<T>(path: string, init?: RequestInit): Promise<T> {
-  // One signal for the whole exchange, kept so the body-read failure below can
-  // tell "server hung up mid-response" from "server sent something unreadable".
-  const signal = AbortSignal.timeout(15_000)
-  let res: Response
-  try {
-    res = await fetch(BASE + path, {
-      ...init,
-      headers: { 'Content-Type': 'application/json', ...(init?.headers ?? {}) },
-      signal,
-    })
-  } catch {
-    throw new VaultUnavailable()
-  }
+/**
+ * Anything thrown by `node:fs` on its way to the renderer.
+ *
+ * One funnel rather than a scrub() at each throw site, because the rule is
+ * per-BOUNDARY, not per-call: everything read() and save() raise crosses IPC,
+ * and a new fs call added later would otherwise leak by default. Our own
+ * `vault:` errors and SaveConflict are rethrown untouched — they name no path,
+ * and SaveConflict must arrive as itself or the renderer's ConflictDialog never
+ * fires.
+ */
+function fsError(e: unknown): Error {
+  if (e instanceof SaveConflict) return e
+  const message = e instanceof Error ? e.message : String(e)
+  return message.startsWith('vault: ') ? new Error(message) : new Error(scrub(message))
+}
 
-  // A body that will not parse used to become `{}` and, on a 2xx, was returned
-  // as if it were the real payload — so a truncated or non-JSON response
-  // surfaced downstream as `undefined.split(...)`, blaming the wrong line.
-  let body: unknown = {}
-  let parsed = true
-  try {
-    body = await res.json()
-  } catch {
-    if (signal.aborted) throw new VaultUnavailable()
-    parsed = false
+/**
+ * Vault-relative path -> absolute path on disk, or a refusal.
+ *
+ * server.py's `safe()` was the ONLY thing standing between a renderer-supplied
+ * path and the rest of the filesystem, and this layer deliberately forwarded
+ * `../../escaped.md` and `C:/Windows/win.ini` untouched so that guard could see
+ * the exact bytes. There is nothing downstream to see them now, so the guard is
+ * here — without it, migrating read() and save() into this process would have
+ * handed the renderer a read/write primitive over the whole disk.
+ *
+ * Containment is LEXICAL, and that is deliberate: `realpath` is not consulted.
+ * Junctions into this vault are a documented convention on this machine and
+ * `tree()` follows them, so a note inside one has a vault-relative path that
+ * resolves under the root while its real path does not. Resolving links would
+ * make every note reached that way unopenable.
+ */
+function resolveInVault(rel: string): string {
+  const root = resolve(VAULT_DIR)
+  const abs = resolve(root, rel)
+  const inside = relative(root, abs)
+  // '' is the root itself, which is a directory and not a note. A leading '..'
+  // or an absolute answer both mean the path climbed out.
+  if (inside === '' || inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
+    throw new Error('vault: path escapes the vault')
   }
-  const o = (body ?? {}) as Record<string, unknown>
-
-  if (res.status === 409 && typeof o.mtime === 'number') {
-    throw new SaveConflict(o.mtime)
-  }
-  if (!res.ok) throw new Error(scrub(String(o.error ?? `${res.status} ${path}`)))
-  if (!parsed) throw new Error(`vault: unreadable response from ${path}`)
-  return body as T
+  return abs
 }
 
 function requirePath(path: unknown): string {
@@ -163,25 +179,29 @@ function requirePath(path: unknown): string {
 /**
  * The lost-update guard's fail-open edge, closed here.
  *
- * server.py:703 runs the guard only when the request carries a non-null mtime:
+ * The `mtime: number` annotations on this function and on the IPC handler are
+ * erased at runtime and stopped nothing: the renderer is untrusted and its
+ * arguments arrive as whatever it chose to send. What made that fatal was the
+ * shape of the OLD guard — server.py:703 ran its check only when the request
+ * carried a non-null mtime:
  *
  *     if p.exists() and data.get("mtime") is not None:
  *
- * so a body with no `mtime` key, or `mtime: null`, skips the check entirely and
- * atomic_write overwrites the note whole-file. Three renderer-supplied values
- * produce exactly that, because JSON.stringify erases them:
+ * and JSON.stringify erased `undefined`, `NaN` and `null` into exactly that, so
+ * a writer that sent NOTHING was trusted more than one that sent something
+ * stale, and the note was overwritten whole-file.
  *
- *     undefined -> key dropped   -> None -> guard SKIPPED -> clobber
- *     NaN       -> "mtime":null  -> None -> guard SKIPPED -> clobber
- *     null      -> "mtime":null  -> None -> guard SKIPPED -> clobber
+ * The guard in save() below cannot fail that way — a non-number `!==` every
+ * mtime on disk, so the default outcome is a refusal rather than a clobber.
+ * This stays regardless: the reason to reject junk at the boundary is to say
+ * "mtime must be a finite number" instead of raising a conflict the user cannot
+ * act on, and a guard that is correct twice over is the one that survives the
+ * next edit to save().
  *
- * A writer that sends nothing was trusted more than one that sends something
- * stale. The `mtime: number` annotations on this function and on the IPC
- * handler are erased at runtime, so they stopped none of it — the renderer is
- * untrusted and its arguments arrive as whatever it chose to send.
- *
- * 0 is deliberately still accepted: it survives JSON.stringify, the server's
- * guard runs, and `int(0) != st_mtime_ns` rejects the save. Noisy, never lossy.
+ * 0 is deliberately still accepted. It is the CREATE stamp — a path that does
+ * not exist yet has no version to lose, so `save(path, '', 0)` is how the new
+ * note button makes a file. On a file that does exist it compares unequal and
+ * conflicts. Noisy, never lossy.
  */
 function requireMtime(mtime: unknown): number {
   if (typeof mtime !== 'number' || !Number.isFinite(mtime)) {
@@ -253,20 +273,67 @@ export async function checkRoots(): Promise<string | null> {
   )
 }
 
+/**
+ * One note, with the version stamp its next save() will be checked against.
+ *
+ * The stat comes BEFORE the read, and the order is the difference between a
+ * false alarm and silent data loss. A write that lands between the two calls
+ * gives us the OLD mtime with the NEW text: stale stamp, so the user's next
+ * save raises a conflict they did not need — noisy. The other order gives us
+ * the NEW mtime with the OLD text: a stamp that says "you have seen the current
+ * file" when the buffer has not, and the next save overwrites the newer version
+ * with no conflict at all. Noisy beats lossy.
+ */
 export async function read(path: string): Promise<VaultNoteBody> {
-  // requirePath was defined and then never called by anything — a guard that
-  // looked like it was protecting these two entry points and was not. tsc
-  // flagged it as unused, which broke `npm run build` (`tsc --noEmit &&
-  // electron-vite build`). Wired in rather than deleted: `path` arrives over
-  // IPC from the renderer, and an empty or non-string value here builds a
-  // nonsense URL that fails deep in the server with a confusing error instead
-  // of a clear one at the boundary.
-  const o = await req<{ path: string; text: string; mtime: number }>(
-    `/note?path=${encodeURIComponent(requirePath(path))}`,
-  )
-  return { path: o.path, text: o.text, mtime: o.mtime, title: titleOf(o.path) }
+  // `path` arrives over IPC from the renderer. Empty or non-string is refused
+  // at the boundary rather than left to fail deeper with a worse message.
+  const safePath = requirePath(path)
+  try {
+    const abs = resolveInVault(safePath)
+    const mtime = statSync(abs).mtimeMs
+    return {
+      path: safePath,
+      text: readFileSync(abs, 'utf8'),
+      mtime,
+      title: titleOf(safePath),
+    }
+  } catch (e) {
+    throw fsError(e)
+  }
 }
 
+/**
+ * Write a note, keeping the four things the note server owned.
+ *
+ * 1. LOST-UPDATE GUARD. `mtime` is the stamp read() handed the renderer. The
+ *    file is re-stat'd here and the two must be equal, so a write by anyone
+ *    else in between is caught. `mtimeMs` is a float64 of ~1.7e12 derived from
+ *    the same syscall on both sides, so an untouched file compares exactly —
+ *    no false conflicts. Two writes inside the SAME timestamp tick are
+ *    indistinguishable, and that ceiling belongs to the filesystem's timestamp
+ *    granularity (~100ns on NTFS, a full second on some others), not to the
+ *    representation: `mtimeNs` would collide in exactly the same window.
+ *    Against a human typing in an editor it is not reachable.
+ * 2. NO SILENT OVERWRITE. A failed guard throws SaveConflict carrying the
+ *    disk's current mtime and writes NOTHING. That is what the renderer's
+ *    ConflictDialog is driven by, and it is the only thing protecting the
+ *    user's unsaved buffer.
+ * 3. BACKUP before overwrite. See backup() below.
+ * 4. ATOMIC WRITE. Temp file in the target's own directory, then rename.
+ *    `writeFileSync` truncates before it writes, so a crash mid-write leaves a
+ *    0-byte note where the text was. rename is atomic on NTFS and replaces the
+ *    target in one step. Same pattern as settings.ts:128.
+ *
+ * A path that does not exist yet skips the guard entirely and is CREATED —
+ * server.py:765 did the same, under the comment "creating a note still needs no
+ * stamp: there is no version to lose". That is what makes `save(p, '', 0)` the
+ * create call.
+ *
+ * The guard, the backup and the rename are deliberately synchronous with no
+ * `await` between them: an await there would let a second save() interleave
+ * BETWEEN the stat and the rename, and both would pass a guard only one of them
+ * still satisfied.
+ */
 export async function save(
   path: string,
   text: string,
@@ -274,13 +341,68 @@ export async function save(
 ): Promise<VaultNote> {
   const safePath = requirePath(path)
   const safeMtime = requireMtime(mtime)
-  const o = await req<{ ok: boolean; mtime: number }>('/save', {
-    method: 'POST',
-    body: JSON.stringify({ path: safePath, text, mtime: safeMtime }),
-  })
+  let written: number
+  try {
+    const abs = resolveInVault(safePath)
+    // `throwIfNoEntry: false` distinguishes "not there" (a create) from a real
+    // stat failure like a permission denial, which must still surface.
+    const cur = statSync(abs, { throwIfNoEntry: false })
+    if (cur) {
+      if (cur.mtimeMs !== safeMtime) throw new SaveConflict(cur.mtimeMs)
+      backup(abs, safePath)
+    }
+
+    const tmp = `${abs}.saving.tmp`
+    try {
+      writeFileSync(tmp, text, 'utf8')
+      renameSync(tmp, abs)
+    } catch (e) {
+      // A half-written temp file is litter next to the user's notes, and it
+      // would be picked up by the next save's rename if the name were reused.
+      try {
+        unlinkSync(tmp)
+      } catch {
+        /* never existed, or is not ours to remove */
+      }
+      throw e
+    }
+    written = statSync(abs).mtimeMs
+  } catch (e) {
+    throw fsError(e)
+  }
   // Our own write is the one staleness source we can react to instantly.
   invalidateGraph()
-  return { path: safePath, title: titleOf(safePath), mtime: o.mtime }
+  return { path: safePath, title: titleOf(safePath), mtime: written }
+}
+
+/**
+ * Copy the CURRENT file aside before it is overwritten.
+ *
+ * The note server kept pre-edit copies in `.backups/` at the vault root, which
+ * is why `.backups/` was already in SKIP below before this function existed.
+ * Same location, same job, so the copies it left are still where they were and
+ * still excluded: the vault-relative path is mirrored under `.backups/` with a timestamp
+ * appended, so `Projects/AI.md` becomes
+ * `.backups/Projects/AI.md.2026-08-16T09-12-33-104Z`. The suffix is not `.md`,
+ * so a backup can never be indexed as a note even if SKIP changed.
+ *
+ * A failure here ABORTS the save rather than being swallowed. Overwriting the
+ * only copy of a note after failing to keep a copy of it is the exact loss this
+ * exists to prevent, and a `.backups/` that cannot be written to is something
+ * the user needs told about, not something to write through.
+ *
+ * ponytail: unbounded — every save keeps a copy forever. Prune by age or count
+ * when the vault's size makes that matter, or when version history gets a UI.
+ */
+function backup(abs: string, rel: string): void {
+  const dest = resolve(VAULT_DIR, '.backups', `${rel}.${stamp()}`)
+  mkdirSync(dirname(dest), { recursive: true })
+  copyFileSync(abs, dest)
+}
+
+/** Filesystem-safe ISO timestamp: no colons, no dots. Sorts lexically. */
+function stamp(): string {
+  return new Date().toISOString().replace(/[:.]/g, '-')
 }
 
 /**
@@ -299,10 +421,10 @@ const HIDDEN = new Set(['.git', '.obsidian', '.trash', 'node_modules', '__pycach
  * the explorer silently lost real folders (Inbox, Templates, _Raw Media) and
  * would have kept drifting as that endpoint's product rules changed.
  *
- * Reading the directory here does not reintroduce the risk that put writes
+ * Reading the directory here did not reintroduce the risk that once put writes
  * behind the Python server: that was about atomic writes, backups and the
- * lost-update guard. A directory listing has none of those hazards, and writes
- * still go through the server untouched.
+ * lost-update guard, and a directory listing has none of those hazards. The
+ * writes have since come over too, with all three of those kept — see save().
  */
 export async function tree(): Promise<VaultTreeNode> {
   const { readdir, realpath, stat } = await import('node:fs/promises')

@@ -9,8 +9,10 @@ check, and no account.
 
 The renderer runs under a Content Security Policy of `default-src 'none'` with
 `connect-src 'none'`, so the UI layer cannot make a network request even if
-something in it tried. The only network traffic the app makes is from the main
-process to `http://127.0.0.1:8765` — the vault server on this same machine.
+something in it tried. The main process makes none either: the app used to
+reach a vault server on `http://127.0.0.1:8765` on this same machine, and now
+reads and writes the vault directory directly. There is no loopback traffic left
+and no port to open.
 
 The one exception is deliberate and requires a click: the artwork credit links
 to Instagram, and following it hands the URL to your normal browser. That is a
@@ -20,7 +22,8 @@ navigation you initiate, and only `http`/`https` URLs are ever handed over.
 
 | What | Where |
 |---|---|
-| Your notes | The vault directory on disk. The app reads and writes them through the local vault server, which owns atomic writes and backups. |
+| Your notes | The vault directory on disk. The app reads and writes them itself, in the main process, through a temp file and a rename. |
+| A copy of every note you overwrite | `.backups/` inside the vault directory, mirroring the note's path with a timestamp appended. Local, never pruned, never sent anywhere. |
 | Network trust decisions | `network-trust.json` in Electron's userData directory. Local only. |
 | Nothing else | There is no database, no cache of note contents, and no history file. |
 

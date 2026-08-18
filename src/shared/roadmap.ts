@@ -132,7 +132,7 @@ export const ROADMAP: FeatureGroup[] = [
     features: [
       { label: 'API / plugin ecosystem', status: 'planned', surface: 'ribbon:plugins' },
       { label: 'Web clipper', status: 'planned' },
-      { label: 'Version history', status: 'planned', note: 'The retired note server kept pre-edit copies in .backups/; nothing surfaces them.' },
+      { label: 'Version history', status: 'planned', note: 'Every save keeps a pre-edit copy in .backups/, as the retired note server did; nothing surfaces them yet.' },
       { label: 'Whiteboard / canvas view', status: 'planned', surface: 'ribbon:canvas' },
       { label: 'Server / client homelab setup', status: 'planned' },
       {

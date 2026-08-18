@@ -1,17 +1,18 @@
 /**
  * Section 4 — Data Layer Tests
  *
- * Tests vault module against a mock HTTP server that mimics server.py's behavior.
- * No network, no real vault, no Electron required.
+ * Drives the real src/main/vault.ts against a scratch directory. There is no
+ * mock HTTP server any more and no server.py to mimic: read() and save() were
+ * the last two calls on the wire and they read and write the vault directory
+ * directly now. No network, no real vault, no Electron required.
  */
 
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, writeFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as vault from '../src/main/vault.ts'
-import { startMockVault } from './helpers.mjs'
 
 /**
  * `tree()`, `list()` and `graph()` all read the real filesystem, so these tests
@@ -40,45 +41,20 @@ async function makeScratchVault(paths) {
 }
 
 test('vault data layer', async (t) => {
-  // Start the mock vault server once for this test suite
-  const mock = await startMockVault({
-    notes: {
-      'Home.md': { text: '# Home\n[[Projects]]', mtime: 1000000 },
-      'Projects/AI.md': { text: '# AI Projects\n[[Trading Insights]]', mtime: 2000000 },
-      'Projects/Tools.md': {
-        text: '# My Tools\n[[Home]]',
-        mtime: 3000000,
-      },
-      'Trading Insights.md': { text: '# Trading\n[[Projects/AI]]', mtime: 4000000 },
-      'Files/Note with spaces.md': {
-        text: '# Spaces\n[[Home]]',
-        mtime: 5000000,
-      },
-      'Files/Special#chars&symbols.md': {
-        text: '# Special\n[[Home]]',
-        mtime: 6000000,
-      },
-      'Orphan Note.md': { text: '# Orphan\nNo links here', mtime: 7000000 },
-    },
+  // ONE fixture, on disk, for every call in this suite. It used to be two — a
+  // mock note set for read()/save() and a scratch directory for the rest —
+  // which meant the suite could pass while the two disagreed about what was in
+  // the vault. There is one source now, which is the point of the change.
+  const dir = await makeScratchVault({
+    'Home.md': '# Home\n[[Projects]]',
+    'Orphan Note.md': '# Orphan\nNo links here',
+    'Trading Insights.md': '# Trading\n[[Projects/AI]]',
+    'Projects/AI.md': '# AI Projects\n[[Trading Insights]]',
+    'Projects/Tools.md': '# My Tools\n[[Home]]',
+    'Files/Note with spaces.md': '# Spaces\n[[Home]]',
+    'Files/Special#chars&symbols.md': '# Special\n[[Home]]',
   })
-  const mockUrl = mock.url
-  vault._setBaseForTest(mockUrl)
-
-  // The SAME note set as the mock, with the same text, on disk. `read()` and
-  // `save()` still go to the server, while `tree()`, `list()` and `graph()`
-  // read this directory — so the two have to agree or the suite is testing two
-  // different vaults and the link assertions below mean nothing.
-  vault._setVaultDirForTest(
-    await makeScratchVault({
-      'Home.md': '# Home\n[[Projects]]',
-      'Orphan Note.md': '# Orphan\nNo links here',
-      'Trading Insights.md': '# Trading\n[[Projects/AI]]',
-      'Projects/AI.md': '# AI Projects\n[[Trading Insights]]',
-      'Projects/Tools.md': '# My Tools\n[[Home]]',
-      'Files/Note with spaces.md': '# Spaces\n[[Home]]',
-      'Files/Special#chars&symbols.md': '# Special\n[[Home]]',
-    }),
-  )
+  vault._setVaultDirForTest(dir)
 
   await t.test('list() returns all notes with correct shape', async () => {
     const notes = await vault.list()
@@ -88,8 +64,8 @@ test('vault data layer', async (t) => {
     const home = notes.find((n) => n.path === 'Home.md')
     assert.ok(home)
     assert.equal(home.title, 'Home')
-    // NOTE: server.py does NOT return mtime in /notes endpoint, only in /note.
-    // vault.ts defaults to 0, which is correct.
+    // The index carries no mtime and never has. See the TRAP note on list():
+    // a row is fine to open or to draw, but 0 is not a version.
     assert.equal(home.mtime, 0)
 
     // Check a nested note
@@ -99,22 +75,37 @@ test('vault data layer', async (t) => {
     assert.equal(aiProject.mtime, 0)
   })
 
-  await t.test('read() fetches note with text and mtime', async () => {
+  await t.test('read() returns the file text and its mtime', async () => {
     const note = await vault.read('Home.md')
     assert.equal(note.path, 'Home.md')
     assert.equal(note.title, 'Home')
     assert.ok(note.text.includes('[[Projects]]'))
-    assert.equal(note.mtime, 1000000)
+
+    // The mtime is the file's, not a number invented on the way through, and
+    // it is what save()'s guard will be compared against.
+    const st = await stat(join(dir, 'Home.md'))
+    assert.equal(note.mtime, st.mtimeMs)
   })
 
-  await t.test('read() handles spaces in path (URL encoding)', async () => {
+  await t.test('read() gives the SAME mtime twice for an untouched file', async () => {
+    // The whole guard rests on this. `mtimeMs` is a float64 of ~1.7e12 and a
+    // repeat stat of a file nobody wrote to must compare exactly equal, or
+    // every save would raise a conflict that is not there. This is the property
+    // the nanosecond value could not hold once it crossed into a JS number.
+    const a = await vault.read('Home.md')
+    const b = await vault.read('Home.md')
+    assert.equal(a.mtime, b.mtime)
+    assert.ok(Number.isFinite(a.mtime) && a.mtime > 0)
+  })
+
+  await t.test('read() handles spaces in path', async () => {
     const note = await vault.read('Files/Note with spaces.md')
     assert.equal(note.path, 'Files/Note with spaces.md')
     assert.equal(note.title, 'Note with spaces')
     assert.ok(note.text.includes('Spaces'))
   })
 
-  await t.test('read() handles special characters # and & (URL encoding)', async () => {
+  await t.test('read() handles special characters # and &', async () => {
     const note = await vault.read('Files/Special#chars&symbols.md')
     assert.equal(note.path, 'Files/Special#chars&symbols.md')
     assert.equal(note.title, 'Special#chars&symbols')
@@ -129,28 +120,40 @@ test('vault data layer', async (t) => {
     }
   })
 
-  await t.test('save() writes note and returns new mtime', async () => {
+  await t.test('save() writes the file and returns the new mtime', async () => {
     const before = await vault.read('Home.md')
     const result = await vault.save('Home.md', 'Updated text', before.mtime)
     assert.equal(result.path, 'Home.md')
     assert.equal(result.title, 'Home')
-    assert.ok(result.mtime > before.mtime)
 
-    // Verify the write succeeded
-    const after = await vault.read('Home.md')
-    assert.equal(after.text, 'Updated text')
-    assert.equal(after.mtime, result.mtime)
+    // On disk, not through our own reader — the file itself is the assertion.
+    assert.equal(await readFile(join(dir, 'Home.md'), 'utf-8'), 'Updated text')
+    assert.equal((await stat(join(dir, 'Home.md'))).mtimeMs, result.mtime)
+
+    // And the stamp it returns is immediately usable as the next guard value.
+    const again = await vault.save('Home.md', 'Updated twice', result.mtime)
+    assert.equal(await readFile(join(dir, 'Home.md'), 'utf-8'), 'Updated twice')
+    assert.ok(Number.isFinite(again.mtime))
   })
 
-  await t.test('save() throws SaveConflict on stale mtime', async () => {
+  await t.test('save() throws SaveConflict on stale mtime, and writes nothing', async () => {
+    const onDisk = await readFile(join(dir, 'Home.md'), 'utf-8')
     try {
-      await vault.save('Home.md', 'Conflicting text', 0) // old mtime
+      await vault.save('Home.md', 'Conflicting text', 0) // never the disk value
       assert.fail('should have thrown SaveConflict')
     } catch (e) {
       assert.ok(e instanceof vault.SaveConflict)
-      assert.ok(e.currentMtime > 0) // should carry the server's current mtime
+      // Carries the disk's CURRENT mtime, which is what the conflict dialog
+      // re-saves against.
+      assert.equal(e.currentMtime, (await stat(join(dir, 'Home.md'))).mtimeMs)
     }
+    assert.equal(
+      await readFile(join(dir, 'Home.md'), 'utf-8'),
+      onDisk,
+      'a refused save touched the file anyway',
+    )
   })
+
 
   await t.test('tree() builds nested structure, sorts folders before notes', async () => {
     const root = await vault.tree()
@@ -254,34 +257,148 @@ test('vault data layer', async (t) => {
     )
   })
 
-  // Cleanup
-  await mock.close()
+})
+
+// ─────────────────────────────────────────────────────────────────────────────
+// save() as a WRITER: the four behaviours the note server used to own.
+//
+// Each of these takes its own scratch vault, because they create files and the
+// suite above counts them.
+
+test('save() creates a note that does not exist yet', async () => {
+  const dir = await makeScratchVault({ 'Home.md': '# Home' })
+  vault._setVaultDirForTest(dir)
+
+  // A path with no file has no version to lose, so the guard is skipped and 0
+  // is the create stamp — server.py:765 did the same, and it is what makes
+  // `save(path, '', 0)` the create call the new-note button is specified on.
+  const made = await vault.save('Created.md', '# new\n', 0)
+  assert.equal(await readFile(join(dir, 'Created.md'), 'utf-8'), '# new\n')
+  assert.ok(made.mtime > 0)
+  assert.equal(made.title, 'Created')
+
+  // Once it exists it is an ordinary note and the create stamp is refused.
+  await assert.rejects(
+    () => vault.save('Created.md', 'clobber', 0),
+    (e) => e instanceof vault.SaveConflict,
+  )
+  assert.equal(await readFile(join(dir, 'Created.md'), 'utf-8'), '# new\n')
+})
+
+test('save() writes into a folder that does not exist rather than inventing one', async () => {
+  const dir = await makeScratchVault({ 'Home.md': '# Home' })
+  vault._setVaultDirForTest(dir)
+
+  // The temp file is staged in the TARGET's directory, exactly as the server's
+  // atomic_write did, so a missing parent is an error and not a silent mkdir.
+  // Creating folders is a separate control with its own dialog; a save that
+  // conjures directories out of a typo'd path is how a vault grows junk.
+  await assert.rejects(
+    () => vault.save('Nope/Deep.md', 'text', 0),
+    (e) => e instanceof Error && !(e instanceof vault.SaveConflict),
+  )
+  await assert.rejects(() => stat(join(dir, 'Nope')))
+})
+
+test('save() keeps a pre-edit copy under .backups/', async () => {
+  const { readdir } = await import('node:fs/promises')
+  const dir = await makeScratchVault({ 'Projects/Backed.md': 'first' })
+  vault._setVaultDirForTest(dir)
+
+  const note = await vault.read('Projects/Backed.md')
+  await vault.save('Projects/Backed.md', 'second', note.mtime)
+
+  const kept = await readdir(join(dir, '.backups', 'Projects'))
+  const copy = kept.find((f) => f.startsWith('Backed.md.'))
+  assert.ok(copy, `no backup was written: ${kept}`)
+  assert.equal(
+    await readFile(join(dir, '.backups', 'Projects', copy), 'utf-8'),
+    'first',
+    'the backup must hold the text as it was BEFORE the save',
+  )
+  // Not a `.md`, so a backup can never be indexed as a note even if SKIP moved.
+  assert.ok(!copy.toLowerCase().endsWith('.md'), `backup looks like a note: ${copy}`)
+
+  // And it is invisible to the app: `.backups/` is a dot-directory, so tree()
+  // skips it, and SKIP keeps it out of the index.
+  const root = await vault.tree()
+  assert.ok(!(root.children ?? []).some((c) => c.name === '.backups'))
+  assert.deepEqual(
+    (await vault.list()).map((n) => n.path),
+    ['Projects/Backed.md'],
+  )
 })
 
 /**
- * Asserted through `read()`, not `list()`. `list()` used to be the natural
- * probe because everything went over HTTP; it now reads the disk and CANNOT
- * raise this, which is the whole point of the change. `read()` and `save()` are
- * the two calls still on the wire, so they are what this contract covers.
+ * ATOMICITY, observed rather than asserted about.
+ *
+ * `writeFileSync` opens the target with O_TRUNC: it empties the file and THEN
+ * writes, so anything that goes wrong in between leaves a 0-byte note where the
+ * user's text was. Temp-file-plus-rename never opens the target at all.
+ *
+ * The failure is forced by putting a DIRECTORY where the temp file wants to go,
+ * which is deterministic on every platform and fails at exactly the moment a
+ * bare writeFileSync would already have truncated the real file.
  */
-test('VaultUnavailable thrown when server is down', async () => {
-  vault._setBaseForTest('http://127.0.0.1:1') // port that definitely has nothing
-  try {
-    await vault.read('Home.md')
-    assert.fail('should have thrown VaultUnavailable')
-  } catch (e) {
-    assert.ok(e instanceof vault.VaultUnavailable)
-  }
+test('a failed write cannot truncate the note', async () => {
+  const { mkdir: makeDir } = await import('node:fs/promises')
+  const dir = await makeScratchVault({ 'Home.md': 'the original text' })
+  vault._setVaultDirForTest(dir)
+
+  const note = await vault.read('Home.md')
+  await makeDir(join(dir, 'Home.md.saving.tmp'))
+
+  await assert.rejects(() => vault.save('Home.md', 'replacement', note.mtime))
+
+  assert.equal(
+    await readFile(join(dir, 'Home.md'), 'utf-8'),
+    'the original text',
+    'the note was truncated or replaced by a write that failed',
+  )
+  // The note is still readable and still carries its original stamp, so the
+  // user can simply save again.
+  const after = await vault.read('Home.md')
+  assert.equal(after.text, 'the original text')
+  assert.equal(after.mtime, note.mtime)
+})
+
+test('a successful save leaves no temp file behind', async () => {
+  const { readdir } = await import('node:fs/promises')
+  const dir = await makeScratchVault({ 'Home.md': 'first' })
+  vault._setVaultDirForTest(dir)
+
+  const note = await vault.read('Home.md')
+  await vault.save('Home.md', 'second', note.mtime)
+
+  const left = (await readdir(dir)).filter((f) => f.endsWith('.tmp'))
+  assert.deepEqual(left, [], `temp files left in the vault: ${left}`)
 })
 
 /**
- * The disk-side counterpart: the database and graph must survive a server that
- * is not there at all. This is the regression the whole change exists to
- * prevent — both views failed with VaultUnavailable when note-system stopped
- * running, and neither of them ever needed it.
+ * The regression the whole migration exists to prevent: nothing in this file
+ * opens a socket any more, so no vault call can fail because a separate process
+ * is not running. There is no `VaultUnavailable` left to throw.
  */
-test('list() and graph() work with no server running', async () => {
-  vault._setBaseForTest('http://127.0.0.1:1')
+test('every vault call works with nothing running but this process', async () => {
+  const dir = await makeScratchVault({
+    'Home.md': '# Home\n[[Deep]]',
+    'Deep.md': '# Deep\nnothing',
+  })
+  vault._setVaultDirForTest(dir)
+
+  const notes = await vault.list()
+  assert.equal(notes.length, 2)
+  assert.deepEqual((await vault.graph()).links, [{ from: 'Home.md', to: 'Deep.md' }])
+
+  const note = await vault.read('Home.md')
+  assert.ok(note.text.includes('[[Deep]]'))
+  await vault.save('Home.md', '# Home\nno links', note.mtime)
+  assert.equal(await readFile(join(dir, 'Home.md'), 'utf-8'), '# Home\nno links')
+
+  assert.equal(vault.VaultUnavailable, undefined, 'the server error class outlived the server')
+})
+
+test('list() and graph() read the disk, not a note index', async () => {
   vault._setVaultDirForTest(
     await makeScratchVault({
       'Home.md': '# Home\n[[Deep]]',
@@ -373,57 +490,64 @@ test('list() survives files it cannot parse', async () => {
   assert.ok(g.links.some((l) => l.from === 'ok.md' && l.to === 'also ok.md'))
 })
 
-test('scrub() redacts paths with spaces and POSIX paths', async () => {
-  const cases = [
-    // The real vault path contains a space; the old class stopped at it and
-    // leaked the rest.
-    [
-      String.raw`[Errno 2] No such file: 'C:\Users\Nathan\Desktop\Universal Vault\x.md'`,
-      'Vault',
-    ],
-    ['failed at /home/nathan/vault/secret.md', 'nathan'],
-    [String.raw`unc \\SERVER\share\vault\x.md`, 'SERVER'],
-  ]
-
-  for (const [serverError, mustNotLeak] of cases) {
-    const mock = await startMockVault({
-      notes: {},
-      respond: () => ({ status: 400, body: { error: serverError } }),
-    })
-    vault._setBaseForTest(mock.url)
-    await assert.rejects(
-      () => vault.read('x.md'),
-      (e) => {
-        assert.ok(
-          !e.message.includes(mustNotLeak),
-          `leaked "${mustNotLeak}" to the renderer: ${e.message}`,
-        )
-        assert.ok(e.message.includes('<path>'), `nothing was redacted: ${e.message}`)
-        return true
-      },
-    )
-    await mock.close()
-  }
-})
-
-test('scrub() does not eat our own single-segment paths', async () => {
-  const mock = await startMockVault({
-    notes: {},
-    // No `error` key, so vault.ts falls back to `${status} ${path}` — which is
-    // a path of ours and must survive, or every error says "<path>".
-    respond: () => ({ status: 500, body: {} }),
-  })
-  vault._setBaseForTest(mock.url)
+/**
+ * scrub() used to redact Python's OSError strings. It now redacts Node's, which
+ * are the same hazard from a new source: `ENOENT: no such file or directory,
+ * open 'C:\…\Universal Vault\x.md'` names the absolute path, and that error is
+ * thrown to the renderer. The scratch vault lives under the user's Temp
+ * directory, so the OS username is really in the string this asserts on.
+ */
+test('a failed read does not leak the vault path to the renderer', async () => {
+  const dir = await makeScratchVault({ 'Home.md': '# Home' })
+  vault._setVaultDirForTest(dir)
 
   await assert.rejects(
-    () => vault.read('x.md'),
+    () => vault.read('Missing.md'),
     (e) => {
-      assert.ok(e.message.includes('/note'), `over-redacted: ${e.message}`)
+      assert.ok(!e.message.includes(dir), `leaked the vault path: ${e.message}`)
+      assert.ok(!/Nathan/i.test(e.message), `leaked the OS username: ${e.message}`)
+      assert.ok(e.message.includes('<path>'), `nothing was redacted: ${e.message}`)
+      // The sentence has to survive, or the renderer shows "<path>" and nothing
+      // a person can act on.
+      assert.match(e.message, /no such file|ENOENT/i)
       return true
     },
   )
+})
 
-  await mock.close()
+test('a failed save does not leak the vault path either', async () => {
+  // Both entry points throw fs errors; scrubbing one and not the other is the
+  // failure mode a per-callsite guard produces.
+  const dir = await makeScratchVault({ 'Home.md': '# Home' })
+  vault._setVaultDirForTest(dir)
+
+  await assert.rejects(
+    () => vault.save('Missing/Deep.md', 'text', 0),
+    (e) => {
+      assert.ok(!e.message.includes(dir), `leaked the vault path: ${e.message}`)
+      assert.ok(!/Nathan/i.test(e.message), `leaked the OS username: ${e.message}`)
+      return true
+    },
+  )
+})
+
+test("scrub() does not eat our own messages", async () => {
+  // Our own strings carry no path and must arrive whole, or every error the
+  // renderer can show reads "<path>" and says nothing.
+  const dir = await makeScratchVault({ 'Home.md': '# Home' })
+  vault._setVaultDirForTest(dir)
+
+  for (const [call, expected] of [
+    [() => vault.read(''), 'vault: path must be a non-empty string'],
+    [() => vault.save('', 'x', 0), 'vault: path must be a non-empty string'],
+    [() => vault.save('Home.md', 'x', null), 'vault: mtime must be a finite number'],
+    [() => vault.read('../escaped.md'), 'vault: path escapes the vault'],
+  ]) {
+    await assert.rejects(call, (e) => {
+      assert.equal(e.message, expected)
+      return true
+    })
+  }
 })
 
 /**

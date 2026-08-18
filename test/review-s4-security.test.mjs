@@ -7,17 +7,20 @@
  * the stub, so the bodies executed here are the files that ship. Nothing below
  * tests a copy.
  *
- * The mock vault server is `./helpers.mjs` — the same one section4 uses, with
- * its opt-in knobs. In particular `pythonGuard` replicates server.py's ACTUAL
- * /save lost-update guard rather than the stricter default, because the gap
- * between those two IS the bug this suite exists to pin down.
+ * There is no mock vault server any more. `read()` and `save()` were the last
+ * two calls behind note-system's HTTP API and they read and write the vault
+ * directory directly now, so every fixture here is a real scratch vault and
+ * every assertion about what was or was not written is made against the file.
+ * The guards that used to live on the far side of the wire — server.py's
+ * lost-update check and its `safe()` path containment — are asserted here
+ * because this process is the only place left that can hold them.
  */
 import './fixtures/ts-hooks.mjs'
 
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { mkdtempSync } from 'node:fs'
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises'
+import { mkdtemp, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
@@ -28,14 +31,14 @@ process.env.TEST_USER_DATA = mkdtempSync(join(tmpdir(), 'aw-s4-'))
 import * as vault from '../src/main/vault.ts'
 
 /**
- * A vault on disk, for the `list()` and `graph()` tests below.
+ * A vault on disk. EVERY test in this file needs one now — read() and save()
+ * included, which used to be answered by a mock HTTP server.
  *
- * Those used to be driven entirely by the mock HTTP server, because that is
- * where the note text lived. They read the filesystem now, so a test that sets
- * only `_setBaseForTest` leaves VAULT_DIR pointing at whatever ran last — or,
- * on the first such test, at the REAL Universal Vault. That is how these went
- * from milliseconds to hundreds of milliseconds each and asserted against the
- * user's actual notes.
+ * Call it before anything that touches the vault. A test that skips it leaves
+ * VAULT_DIR pointing at whatever scratch directory ran last, or — on the first
+ * such test — at the REAL Universal Vault. That is how these once went from
+ * milliseconds to hundreds of milliseconds each and asserted against the user's
+ * actual notes, and it is a good deal worse now that save() writes.
  */
 async function scratchVault(notes) {
   const dir = await mkdtemp(join(tmpdir(), 'aw-s4-vault-'))
@@ -51,43 +54,48 @@ async function scratchVault(notes) {
 // ---------------------------------------------------------------------------
 // A. THE LOST-UPDATE GUARD  (the live data-loss bug, and its fix)
 //
-// server.py:703-708
+// The guard used to live in server.py:703-708:
+//
 //     if p.exists() and data.get("mtime") is not None:
 //         cur = p.stat().st_mtime_ns
 //         if int(data["mtime"]) != cur:  -> 409 {"error": ..., "mtime": cur}
 //
-// The guard runs only when the request carries a NON-NULL mtime, so its default
-// is fail-open: send nothing and the check is skipped and the note is
-// overwritten whole-file. Three renderer-supplied values reach that state,
-// because JSON.stringify erases them before they ever leave this process:
+// It ran ONLY when the request carried a non-null mtime, so its default was
+// fail-open: send nothing and the check was skipped and the note was
+// overwritten whole-file. Three renderer-supplied values reached that state,
+// because JSON.stringify erased them before they left this process:
 //
-//   value      | on the wire         | server sees | outcome
+//   value      | on the wire         | server saw  | outcome
 //   -----------|---------------------|-------------|-------------------------
 //   0          | "mtime":0           | 0           | guard RUNS -> 409 forever
 //   undefined  | key dropped         | None        | guard SKIPPED -> CLOBBER
 //   NaN        | "mtime":null        | None        | guard SKIPPED -> CLOBBER
 //   null       | "mtime":null        | None        | guard SKIPPED -> CLOBBER
-//   valid ns   | "mtime":1755...     | int         | guard RUNS -> correct
 //
-// The `mtime: number` annotations on ipc.ts:53 and vault.save() are erased at
-// runtime and stopped none of this. requireMtime() in vault.ts is the fix; the
-// three None-producing inputs must now be refused BEFORE any request is sent.
+// The guard is vault.save()'s own now, comparing the caller's stamp against a
+// fresh `statSync().mtimeMs`, and it cannot fail that way: a non-number is
+// unequal to every mtime on disk, so the default outcome is a refusal. The
+// `mtime: number` annotations on ipc.ts:53 and vault.save() are still erased at
+// runtime and still stop nothing, so requireMtime() still rejects junk at the
+// boundary — with the message the user can act on, and before the file is
+// touched. Both halves are asserted below, against the file itself.
 // ---------------------------------------------------------------------------
 
 test('lost-update guard: mtime is validated before anything is written', async (t) => {
-  const saveBodies = []
-  const mock = await startPythonish({ 'Home.md': { text: 'disk', mtime: 5_000 } }, {
-    saveBodies,
-  })
-  vault._setBaseForTest(mock.url)
-
-  const reset = () => {
-    mock.state.notes['Home.md'] = { text: 'disk', mtime: 5_000 }
-    saveBodies.length = 0
+  const dir = await scratchVault({ 'Home.md': 'disk' })
+  const home = join(dir, 'Home.md')
+  const reset = () => writeFile(home, 'disk', 'utf-8')
+  const untouched = async (before) => {
+    assert.equal(await readFile(home, 'utf-8'), 'disk', 'the note must be untouched')
+    assert.equal(
+      (await stat(home)).mtimeMs,
+      before,
+      'the file was rewritten with identical bytes — still a write',
+    )
   }
 
-  // The three that made the server skip its guard. Each must be refused here,
-  // and must not reach the server at all.
+  // The three that made the server skip its guard, plus the shapes a renderer
+  // can send once the erased type annotation is out of the picture.
   for (const [label, value] of [
     ['undefined (argument omitted over IPC)', undefined],
     ['null', null],
@@ -97,78 +105,83 @@ test('lost-update guard: mtime is validated before anything is written', async (
     ['an object', {}],
   ]) {
     await t.test(`refuses ${label} without writing`, async () => {
-      reset()
+      await reset()
+      const before = (await stat(home)).mtimeMs
       await assert.rejects(
         () => vault.save('Home.md', 'would have clobbered', value),
         (e) => e.message === 'vault: mtime must be a finite number',
       )
-      assert.equal(saveBodies.length, 0, 'no request should have been sent')
-      assert.equal(
-        mock.state.notes['Home.md'].text,
-        'disk',
-        'the note must be untouched',
-      )
+      await untouched(before)
     })
   }
 
   await t.test('an omitted argument is refused, not silently defaulted', async () => {
-    reset()
-    // Exactly what `window.api.vault.save(p, t)` produces once the erased
-    // TypeScript signature is out of the picture.
+    await reset()
+    const before = (await stat(home)).mtimeMs
+    // Exactly what `window.api.vault.save(p, t)` produces.
     await assert.rejects(
       () => vault.save('Home.md', 'two args only'),
       (e) => e.message === 'vault: mtime must be a finite number',
     )
-    assert.equal(saveBodies.length, 0)
-    assert.equal(mock.state.notes['Home.md'].text, 'disk')
+    await untouched(before)
   })
 
-  await t.test('0 is allowed through, and the server guard rejects it (409)', async () => {
-    reset()
+  await t.test('0 is allowed through, and the guard rejects it on a file that exists', async () => {
+    await reset()
+    const before = (await stat(home)).mtimeMs
     await assert.rejects(
       () => vault.save('Home.md', 'from a stale buffer', 0),
-      (e) => e instanceof vault.SaveConflict && e.currentMtime === 5_000,
+      (e) => e instanceof vault.SaveConflict && e.currentMtime === before,
     )
-    const sent = JSON.parse(saveBodies.at(-1))
-    assert.ok('mtime' in sent, 'the key must survive JSON.stringify')
-    assert.equal(sent.mtime, 0)
-    assert.equal(mock.state.notes['Home.md'].text, 'disk', 'noisy, never lossy')
+    await untouched(before)
   })
 
-  await t.test('a valid mtime still saves, and the guard ran', async () => {
-    reset()
-    const r = await vault.save('Home.md', 'legitimate edit', 5_000)
-    const sent = JSON.parse(saveBodies.at(-1))
-    assert.equal(sent.mtime, 5_000)
-    assert.equal(mock.state.notes['Home.md'].text, 'legitimate edit')
-    assert.ok(r.mtime > 0)
+  await t.test('a valid mtime saves, and its stamp is the file it just wrote', async () => {
+    await reset()
+    const before = (await stat(home)).mtimeMs
+    const r = await vault.save('Home.md', 'legitimate edit', before)
+    assert.equal(await readFile(home, 'utf-8'), 'legitimate edit')
     assert.equal(r.path, 'Home.md')
     assert.equal(r.title, 'Home')
+    assert.equal(r.mtime, (await stat(home)).mtimeMs)
   })
 
   await t.test('a stale-but-valid mtime is a SaveConflict carrying the disk value', async () => {
-    reset()
+    await reset()
+    const before = (await stat(home)).mtimeMs
     await assert.rejects(
-      () => vault.save('Home.md', 'stale', 4_999),
-      (e) => e instanceof vault.SaveConflict && e.currentMtime === 5_000,
+      () => vault.save('Home.md', 'stale', before - 1),
+      (e) =>
+        e instanceof vault.SaveConflict &&
+        e.currentMtime === before &&
+        // The dialog re-saves against this number. A SaveConflict that carried
+        // undefined would drive it into writing against garbage.
+        Number.isFinite(e.currentMtime),
     )
-    assert.equal(mock.state.notes['Home.md'].text, 'disk')
+    await untouched(before)
   })
 
-  await mock.close()
+  await t.test('the conflict is resolvable: the disk stamp lets the save through', async () => {
+    // The full ConflictDialog round trip. If this breaks, a conflict becomes a
+    // note the user can never save again.
+    await reset()
+    await assert.rejects(
+      () => vault.save('Home.md', 'mine', 0),
+      (e) => e instanceof vault.SaveConflict,
+    )
+    const fresh = await vault.read('Home.md')
+    await vault.save('Home.md', 'mine', fresh.mtime)
+    assert.equal(await readFile(home, 'utf-8'), 'mine')
+  })
 })
 
 test('list() rows carry mtime 0 and are not a version', async () => {
-  const mock = await startPythonish({ 'Home.md': { text: 'disk', mtime: 5_000 } })
-  vault._setBaseForTest(mock.url)
-  await scratchVault({ 'Home.md': 'disk' })
+  const dir = await scratchVault({ 'Home.md': 'disk' })
 
-  // The index carries no mtime. It never did — GET /notes did not send one and
-  // vault.ts defaulted it to 0 — and now it is a deliberate hole rather than an
-  // accident of the wire format: `save()`'s guard compares a NANOSECOND value
-  // that does not survive a JS number, so the scan does not pretend to supply
-  // one. LATENT, not live: no current caller routes a list row into save(). If
-  // one ever does it 409s forever rather than losing data, which is why 0 is
+  // The index carries no mtime and never did. It is a deliberate hole: the scan
+  // does not stat 800 files to hand out version stamps nobody asked for.
+  // LATENT, not live — no current caller routes a list row into save(). If one
+  // ever does it conflicts forever rather than losing data, which is why 0 is
   // left permitted by requireMtime().
   const [row] = await vault.list()
   assert.equal(row.mtime, 0)
@@ -176,9 +189,7 @@ test('list() rows carry mtime 0 and are not a version', async () => {
     () => vault.save(row.path, 'text', row.mtime),
     (e) => e instanceof vault.SaveConflict,
   )
-  assert.equal(mock.state.notes['Home.md'].text, 'disk')
-
-  await mock.close()
+  assert.equal(await readFile(join(dir, 'Home.md'), 'utf-8'), 'disk')
 })
 
 test('the IPC handler does not launder an invalid mtime on its way through', async () => {
@@ -189,11 +200,7 @@ test('the IPC handler does not launder an invalid mtime on its way through', asy
   const { CH } = await import('../src/shared/ipc.ts')
   const { registerIpc } = await import('../src/main/ipc.ts')
 
-  const saveBodies = []
-  const mock = await startPythonish({ 'Home.md': { text: 'disk', mtime: 5_000 } }, {
-    saveBodies,
-  })
-  vault._setBaseForTest(mock.url)
+  const dir = await scratchVault({ 'Home.md': 'disk' })
   registerIpc()
 
   const call = registeredHandlers.get(CH.vaultSave)
@@ -211,111 +218,107 @@ test('the IPC handler does not launder an invalid mtime on its way through', asy
       `handler accepted ${JSON.stringify(args[2] ?? null)}`,
     )
   }
-  assert.equal(saveBodies.length, 0)
-  assert.equal(mock.state.notes['Home.md'].text, 'disk')
-
-  await mock.close()
+  assert.equal(await readFile(join(dir, 'Home.md'), 'utf-8'), 'disk')
 })
 
 // ---------------------------------------------------------------------------
-// B. 409 WITHOUT AN MTIME
+// C. PATH HANDLING — INVERTED BY THE MIGRATION
 //
-// server.py:715-716 turns a FileExistsError into a 409 whose body carries only
-// `error`. vault.ts:85 requires `typeof o.mtime === 'number'` before building a
-// SaveConflict, so that one must surface as an ordinary Error — a SaveConflict
-// with an undefined mtime would drive the renderer's conflict dialog into
-// re-saving against garbage.
+// This suite used to assert the OPPOSITE: that `../../escaped.md` and
+// `C:/Windows/win.ini` were forwarded to the server byte for byte, because
+// server.py's safe() was the only guard and had to see the exact bytes.
+//
+// There is no server. Had read() and save() moved into this process without
+// bringing that guard with them, the renderer would have gained a read/write
+// primitive over the whole disk — the CSP stops the UI making a network
+// request, and this is the other door. resolveInVault() is that guard now, and
+// these are the cases it has to hold.
 // ---------------------------------------------------------------------------
 
-test('a 409 with no mtime is a plain Error, never a SaveConflict', async (t) => {
-  const mock = await startPythonish({ 'Home.md': { text: 'disk', mtime: 5_000 } })
-  vault._setBaseForTest(mock.url)
+test('paths cannot escape the vault, in either direction', async (t) => {
+  const dir = await scratchVault({ 'Home.md': 'ok', 'Projects/AI.md': 'nested' })
+  // A file OUTSIDE the vault, in the vault's parent. Every escape below aims at
+  // something like this; none of them may read it and none may overwrite it.
+  const outside = join(dir, '..', `outside-${Date.now()}.md`)
+  await writeFile(outside, 'SECRET', 'utf-8')
 
-  await t.test('mtime absent', async () => {
-    mock.state.respond = ({ method }) =>
-      method === 'POST' ? { status: 409, body: { error: 'note already exists' } } : null
+  const escapes = [
+    '../' + outside.split(/[\\/]/).pop(),
+    '../../Windows/win.ini',
+    '..',
+    '../',
+    'Projects/../../escaped.md',
+    'C:/Windows/win.ini',
+    'C:\\Windows\\win.ini',
+    '\\\\NAS\\share\\x.md',
+    '/etc/passwd',
+    '..\\..\\escaped.md',
+  ]
+
+  await t.test('read() refuses every traversal', async () => {
+    for (const bad of escapes) {
+      await assert.rejects(
+        () => vault.read(bad),
+        (e) => {
+          assert.equal(e.message, 'vault: path escapes the vault', bad)
+          return true
+        },
+        `read() accepted ${bad}`,
+      )
+    }
+  })
+
+  await t.test('save() refuses every traversal, and writes nothing', async () => {
+    for (const bad of escapes) {
+      await assert.rejects(
+        () => vault.save(bad, 'CLOBBERED', 0),
+        (e) => e.message === 'vault: path escapes the vault',
+        `save() accepted ${bad}`,
+      )
+    }
+    assert.equal(await readFile(outside, 'utf-8'), 'SECRET', 'a file outside the vault was written')
+  })
+
+  await t.test('the refusal names no path', async () => {
+    // It crosses IPC to the renderer, so it may not carry the vault location
+    // any more than an fs error may.
     await assert.rejects(
-      () => vault.save('Home.md', 'x', 5_000),
-      (e) =>
-        e instanceof Error &&
-        !(e instanceof vault.SaveConflict) &&
-        e.message === 'note already exists',
+      () => vault.read('../../x.md'),
+      (e) => !e.message.includes(dir) && !/Nathan/i.test(e.message),
     )
   })
 
-  await t.test('mtime present but not a number', async () => {
-    mock.state.respond = ({ method }) =>
-      method === 'POST'
-        ? { status: 409, body: { error: 'weird', mtime: '5000' } }
-        : null
+  await t.test('the vault root itself is not a note', async () => {
+    for (const p of ['.', './', 'Projects/..']) {
+      await assert.rejects(
+        () => vault.read(p),
+        (e) => e.message === 'vault: path escapes the vault',
+        `read() accepted the root as ${p}`,
+      )
+    }
+  })
+
+  await t.test('percent-encoding is not a bypass', async () => {
+    // The old layer ran encodeURIComponent because the path went into a query
+    // string. Nothing decodes now, so `..%2f..%2f` is a literal filename, not a
+    // traversal — it simply does not exist.
     await assert.rejects(
-      () => vault.save('Home.md', 'x', 5_000),
-      (e) => e instanceof Error && !(e instanceof vault.SaveConflict),
+      () => vault.read('..%2f..%2fencoded.md'),
+      (e) => e.message !== 'vault: path escapes the vault' && /no such file|ENOENT/i.test(e.message),
     )
   })
 
-  mock.state.respond = null
-  await mock.close()
-})
-
-// ---------------------------------------------------------------------------
-// C. PATH HANDLING
-//
-// Our layer deliberately does NOT sanitise paths; server.py's safe() is the
-// only guard. These pin that down: the exact bytes the caller supplied must
-// arrive at the server unchanged and undecoded twice, because safe() is what
-// has to see them.
-// ---------------------------------------------------------------------------
-
-test('paths reach the server verbatim; safe() is the only guard', async (t) => {
-  const seen = []
-  const mock = await startPythonish(
-    {
-      'Home.md': { text: 'ok', mtime: 1 },
-      // Keyed by the literal traversal string. If it is readable, our layer
-      // forwarded the escape untouched — which is correct, and exactly why
-      // server.py's safe() must never be removed.
-      '../../escaped.md': { text: 'outside', mtime: 2 },
-      '..%2f..%2fencoded.md': { text: 'literal percent', mtime: 3 },
-    },
-    {
-      respond: ({ method, url, path }) => {
-        if (method === 'GET' && path.startsWith('/note') && path !== '/notes') {
-          seen.push(url.searchParams.get('path'))
-        }
-        return null
-      },
-    },
-  )
-  vault._setBaseForTest(mock.url)
-
-  await t.test('relative traversal is forwarded unmodified', async () => {
-    const n = await vault.read('../../escaped.md')
-    assert.equal(n.text, 'outside')
-    assert.equal(seen.at(-1), '../../escaped.md')
+  await t.test('ordinary paths, including odd ones, still work', async () => {
+    // The guard must not cost the vault its real filenames. A containment check
+    // that also refuses `Projects/AI.md` or a name with a `#` in it would be
+    // discovered as "the app cannot open half my notes".
+    assert.equal((await vault.read('Projects/AI.md')).text, 'nested')
+    assert.equal((await vault.read('./Home.md')).text, 'ok')
+    await vault.save('Odd #name & (chars).md', 'fine', 0)
+    assert.equal(await readFile(join(dir, 'Odd #name & (chars).md'), 'utf-8'), 'fine')
   })
 
-  await t.test('percent-encoded traversal is NOT double-decoded', async () => {
-    const n = await vault.read('..%2f..%2fencoded.md')
-    assert.equal(n.text, 'literal percent')
-    // encodeURIComponent escaped the '%' to '%25', so the server's single
-    // unquote yields the literal string back — not '../../encoded.md'.
-    assert.equal(seen.at(-1), '..%2f..%2fencoded.md')
-    assert.notEqual(seen.at(-1), '../../encoded.md')
-  })
-
-  await t.test('a query-injection attempt stays inside the path parameter', async () => {
-    await assert.rejects(() => vault.read('Home.md&path=Other.md'))
-    assert.equal(seen.at(-1), 'Home.md&path=Other.md')
-  })
-
-  await t.test('an absolute Windows path is forwarded for safe() to reject', async () => {
-    await assert.rejects(() => vault.read('C:/Windows/win.ini'))
-    assert.equal(seen.at(-1), 'C:/Windows/win.ini')
-  })
-
-  await t.test('requirePath refuses empty and non-string before any request', async () => {
-    const before = seen.length
+  await t.test('requirePath refuses empty and non-string before anything is touched', async () => {
     for (const bad of ['', null, undefined, 42, {}, []]) {
       await assert.rejects(
         () => vault.read(bad),
@@ -326,60 +329,72 @@ test('paths reach the server verbatim; safe() is the only guard', async (t) => {
         (e) => e.message === 'vault: path must be a non-empty string',
       )
     }
-    assert.equal(seen.length, before, 'nothing should have reached the server')
   })
-
-  await mock.close()
 })
 
 // ---------------------------------------------------------------------------
 // D. ERROR LEAKAGE ACROSS THE BOUNDARY
 // ---------------------------------------------------------------------------
 
-test('scrub() keeps absolute paths out of renderer-visible errors', async (t) => {
-  const mock = await startPythonish({})
-  vault._setBaseForTest(mock.url)
+/**
+ * The leak is the same one as before with a new source: it was Python's
+ * `[Errno 2] No such file or directory: 'C:\…\Universal Vault\Home.md'`, it is
+ * now Node's `ENOENT: no such file or directory, open 'C:\…'`. Both name the
+ * absolute path, both are thrown to the renderer.
+ *
+ * Asserted through the REGISTERED IPC HANDLER rather than through vault.read()
+ * directly, because that is the boundary the rule is about: a scrub that
+ * happens inside vault.ts but is lost or re-wrapped on the way through ipc.ts
+ * would pass a direct test and still leak.
+ */
+test('fs errors reach the renderer with the path removed', async (t) => {
+  const { registeredHandlers } = await import('./fixtures/electron-stub.mjs')
+  const { CH } = await import('../src/shared/ipc.ts')
+  const { registerIpc } = await import('../src/main/ipc.ts')
 
-  await t.test('Windows drive path is removed', async () => {
-    mock.state.respond = () => ({
-      status: 400,
-      body: {
-        error:
-          "[Errno 2] No such file or directory: 'C:\\\\Users\\\\Nathan\\\\Desktop\\\\Universal Vault\\\\Home.md'",
-      },
-    })
+  const dir = await scratchVault({ 'Home.md': 'ok' })
+  registerIpc()
+  const topFrame = { senderFrame: { parent: null } }
+  const read = registeredHandlers.get(CH.vaultRead)
+  const save = registeredHandlers.get(CH.vaultSave)
+
+  // The scratch vault is under the user's Temp directory, so the absolute path
+  // in these errors really does contain the OS username.
+  assert.match(dir, /Nathan/i, 'fixture cannot demonstrate the leak')
+
+  await t.test('a missing note names no path', async () => {
     await assert.rejects(
-      () => vault.read('Home.md'),
+      () => read(topFrame, 'Missing.md'),
       (e) => {
-        assert.ok(!/Nathan/.test(e.message), `username leaked: ${e.message}`)
+        assert.ok(!e.message.includes(dir), `vault path leaked: ${e.message}`)
+        assert.ok(!/Nathan/i.test(e.message), `username leaked: ${e.message}`)
         assert.match(e.message, /<path>/)
-        assert.match(e.message, /No such file or directory/)
+        assert.match(e.message, /no such file or directory/i)
         return true
       },
     )
   })
 
-  await t.test('UNC path is removed', async () => {
-    mock.state.respond = () => ({
-      status: 400,
-      body: { error: 'cannot open \\\\NAS\\vault\\Home.md' },
-    })
+  await t.test('a failed write names no path', async () => {
     await assert.rejects(
-      () => vault.read('Home.md'),
-      (e) => !/NAS/.test(e.message) && /<path>/.test(e.message),
+      () => save(topFrame, 'Missing/Deep.md', 'text', 0),
+      (e) => {
+        assert.ok(!e.message.includes(dir), `vault path leaked: ${e.message}`)
+        assert.ok(!/Nathan/i.test(e.message), `username leaked: ${e.message}`)
+        return true
+      },
     )
   })
 
-  await t.test('a status-only failure still produces a usable message', async () => {
-    mock.state.respond = () => ({ status: 500, body: {} })
+  await t.test('a conflict still arrives as a SaveConflict, not a scrubbed Error', async () => {
+    // scrub() must not launder this one into an ordinary Error: the renderer
+    // matches on the message to open its ConflictDialog, and that dialog is the
+    // only thing protecting the unsaved buffer.
     await assert.rejects(
-      () => vault.read('Home.md'),
-      (e) => e.message === '500 /note?path=Home.md',
+      () => save(topFrame, 'Home.md', 'stale', 1),
+      (e) => e.message === 'Note changed on disk since you opened it.',
     )
   })
-
-  mock.state.respond = null
-  await mock.close()
 })
 
 // ---------------------------------------------------------------------------
@@ -444,55 +459,28 @@ test('hostile titles and paths do not break or pollute anything', async () => {
 
 test('a multi-megabyte note round-trips intact', async () => {
   const big = 'x'.repeat(4 * 1024 * 1024)
-  const mock = await startPythonish({ 'Big.md': { text: big, mtime: 1 } })
-  vault._setBaseForTest(mock.url)
+  const dir = await scratchVault({ 'Big.md': big })
 
   const n = await vault.read('Big.md')
   assert.equal(n.text.length, big.length)
   assert.equal(n.text, big)
 
-  await mock.close()
+  // And back out again, through the temp file and the rename.
+  const bigger = big + 'y'.repeat(1024)
+  const saved = await vault.save('Big.md', bigger, n.mtime)
+  assert.equal((await readFile(join(dir, 'Big.md'), 'utf-8')).length, bigger.length)
+  assert.equal(saved.mtime, (await stat(join(dir, 'Big.md'))).mtimeMs)
 })
 
 // ---------------------------------------------------------------------------
-// G. UNREADABLE AND ABSENT RESPONSES
+// G. WHAT USED TO BE HERE
+//
+// Two tests lived here: one for a 2xx body that would not parse, and one that
+// spent 15 seconds proving `AbortSignal.timeout` fired when a server accepted
+// the connection and never answered. Both were properties of the wire. There is
+// no wire, no response to be unparseable, and nothing that can hang — so they
+// are gone rather than rewritten into something that only looks equivalent.
 // ---------------------------------------------------------------------------
-
-test('a 2xx body that will not parse throws instead of becoming {}', async () => {
-  const mock = await startPythonish({ 'Home.md': { text: 'ok', mtime: 1 } })
-  vault._setBaseForTest(mock.url)
-
-  mock.state.respond = () => ({ status: 200, body: '<html>not json</html>' })
-  await assert.rejects(
-    () => vault.read('Home.md'),
-    (e) => /unreadable response/.test(e.message),
-  )
-
-  mock.state.respond = null
-  await mock.close()
-})
-
-test('a server that accepts the connection and never answers times out', async () => {
-  // vault.ts uses AbortSignal.timeout(15_000); this test therefore takes ~15s.
-  // It is the only way to prove the timeout exists rather than assuming it.
-  const mock = await startPythonish({}, { respond: () => 'hang' })
-  vault._setBaseForTest(mock.url)
-
-  // Probed through read(), not list(). list() no longer opens a socket, so it
-  // can neither hang nor time out — proving the timeout still needs a call that
-  // is actually on the wire.
-  const started = Date.now()
-  await assert.rejects(
-    () => vault.read('Home.md'),
-    (e) => e instanceof vault.VaultUnavailable,
-  )
-  const took = Date.now() - started
-  assert.ok(took >= 14_000, `should have waited for the timeout, waited ${took}ms`)
-  assert.ok(took < 30_000, `timeout should have fired by now, waited ${took}ms`)
-
-  mock.state.respond = null
-  await mock.close()
-})
 
 // ---------------------------------------------------------------------------
 // H. graph() CONCURRENCY POOL
@@ -544,29 +532,27 @@ test('graph() ignores an unterminated [[', async () => {
 })
 
 test('graph() memo is shared by concurrent callers and dropped by save()', async () => {
-  const { writeFile: write } = await import('node:fs/promises')
-  const mock = await startPythonish({ 'A.md': { text: '[[Home]]', mtime: 2 } })
-  vault._setBaseForTest(mock.url)
   const dir = await scratchVault({ 'Home.md': '[[Home]]', 'A.md': '[[Home]]' })
 
   // Overlapping callers (the graph tab and a backlinks lookup) share one scan.
   await Promise.all([vault.graph(), vault.graph(), vault.backlinks('Home.md')])
   assert.deepEqual((await vault.graph()).links, [{ from: 'A.md', to: 'Home.md' }])
 
-  // Staleness is now measured against the DISK rather than a request count:
-  // change a file behind the memo's back and the memo must not notice.
-  await write(join(dir, 'A.md'), 'no links any more', 'utf-8')
+  // Staleness is measured against the DISK: change a file behind the memo's
+  // back and the memo must not notice, because it is a 30s cache.
+  await writeFile(join(dir, 'A.md'), 'no links any more', 'utf-8')
   assert.deepEqual(
     (await vault.graph()).links,
     [{ from: 'A.md', to: 'Home.md' }],
     'a cached call went back to disk inside the TTL',
   )
 
-  // Our own write invalidates it immediately — no waiting out the TTL.
-  await vault.save('A.md', 'no links any more', mock.state.notes['A.md'].mtime)
+  // Our own write invalidates it immediately — no waiting out the TTL. Written
+  // through save() this time rather than around it, which is the whole point:
+  // the writer and the memo are in the same process now.
+  const cur = await vault.read('A.md')
+  await vault.save('A.md', 'still no links', cur.mtime)
   assert.deepEqual((await vault.graph()).links, [], 'save() did not invalidate the memo')
-
-  await mock.close()
 })
 
 test('graph() on an empty vault resolves rather than deadlocking', async () => {
@@ -615,11 +601,9 @@ test('ipc handlers refuse anything that is not the top frame', async (t) => {
   const { CH } = await import('../src/shared/ipc.ts')
   const { registerIpc } = await import('../src/main/ipc.ts')
 
-  const mock = await startPythonish({ 'Home.md': { text: 'ok', mtime: 1 } })
-  vault._setBaseForTest(mock.url)
-  // vault:list is answered from disk, so the fixture has to be on disk. Without
-  // this the handler returned whatever scratch vault the previous test left
-  // VAULT_DIR pointing at, and the row count below was a coincidence.
+  // The fixture has to be on disk. Without this the handler returned whatever
+  // scratch vault the previous test left VAULT_DIR pointing at, and the row
+  // count below was a coincidence.
   await scratchVault({ 'Home.md': 'ok' })
 
   registerIpc()
@@ -693,8 +677,6 @@ test('ipc handlers refuse anything that is not the top frame', async (t) => {
       )
     }
   })
-
-  await mock.close()
 })
 
 // ---------------------------------------------------------------------------
@@ -737,13 +719,3 @@ test('isExternallyOpenable admits http(s) and nothing else', async () => {
   }
 })
 
-// ---------------------------------------------------------------------------
-// helper: the shared mock, wired to server.py's real /save semantics
-// ---------------------------------------------------------------------------
-
-async function startPythonish(notes, extra = {}) {
-  const { startMockVault } = await import('./helpers.mjs')
-  const state = { notes, pythonGuard: true, ...extra }
-  const mock = await startMockVault(state)
-  return { ...mock, state }
-}

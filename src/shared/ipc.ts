@@ -15,7 +15,11 @@ export type VaultNote = {
   /** Vault-relative, forward slashes. e.g. "Business/Claude Code Extension/_START HERE.md" */
   path: string
   title: string
-  /** Nanosecond mtime from the server. Required for the lost-update guard on save. */
+  /**
+   * The note's mtime in milliseconds (`fs.Stats.mtimeMs`), as read()
+   * observed it. Required for the lost-update guard on save, which compares it
+   * against a fresh stat — pass back exactly what read() gave you, unrounded.
+   */
   mtime: number
 }
 

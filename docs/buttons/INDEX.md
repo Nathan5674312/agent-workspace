@@ -74,8 +74,22 @@ All seven are left-ribbon icons.
 | Tier | Count | Status |
 |---|---|---|
 | WIRE | 9 | ✅ all built |
-| DECIDE | 7 | blocked on a scope decision |
-| **Total** | **16** | **9 done, 7 waiting on a human** |
+| DECIDE | 7 | the CONTROL is built; the feature behind it is not |
+| **Total** | **16** | **no dead controls remain** |
+
+**Read that second row carefully, because the title of this file invites the
+wrong conclusion.** The seven DECIDE items are not dead controls and have not
+been since 2026-08-17. All eight ribbon icons are wired, carry `aria-pressed`,
+and show `SidebarPlaceholder` — which reads `shared/roadmap.ts` and says the
+feature is not built yet, names it, and points at the Files icon for the tree.
+A wired control honestly reporting an unbuilt feature is not the defect this
+directory is about. What is outstanding is seven FEATURES, and the scope
+question each file asks.
+
+Audited independently on 2026-08-18 across every `.tsx` in `src/renderer`, not
+just this pane: **58 interactive elements — 54 wired, 0 disabled, 4 read-only.**
+The four are the conflict dialog's two panes, the discarded-version box and the
+version preview, all `readOnly` by design. Nothing in the renderer is inert.
 
 ## What now stops this list growing back
 

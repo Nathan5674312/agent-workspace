@@ -11,7 +11,7 @@
  * pickVaultDir() runs the OS picker here and returns the result.
  */
 import { app, dialog, BrowserWindow } from 'electron'
-import { readFileSync, writeFileSync, renameSync } from 'node:fs'
+import { readFileSync, writeFileSync, renameSync, statSync } from 'node:fs'
 import { join } from 'node:path'
 import {
   CH,
@@ -43,6 +43,19 @@ let current: Stored = {}
  * one that may disagree with the warning already in the console.
  */
 let rootMismatch: string | null = null
+
+/**
+ * Why the persisted vaultDir was refused at boot, or null if it was applied (or
+ * there was none). Same CHANNEL as rootMismatch — one diagnostic line in the
+ * modal — but a separate variable, because index.ts calls setRootMismatch()
+ * from checkRoots()'s .then(), which lands AFTER applySettings() and would
+ * otherwise overwrite this with the null that a healthy default root produces.
+ *
+ * It wins over rootMismatch when both are set: checkRoots() would be describing
+ * the default directory, and the reason the app is looking at the default
+ * directory is the more useful sentence.
+ */
+let vaultDirRefused: string | null = null
 
 export function setRootMismatch(message: string | null): void {
   rootMismatch = message
@@ -128,18 +141,48 @@ function save(s: Stored): void {
  */
 export function applySettings(): void {
   current = load()
-  if (current.vaultDir) setVaultDir(current.vaultDir)
+  vaultDirRefused = null
+  const dir = current.vaultDir
+  if (!dir) return
+
+  // load() proves the value is a non-empty string. It cannot prove the folder
+  // still exists — the user may have deleted it, renamed it, or unplugged the
+  // drive it was on since the last run, and that is far likelier than the
+  // corrupt JSON this file already defends against. Applying it anyway boots
+  // the app pointed at nothing, with no visible reason.
+  if (isDirectory(dir)) {
+    setVaultDir(dir)
+    return
+  }
+  // Left in settings.json, not deleted: the drive may come back, and dropping
+  // it would silently discard a choice the user made. The default is used for
+  // this run, and the modal says so with the path, so it can be re-picked.
+  vaultDirRefused = `Saved vault folder is missing: ${dir} — using the default instead. Choose the folder again to switch back.`
+}
+
+/** Non-throwing: statSync raises on a bad path or a denied one, and neither is a
+ *  reason for the whole app to fail to boot. Both mean "cannot use this". */
+function isDirectory(path: string): boolean {
+  try {
+    return statSync(path).isDirectory()
+  } catch {
+    return false
+  }
 }
 
 function state(): AppSettings {
   const active = getVaultDir()
   const stored = current.vaultDir ?? null
   // After applySettings() these agree, so nothing is pending at boot. They
-  // diverge only between a pick and the next restart.
+  // diverge only between a pick and the next restart — or when the stored
+  // folder was refused, and then nothing is pending either: promising "restart
+  // to open it" under a warning that it does not exist is a lie the user would
+  // act on.
   return {
     vaultDir: active,
-    pendingVaultDir: stored !== null && stored !== active ? stored : null,
-    rootMismatch,
+    pendingVaultDir:
+      stored !== null && stored !== active && vaultDirRefused === null ? stored : null,
+    rootMismatch: vaultDirRefused ?? rootMismatch,
     appearance: current.appearance ?? DEFAULT_APPEARANCE,
   }
 }
@@ -173,6 +216,10 @@ async function pickVaultDir(): Promise<AppSettings> {
   if (result.canceled || !chosen) return state()
 
   current = { ...current, vaultDir: chosen }
+  // The picker only returns a folder that exists, so this IS the re-pick the
+  // refusal message asks for. Clearing it here is what lets pendingVaultDir
+  // come back and the warning go away.
+  vaultDirRefused = null
   save(current)
   // Deliberately no setVaultDir() here. See the file header.
   return state()

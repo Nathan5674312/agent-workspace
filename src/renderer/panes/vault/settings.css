@@ -8,16 +8,41 @@
  * is luminance and weight, never a hue.
  */
 
+/* The <dialog> element itself, opened with showModal(). It is not the panel —
+   it is the full-viewport hit area the backdrop-dismiss rule needs, and the
+   panel is centred inside it.
+
+   No z-index: showModal() puts this in the TOP LAYER, above .pane-corner (100)
+   and above every stacking context in the app, so a number here would be
+   ignored and would only invite someone to tune it.
+
+   The four overrides below are all against the UA sheet for dialog, which sizes
+   a modal to fit its content and centres it with `margin: auto`. */
 .settings-overlay {
   position: fixed;
   inset: 0;
-  z-index: 200; /* over .pane-corner (100), which floats above the vault */
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: var(--space-6);
+  border: 0;
+  background: transparent;
+}
+
+/* `display` and not just the flex properties: the UA sheet closes a dialog with
+   `display: none`, so an unconditional display here would leave the modal on
+   screen forever. */
+.settings-overlay[open] {
   display: flex;
   align-items: center;
   justify-content: center;
-  padding: var(--space-6);
-  /* Ink at high alpha rather than neutral black: a grey scrim on a warm ground
-     reads as a dead pixel layer. */
+}
+
+/* Ink at high alpha rather than neutral black: a grey scrim on a warm ground
+   reads as a dead pixel layer. */
+.settings-overlay::backdrop {
   background: rgba(22, 12, 8, 0.6);
   backdrop-filter: var(--blur-regular);
   -webkit-backdrop-filter: var(--blur-regular);
@@ -38,12 +63,6 @@
   box-shadow: var(--shadow-lg), inset 0 1px 0 var(--edge-highlight);
   border-radius: var(--radius-xl);
   color: var(--label);
-}
-
-/* The wrapper takes focus on open so the trap has a start; that focus is
-   programmatic, not a tab stop, and the ring on a whole panel is noise. */
-.settings-dialog:focus {
-  outline: none;
 }
 
 .settings-title {

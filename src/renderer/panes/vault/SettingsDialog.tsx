@@ -14,6 +14,11 @@
  * graph memo, the tree, the open buffer and the nav trail atomically. The
  * appearance overrides are CSS attributes on <html>, so they apply as they are
  * touched — there is nothing to rebuild and nothing to lose.
+ *
+ * A real <dialog> + showModal(), not a div pretending to be one. The renderer is
+ * always Chromium, so the focus trap, Escape, the focus restore on close and the
+ * top layer are all the platform's job. What is NOT native, and so is still
+ * written out below: dismissing on a backdrop click.
  */
 import { useEffect, useRef, useState } from 'react'
 import {
@@ -33,7 +38,7 @@ import './settings.css'
  * `'system' | 'reduced'` at the other two, with no cast anywhere. A `<select>`
  * rather than a segmented control because it is two mutually exclusive options
  * with a label, which is the element's job: keyboard, screen reader and the
- * focus trap's `:not(:disabled)` all come free.
+ * dialog's own tab order all come free.
  */
 function Choice<T extends string>({
   id,
@@ -76,14 +81,6 @@ function Choice<T extends string>({
   )
 }
 
-/**
- * Tab-cycle members. `:not(:disabled)` matters — the help `?` button is not in
- * here, but a disabled "Change…" during a pick would otherwise be a focus stop
- * that does nothing.
- */
-const FOCUSABLE =
-  'button:not(:disabled), [href], input:not(:disabled), select:not(:disabled), textarea:not(:disabled), [tabindex]:not([tabindex="-1"])'
-
 export interface SettingsDialogProps {
   isOpen: boolean
   onClose: () => void
@@ -104,7 +101,14 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
    * the drag ends, and only then is one value persisted.
    */
   const [artworkDraft, setArtworkDraft] = useState<number | null>(null)
-  const dialogRef = useRef<HTMLDivElement>(null)
+  const dialogRef = useRef<HTMLDialogElement>(null)
+  /**
+   * Whether the mousedown currently in flight started on the backdrop.
+   *
+   * A ref, not state: it is read by the mouseup that follows and must not
+   * repaint anything in between.
+   */
+  const downOnBackdrop = useRef(false)
 
   /**
    * Read on every open rather than once. The settings live in the main process
@@ -130,49 +134,21 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
   }, [isOpen])
 
   /**
-   * Focus in on open, back to the gear on close.
+   * The whole of the modal behaviour: focus in, Tab trapped, Escape, focus back
+   * to the gear on close, and the top layer. showModal() does all of it.
    *
-   * `document.activeElement` is captured rather than taking a ref to the gear
-   * button: the gear lives two components away, and reading what actually had
-   * focus is both shorter and correct if the dialog is ever opened from
-   * somewhere else. The dialog wrapper takes focus itself (tabIndex -1) so a
-   * screen reader lands inside the dialog instead of staying behind it, and so
-   * the Tab trap below always has a known starting point.
+   * The element is rendered whether or not it is open — a closed <dialog> is
+   * `display: none` by UA rule, so its contents are neither visible nor
+   * focusable — because close() is what restores focus to whatever opened this,
+   * and it can only run on an element that is still in the document. Returning
+   * null on close would tear the node out first and drop focus to <body>.
    */
   useEffect(() => {
     if (!isOpen) return
-    const returnTo = document.activeElement
-    dialogRef.current?.focus()
-    return () => {
-      if (returnTo instanceof HTMLElement) returnTo.focus()
-    }
+    const el = dialogRef.current
+    el?.showModal()
+    return () => el?.close()
   }, [isOpen])
-
-  const handleKeyDown = (e: React.KeyboardEvent<HTMLDivElement>) => {
-    if (e.key === 'Escape') {
-      e.stopPropagation()
-      onClose()
-      return
-    }
-    if (e.key !== 'Tab') return
-
-    const items = Array.from(
-      dialogRef.current?.querySelectorAll<HTMLElement>(FOCUSABLE) ?? [],
-    )
-    if (items.length === 0) return
-    const first = items[0]
-    const last = items[items.length - 1]
-    const active = document.activeElement
-
-    // Only the two edges are handled; everything in between is the browser's
-    // own tab order and does not need help. The wrapper counts as the leading
-    // edge because focus starts there — without that, the first Shift+Tab of
-    // the dialog's life walks straight out into the page behind it.
-    if (e.shiftKey ? active === first || active === dialogRef.current : active === last) {
-      e.preventDefault()
-      ;(e.shiftKey ? last : first).focus()
-    }
-  }
 
   const handleChange = async () => {
     setPicking(true)
@@ -226,26 +202,39 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
     void update({ artworkOpacity: artworkDraft }).finally(() => setArtworkDraft(null))
   }
 
-  if (!isOpen) return null
-
   return (
-    <div
+    <dialog
       className="settings-overlay"
-      // mousedown, not click: a click that STARTS inside the dialog and ends on
-      // the backdrop (a drag off the end of a selection) is not a dismissal.
+      ref={dialogRef}
+      aria-labelledby="settings-title"
+      // The <dialog> IS the backdrop hit area: it fills the viewport and the
+      // panel is a child of it, so a press on the scrim targets the dialog
+      // itself. ::backdrop paints but cannot be hit-tested, which is why this
+      // one behaviour stays hand-rolled.
+      //
+      // Both ends of the press must be on it. Down-only would dismiss a
+      // selection dragged INTO the dialog; up-only (a plain click) would
+      // dismiss one dragged OUT of it, which is the more common accident.
       onMouseDown={(e) => {
-        if (e.target === e.currentTarget) onClose()
+        downOnBackdrop.current = e.target === e.currentTarget
+      }}
+      onMouseUp={(e) => {
+        if (downOnBackdrop.current && e.target === e.currentTarget) onClose()
+      }}
+      // Escape's native close arrives as `cancel`. preventDefault leaves React
+      // the only thing that closes this: the effect above owns close(), so the
+      // element's open state cannot drift from `isOpen`.
+      onCancel={(e) => {
+        e.preventDefault()
+        onClose()
+      }}
+      // `cancel` does not consume the keydown that produced it, and the app
+      // behind must not act on the same Escape.
+      onKeyDown={(e) => {
+        if (e.key === 'Escape') e.stopPropagation()
       }}
     >
-      <div
-        className="settings-dialog"
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="settings-title"
-        tabIndex={-1}
-        ref={dialogRef}
-        onKeyDown={handleKeyDown}
-      >
+      <div className="settings-dialog">
         <h2 className="settings-title" id="settings-title">
           Settings
         </h2>
@@ -361,7 +350,7 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
                 value={artworkOpacity}
                 // Off means there is nothing for it to act on, so it is disabled
                 // rather than left live over an invisible layer. Disabled also
-                // takes it out of FOCUSABLE, so it stops being a tab stop.
+                // takes it out of the dialog's tab order for free.
                 disabled={!settings || !appearance.artwork}
                 onChange={(e) => {
                   const v = Number(e.target.value)
@@ -403,6 +392,6 @@ export function SettingsDialog({ isOpen, onClose }: SettingsDialogProps) {
           </button>
         </div>
       </div>
-    </div>
+    </dialog>
   )
 }

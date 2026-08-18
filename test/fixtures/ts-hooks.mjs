@@ -22,7 +22,15 @@ registerHooks({
     if (specifier === 'electron') {
       return { url: ELECTRON_STUB, format: 'module', shortCircuit: true }
     }
-    if (specifier.startsWith('.') && specifier.endsWith('.js') && context.parentURL?.endsWith('.ts')) {
+    // The query is stripped before the `.ts` test: a suite that needs its OWN
+    // instance of a module imports it as `foo.ts?why` (ESM caches by full URL,
+    // query included), and without this the importer stops looking like a `.ts`
+    // file and every `./bar.js` inside it fails to resolve.
+    if (
+      specifier.startsWith('.') &&
+      specifier.endsWith('.js') &&
+      context.parentURL?.split('?')[0].endsWith('.ts')
+    ) {
       const candidate = new URL(specifier.slice(0, -3) + '.ts', context.parentURL)
       if (existsSync(fileURLToPath(candidate))) {
         return { url: candidate.href, format: 'module-typescript', shortCircuit: true }

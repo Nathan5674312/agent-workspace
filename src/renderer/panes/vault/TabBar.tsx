@@ -79,7 +79,6 @@ export function TabBar({
         {tabs.map((tab) => (
           <PaneMenuItem
             key={tab.id}
-            menu="vault-tab-list-menu"
             onClick={() => onTabChange(tab.id)}
           >
             <span aria-current={tab.id === activeTabId}>{tab.name}</span>
@@ -111,7 +110,6 @@ export function TabBar({
         icon={<EllipsisVertical size={14} aria-hidden="true" />}
       >
         <PaneMenuItem
-          menu="vault-tab-actions-menu"
           onClick={() => onCloseTab(activeTabId)}
           disabled={lastTab}
           reason="The last tab stays open"
@@ -119,7 +117,6 @@ export function TabBar({
           Close this tab
         </PaneMenuItem>
         <PaneMenuItem
-          menu="vault-tab-actions-menu"
           onClick={onCloseOthers}
           disabled={lastTab}
           reason="There are no other tabs"
@@ -127,7 +124,6 @@ export function TabBar({
           Close others
         </PaneMenuItem>
         <PaneMenuItem
-          menu="vault-tab-actions-menu"
           onClick={onCopyPath}
           disabled={!activePath}
           reason="No note is open"

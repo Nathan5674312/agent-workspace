@@ -1051,6 +1051,40 @@ test('every menu row is wired', () => {
  * pair is written by hand in menu.css and this is what stops the next one being
  * forgotten.
  */
+/**
+ * A menu row must close its menu ITSELF, never via popovertargetaction.
+ *
+ * Found by a human clicking it, not by this suite, and worth a standing guard
+ * because the failure is invisible to every test that drives the app with
+ * element.click(). `popovertargetaction="hide"` is an ACTIVATION BEHAVIOUR: the
+ * browser runs it after the click event finishes dispatching. React handles the
+ * click first and flushes the re-render synchronously for a discrete event, so
+ * a row whose own action disables it — "Close this tab" on the second-to-last
+ * tab — is already disabled when the browser gets to the hide. Disabled buttons
+ * have no activation behaviour, so the hide is skipped in silence and the menu
+ * is left open in the top layer over a screen that has already changed.
+ *
+ * It costs the next click too: an open popover=auto swallows one click anywhere
+ * outside itself as its light-dismiss, so the button you press next appears
+ * dead. Two bug reports, one cause.
+ */
+test('menu rows close their own popover, not via popovertargetaction', () => {
+  const menu = stripComments(src('PaneMenu.tsx'))
+  const item = menu.slice(menu.indexOf('export function PaneMenuItem'))
+  assert.ok(item.length > 0, 'PaneMenuItem not found')
+  assert.doesNotMatch(
+    item,
+    /popoverTargetAction/,
+    'a row that disables itself would never close its menu',
+  )
+  assert.match(item, /hidePopover\(\)/, 'the row never closes its menu')
+  // Closing must happen BEFORE the action runs, while the button is still
+  // enabled and mounted — after it, a re-render can already have unmounted it.
+  const hideAt = item.indexOf('hidePopover()')
+  const actAt = item.indexOf('onClick()')
+  assert.ok(hideAt > 0 && actAt > hideAt, 'the action runs before the menu closes')
+})
+
 test('every PaneMenu has an anchor pair in menu.css', () => {
   const css = readFileSync(join(PANE, 'menu.css'), 'utf8')
   const ids = new Set()

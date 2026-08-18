@@ -88,8 +88,6 @@ export function PaneMenu({
 }
 
 export interface PaneMenuItemProps {
-  /** The owning `PaneMenu`'s `id`. This is what closes the menu on click. */
-  menu: string
   onClick: () => void
   /**
    * Set when the action exists but cannot run right now (no note open, only one
@@ -103,7 +101,6 @@ export interface PaneMenuItemProps {
 }
 
 export function PaneMenuItem({
-  menu,
   onClick,
   disabled,
   reason,
@@ -113,12 +110,36 @@ export function PaneMenuItem({
     <button
       className="pane-menu-item"
       role="menuitem"
-      // Closing is declarative: the same click that runs the action also hides
-      // the popover, so there is no state to flip and no way for the menu to be
-      // left open over a screen that has already changed underneath it.
-      popoverTarget={menu}
-      popoverTargetAction="hide"
-      onClick={onClick}
+      /**
+       * CLOSE FIRST, THEN ACT — and close imperatively, not with
+       * `popovertargetaction="hide"`.
+       *
+       * The declarative form was here and was wrong in a way that only a human
+       * clicking the thing would find. `popovertargetaction` is an ACTIVATION
+       * BEHAVIOUR, which the browser runs AFTER the click event has finished
+       * dispatching. React handles the click first and, for a discrete event,
+       * flushes the re-render synchronously. So a row whose own action disables
+       * it — "Close this tab" on the second-to-last tab, which leaves one tab
+       * and one disabled row — was already `disabled` by the time the browser
+       * got round to the hide. A disabled button has no activation behaviour,
+       * the hide was skipped in silence, and the menu sat open in the top layer
+       * over a screen that had already changed.
+       *
+       * That also cost the NEXT click: a `popover=auto` left open swallows one
+       * click anywhere outside it as its light-dismiss, so pressing "+" after
+       * this appeared to do nothing at all.
+       *
+       * Hiding here runs during dispatch, while the button is still enabled and
+       * mounted, so no re-render can race it. `hidePopover()` restores focus to
+       * the invoker exactly as the declarative form did.
+       */
+      onClick={(e) => {
+        const panel = e.currentTarget.closest('[popover]')
+        if (panel instanceof HTMLElement && panel.matches(':popover-open')) {
+          panel.hidePopover()
+        }
+        onClick()
+      }}
       disabled={disabled}
       title={disabled ? reason : undefined}
     >

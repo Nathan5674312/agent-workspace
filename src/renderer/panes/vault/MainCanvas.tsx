@@ -228,13 +228,11 @@ export function MainCanvas({
           disabled={!note}
         >
           <PaneMenuItem
-            menu="vault-note-options-menu"
             onClick={() => void navigator.clipboard.writeText(note?.path ?? '')}
           >
             Copy note path
           </PaneMenuItem>
           <PaneMenuItem
-            menu="vault-note-options-menu"
             onClick={() => void navigator.clipboard.writeText(`[[${note?.title ?? ''}]]`)}
           >
             Copy wikilink

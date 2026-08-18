@@ -1,6 +1,7 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { CH } from '../shared/ipc.js'
 import * as vault from './vault.js'
+import * as versions from './versions.js'
 import * as corner from './corner.js'
 import * as network from './network.js'
 import * as settings from './settings.js'
@@ -53,6 +54,11 @@ export function registerIpc(): void {
   handle(CH.vaultSave, (p: string, t: string, m: number) => vault.save(p, t, m))
   handle(CH.vaultGraph, () => vault.graph())
   handle(CH.vaultBacklinks, (p: string) => vault.backlinks(p))
+  // Read-only. Restoring a version goes back out through CH.vaultSave above,
+  // so it is guarded and backed up like any other write — there is no restore
+  // channel by design.
+  handle(CH.vaultVersions, (p: string) => versions.versions(p))
+  handle(CH.vaultVersionText, (id: string) => versions.versionText(id))
 
   corner.register(handle)
   network.register(handle)

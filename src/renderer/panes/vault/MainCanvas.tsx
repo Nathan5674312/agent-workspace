@@ -5,6 +5,7 @@ import { GraphView } from './GraphView.js'
 import { DatabaseView } from './DatabaseView.js'
 import { InboxView } from './InboxView.js'
 import { RoadmapView } from './RoadmapView.js'
+import { VersionsView } from './VersionsView.js'
 import type { VaultNoteMeta, InboxItem } from '../../../shared/notemeta.js'
 import { ArrowLeft, ArrowRight, Ellipsis } from 'lucide-react'
 
@@ -22,6 +23,8 @@ export interface MainCanvasProps {
   isDirty: boolean
   onSave: (text: string, mtime: number) => Promise<void>
   onConflict: (diskMtime: number, diskText: string) => void
+  /** Save an older version over the open note. False when the user declined. */
+  onRestore: (text: string) => Promise<boolean>
   getGraph: () => Promise<VaultGraph>
   getNotes: () => Promise<VaultNoteMeta[]>
   getInbox: () => Promise<InboxItem[]>
@@ -45,6 +48,7 @@ export function MainCanvas({
   isDirty,
   onSave,
   onConflict,
+  onRestore,
   getGraph,
   getNotes,
   getInbox,
@@ -58,7 +62,7 @@ export function MainCanvas({
   canGoForward,
 }: MainCanvasProps) {
   const [view, setView] = useState<
-    'editor' | 'graph' | 'database' | 'inbox' | 'roadmap'
+    'editor' | 'versions' | 'graph' | 'database' | 'inbox' | 'roadmap'
   >('editor')
   const [graph, setGraph] = useState<VaultGraph | null>(null)
   const [loadingGraph, setLoadingGraph] = useState(false)
@@ -200,7 +204,10 @@ export function MainCanvas({
                 ? 'Inbox'
                 : view === 'roadmap'
                   ? 'Roadmap'
-                  : (note?.title ?? 'No note selected')}
+                  : view === 'versions'
+                    ? // Still the note's own view, so it keeps the note's name.
+                      `${note?.title ?? 'No note selected'} — versions`
+                    : (note?.title ?? 'No note selected')}
         </span>
         <button className="vault-note-menu" aria-label="More options" title="More options">
           <Ellipsis size={15} aria-hidden="true" />
@@ -213,6 +220,16 @@ export function MainCanvas({
           onClick={() => setView('editor')}
         >
           Editor
+        </button>
+        {/* Next to Editor because it is about the OPEN NOTE, where Graph,
+            Database and Inbox are about the vault. Nothing is fetched on the
+            click: the panel loads its own list from the note it is given, so
+            this needs no loading state up here. */}
+        <button
+          className={`vault-view-button ${view === 'versions' ? 'active' : ''}`}
+          onClick={() => setView('versions')}
+        >
+          Versions
         </button>
         <button
           className={`vault-view-button ${view === 'graph' ? 'active' : ''}`}
@@ -260,6 +277,8 @@ export function MainCanvas({
       <div className="vault-view-content">
         {view === 'roadmap' ? (
           <RoadmapView />
+        ) : view === 'versions' ? (
+          <VersionsView note={note} onRestore={onRestore} />
         ) : view === 'inbox' ? (
           <InboxView
             items={inbox}

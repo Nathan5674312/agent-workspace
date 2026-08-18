@@ -132,7 +132,7 @@ export const ROADMAP: FeatureGroup[] = [
     features: [
       { label: 'API / plugin ecosystem', status: 'planned', surface: 'ribbon:plugins' },
       { label: 'Web clipper', status: 'planned' },
-      { label: 'Version history', status: 'planned', note: 'Every save keeps a pre-edit copy in .backups/, as the retired note server did; nothing surfaces them yet.' },
+      { label: 'Version history', status: 'partial', surface: 'Versions tab', note: 'The Versions tab lists every pre-edit copy in .backups/ for the open note, newest first, previews one, and restores it THROUGH save() so the lost-update guard and the backup-before-overwrite still apply. Both on-disk layouts are listed — the new mirrored one and the retired note server\'s flat one. The gap is that it has not been watched running yet: verified by test/versions.test.mjs against the real data layer, not by a human opening the tab. No pruning either — the history is still unbounded.' },
       { label: 'Whiteboard / canvas view', status: 'planned', surface: 'ribbon:canvas' },
       { label: 'Server / client homelab setup', status: 'planned' },
       {

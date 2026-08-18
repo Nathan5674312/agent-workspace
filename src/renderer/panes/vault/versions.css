@@ -1,0 +1,166 @@
+/**
+ * Version history panel. Imported by VersionsView.tsx, not by main.tsx, so the
+ * styles arrive with the component — same arrangement as settings.css.
+ *
+ * Values come from tokens.css only. Nothing here invents a colour, a radius or
+ * a duration.
+ */
+
+/* Two columns: the dates you scan, and the one version you are reading. The
+   list is fixed-width because a date is a fixed-width thing; all the slack goes
+   to the text, which is what the panel is actually for.
+
+   Collapses to one column on a narrow pane — below ~34rem the two columns leave
+   the preview too thin to read a line of markdown in. */
+.vault-versions {
+  display: grid;
+  grid-template-columns: minmax(14rem, 18rem) minmax(0, 1fr);
+  gap: var(--space-6);
+  align-items: start;
+}
+@media (max-width: 60rem) {
+  .vault-versions {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.vault-versions-list-pane,
+.vault-versions-preview-pane {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  min-width: 0;
+}
+
+.vault-versions-title {
+  margin: 0;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--label-secondary);
+  /* Long titles must not push the grid column wider than it was declared. */
+  overflow-wrap: anywhere;
+}
+
+.vault-versions-note,
+.vault-versions-hint {
+  margin: 0;
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+  color: var(--label-tertiary);
+}
+
+.vault-versions-empty,
+.vault-versions-loading {
+  font-size: var(--text-base);
+  color: var(--label-tertiary);
+}
+
+.vault-versions-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+}
+
+/* The whole row is the target, not the date inside it — a 13px timestamp is
+   below any reasonable hit size on its own. */
+.vault-version-button {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-3) var(--space-4);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: transparent;
+  color: var(--label);
+  font-size: var(--text-base);
+  text-align: left;
+  cursor: pointer;
+  transition: background var(--duration-instant) var(--ease-out);
+}
+.vault-version-button:hover {
+  background: var(--fill-hover);
+}
+/* Selection is a fill, not a hue: the palette is monochrome by design and the
+   accent is reserved for the action, which here is Restore. */
+.vault-version-button[data-selected='true'] {
+  background: var(--fill-selected);
+  font-weight: var(--weight-medium);
+}
+
+.vault-version-when {
+  font-variant-numeric: tabular-nums;
+}
+
+.vault-version-size {
+  flex: none;
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+  color: var(--label-tertiary);
+}
+
+.vault-versions-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  flex-wrap: wrap;
+}
+
+.vault-versions-restore {
+  flex: none;
+  padding: var(--space-3) var(--space-5);
+  border: 0;
+  border-radius: var(--radius-md);
+  background: var(--accent);
+  color: var(--label-on-accent);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  cursor: pointer;
+  transition: background var(--duration-instant) var(--ease-out);
+}
+.vault-versions-restore:hover:not(:disabled) {
+  background: var(--accent-pressed);
+}
+.vault-versions-restore:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+/* Read-only, and it has to LOOK read-only — sunken ground and the same mono
+   face the editor uses, so the two are legibly the same kind of text without
+   this one inviting a keystroke. */
+.vault-versions-preview {
+  width: 100%;
+  min-height: max(20rem, 46vh);
+  resize: vertical;
+  padding: var(--space-4) var(--space-5);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-lg);
+  background: var(--bg-sunken);
+  color: var(--label-secondary);
+  font-family: var(--font-mono);
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
+  tab-size: 2;
+}
+
+.vault-versions-error,
+.vault-versions-status {
+  padding: var(--space-3) var(--space-4);
+  border-radius: var(--radius-md);
+  background: var(--material-light);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+.vault-versions-error {
+  color: var(--danger);
+}
+.vault-versions-status {
+  color: var(--success);
+}

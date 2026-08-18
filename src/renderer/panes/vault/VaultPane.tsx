@@ -205,6 +205,54 @@ export function VaultPane(): React.ReactElement {
     if (path) void openNote(path)
   }
 
+  /**
+   * PLACEMENT, not preference: this sits BEFORE handleSave rather than after
+   * it because review-s2-vault-pane.test.mjs reads this file as text and slices
+   * handleSave's body out with `indexOf('const handleSave')` ->
+   * `indexOf('const handleConflict')`. A function between those two markers is
+   * read as part of handleSave, and this one legitimately calls setBuffer,
+   * which that suite forbids there. Keep new handlers out of that span.
+   *
+   * Restore an old version: a SAVE of its text, never a file copy.
+   *
+   * Routed through the same `vault.saveNote` as the Save button, deliberately,
+   * and with `target.mtime` — the stamp read() handed us — as the version being
+   * replaced. So the lost-update guard runs, the CURRENT text is copied into
+   * `.backups/` before it is overwritten (a restore is itself undoable), and a
+   * note changed by someone else in the meantime raises SaveConflict instead of
+   * being clobbered. <VersionsView> reports that; it does not open the conflict
+   * dialog, which is about the edit buffer and has nothing useful to offer here.
+   *
+   * The buffer is updated too, and that is why this lives up here rather than
+   * in the panel: writing the file and leaving the editor on the old text would
+   * show "Unsaved changes" for text that is already on disk, and the next Save
+   * would undo the restore.
+   *
+   * Returns false when the user declined the unsaved-edits prompt. Anything the
+   * prompt discards is kept in `discarded`, the same recovery the conflict
+   * dialog uses — a restore must not be the one action that eats typing.
+   */
+  const handleRestore = async (text: string): Promise<boolean> => {
+    const target = selectedNote
+    if (!target) return false
+    const replaced = buffer
+    if (isDirty) {
+      const ok = window.confirm(
+        `"${target.title}" has unsaved edits. Restoring an older version replaces them. Continue?`,
+      )
+      if (!ok) return false
+    }
+    const saved = await vault.saveNote(target.path, text, target.mtime)
+    setSelectedNote((prev) =>
+      prev && prev.path === target.path ? { ...prev, mtime: saved.mtime, text } : prev,
+    )
+    setBuffer(text)
+    setDiscarded(
+      isDirty ? { label: 'Your unsaved version (replaced by restore)', text: replaced } : null,
+    )
+    return true
+  }
+
   const handleSave = async (text: string, mtime: number) => {
     // Pin the note this save belongs to. `selectedNote` is captured from the
     // render that produced this closure, and a save is a round-trip to the
@@ -396,6 +444,7 @@ export function VaultPane(): React.ReactElement {
             isDirty={isDirty}
             onSave={handleSave}
             onConflict={handleConflict}
+            onRestore={handleRestore}
             getGraph={vault.getGraph}
             getNotes={vault.getNotes}
             getInbox={vault.getInbox}

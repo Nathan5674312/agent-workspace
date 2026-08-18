@@ -28,6 +28,8 @@ const api: Api = {
       ipcRenderer.invoke(CH.vaultSave, path, text, mtime),
     graph: () => ipcRenderer.invoke(CH.vaultGraph),
     backlinks: (path) => ipcRenderer.invoke(CH.vaultBacklinks, path),
+    versions: (path) => ipcRenderer.invoke(CH.vaultVersions, path),
+    versionText: (id) => ipcRenderer.invoke(CH.vaultVersionText, id),
   },
   corner: {
     items: () => ipcRenderer.invoke(CH.cornerItems),

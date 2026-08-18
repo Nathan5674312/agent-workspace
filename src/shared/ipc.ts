@@ -32,6 +32,26 @@ export type VaultTreeNode = {
   children?: VaultTreeNode[]
 }
 
+/**
+ * One pre-edit copy of a note, from `<vault>/.backups/`.
+ *
+ * There is no `text` here on purpose: a note with a long history would send its
+ * whole past over the bridge to draw a list of dates. The body is fetched for
+ * the one version being previewed, by `versionText(id)`.
+ */
+export type NoteVersion = {
+  /**
+   * The backup's path relative to `.backups/`, forward slashes. Opaque to the
+   * renderer — the only valid thing to do with it is hand it back to
+   * `versionText()`. Not a vault path and not openable as a note.
+   */
+  id: string
+  /** When the copy was taken, ms since epoch. Comparable to `VaultNote.mtime`. */
+  at: number
+  /** Bytes on disk. Shown because a 0-byte version is worth seeing before restoring it. */
+  size: number
+}
+
 /** One edge of the graph view. Derived from [[wikilinks]], never authoritative. */
 export type VaultLink = { from: string; to: string }
 
@@ -192,6 +212,8 @@ export const CH = {
   vaultSave: 'vault:save',
   vaultGraph: 'vault:graph',
   vaultBacklinks: 'vault:backlinks',
+  vaultVersions: 'vault:versions',
+  vaultVersionText: 'vault:version-text',
 
   claudeNewSession: 'claude:new-session',
   claudeSend: 'claude:send',
@@ -228,6 +250,16 @@ export type Api = {
     save(path: string, text: string, mtime: number): Promise<VaultNote>
     graph(): Promise<VaultGraph>
     backlinks(path: string): Promise<string[]>
+    /** Every pre-edit copy of this note in `.backups/`, newest first. Read-only. */
+    versions(path: string): Promise<NoteVersion[]>
+    /**
+     * The body of one backup, by `NoteVersion.id`.
+     *
+     * Restoring it is NOT done here: pass the text to `save()` with the note's
+     * current mtime, so the lost-update guard and SaveConflict apply exactly as
+     * they do to a typed edit. There is deliberately no restore call.
+     */
+    versionText(id: string): Promise<string>
   }
   corner: {
     items(): Promise<CornerItem[]>

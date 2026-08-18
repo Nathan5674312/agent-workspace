@@ -2,7 +2,7 @@
 tier: WIRE
 control: "+ Note" button in the explorer header, above the folder tree
 location: src/renderer/panes/vault/ExplorerHeader.tsx:30-37
-status: NOT STARTED
+status: DONE
 ---
 
 # + Note

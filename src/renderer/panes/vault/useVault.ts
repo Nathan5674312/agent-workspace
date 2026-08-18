@@ -16,6 +16,14 @@ export function useVault() {
   const [tree, setTree] = useState<VaultTreeNode | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * Bumped to re-run the tree effect. A counter rather than a bare `reload()`
+   * that fetches on the side, so a reload and the mount load share ONE code
+   * path and therefore one `cancelled` flag — two fetchers writing `tree` would
+   * race, and the loser would put a pre-create tree back on screen after the
+   * create had already landed.
+   */
+  const [reloadCount, setReloadCount] = useState(0)
 
   useEffect(() => {
     let cancelled = false
@@ -35,7 +43,13 @@ export function useVault() {
     return () => {
       cancelled = true
     }
-  }, [])
+  }, [reloadCount])
+
+  /**
+   * Re-read the folder tree. Called after a create, which is the only thing in
+   * the pane that changes what is IN the vault rather than what is in a note.
+   */
+  const reload = useCallback(() => setReloadCount((n) => n + 1), [])
 
   const readNote = useCallback((path: string): Promise<VaultNoteBody> => {
     return window.api.vault.read(path)
@@ -93,12 +107,18 @@ export function useVault() {
     return window.api.vault.backlinks(path)
   }, [])
 
+  const makeFolder = useCallback((path: string): Promise<void> => {
+    return window.api.vault.mkdir(path)
+  }, [])
+
   return {
     tree,
     loading,
     error,
+    reload,
     readNote,
     saveNote,
+    makeFolder,
     getGraph,
     getNotes,
     getInbox,

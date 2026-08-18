@@ -13,14 +13,15 @@ export function VaultSwitcher({ onSettings, onHelp }: VaultSwitcherProps) {
   return (
     <div className="vault-switcher">
       <div className="vault-switcher-name">Universal Vault</div>
-      {/* Help is still a console.log stub and stays disabled — there is no help
-          content to show. Settings now opens the real modal. */}
+      {/* Both open a real modal now. Help was disabled for want of content
+          rather than machinery, and the content it needed was a description of
+          what this app already does — see HelpDialog.tsx. */}
       <div className="vault-switcher-actions">
         <button
           className="vault-switcher-button"
           onClick={onHelp}
-          disabled
-          title="Not implemented yet"
+          title="Help"
+          aria-label="Help"
         >
           ?
         </button>

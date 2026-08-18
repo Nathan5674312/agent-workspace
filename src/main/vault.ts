@@ -41,7 +41,7 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
-import { dirname, isAbsolute, relative, resolve, sep } from 'node:path'
+import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type {
   VaultGraph,
   VaultNote,
@@ -411,6 +411,45 @@ function stamp(): string {
  * excluded for being NOT-CONTENT — never to hide a folder the user owns.
  */
 const HIDDEN = new Set(['.git', '.obsidian', '.trash', 'node_modules', '__pycache__'])
+
+/**
+ * Create one folder in the vault.
+ *
+ * Direct `node:fs`, and the precedent is `tree()` below rather than `save()`
+ * above: the reason writes were once kept behind a separate process was atomic
+ * replacement, pre-edit backups and the lost-update guard, and a directory has
+ * none of those hazards. There is no content to lose and no version to race.
+ *
+ * `resolveInVault` IS the traversal guard, reused rather than restated — it
+ * already rejects `..`, an absolute path and a drive letter, and it already
+ * rejects `''` because the root is not something to create. A second
+ * containment check written specially for this call is a second thing to keep
+ * correct, and the two would drift.
+ *
+ * The name check is a separate concern from containment: `tree()` skips
+ * dot-directories and everything in HIDDEN, so those names would create a real
+ * folder that never appears in the explorer — a button that reports success and
+ * shows nothing, which is the defect this control is being fixed for. Refusing
+ * is the honest answer.
+ *
+ * NOT recursive, deliberately. `recursive: true` swallows EEXIST, so typing the
+ * name of a folder that already exists would report success and appear to do
+ * nothing. Letting EEXIST through is what puts a real sentence in front of the
+ * user.
+ */
+export async function mkdir(path: string): Promise<void> {
+  const safePath = requirePath(path)
+  try {
+    const abs = resolveInVault(safePath)
+    const name = basename(abs)
+    if (name.startsWith('.') || HIDDEN.has(name)) {
+      throw new Error('vault: the explorer does not show folders with that name')
+    }
+    mkdirSync(abs)
+  } catch (e) {
+    throw fsError(e)
+  }
+}
 
 /**
  * Folder tree, read from the actual vault directory.

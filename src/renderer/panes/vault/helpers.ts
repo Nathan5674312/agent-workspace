@@ -28,6 +28,103 @@ export function collectFolderPaths(node: VaultTreeNode | null): string[] {
 }
 
 /**
+ * Explorer sort order. Two axes, four combinations, no duplicate outcome —
+ * which is the whole reason the kind and the direction are both in the value.
+ * "Folders first" with a name direction already IS "Name (A→Z)", so shipping
+ * both as separate options would put a choice on the menu that changes nothing,
+ * the exact defect this control is being fixed for.
+ *
+ * `folders-asc` is what the main process already returns (src/main/vault.ts
+ * `sort`), so it is the default and the app looks identical until touched.
+ */
+export type TreeSort = 'folders-asc' | 'folders-desc' | 'files-asc' | 'files-desc'
+
+/**
+ * A re-sorted COPY of the tree. Never mutates its argument.
+ *
+ * `Array.prototype.sort` sorts in place, and this tree is React state shared
+ * with the wikilink index, expand-all, and everything else in the pane — sorting
+ * it where it lies would reorder those behind their backs and skip the render.
+ *
+ * `localeCompare`, not `<`: the vault has non-ASCII note names and a codepoint
+ * comparison files them wrongly. Kept identical to the main process comparator
+ * so the default mode reproduces the server order exactly.
+ */
+export function sortTree(
+  node: VaultTreeNode | null,
+  mode: TreeSort,
+): VaultTreeNode | null {
+  if (!node) return null
+  if (!node.children) return node
+  const foldersFirst = mode.startsWith('folders')
+  const direction = mode.endsWith('asc') ? 1 : -1
+  const children = node.children
+    .map((child) => sortTree(child, mode) as VaultTreeNode)
+    .sort(
+      (a, b) =>
+        (a.kind === b.kind ? 0 : (a.kind === 'folder') === foldersFirst ? -1 : 1) ||
+        direction * a.name.localeCompare(b.name),
+    )
+  return { ...node, children }
+}
+
+/**
+ * Is this one folder name, rather than a path wearing the costume of one?
+ *
+ * "+ Folder" prompts for a NAME and joins it to the open note's folder, so a
+ * separator in it silently makes a path: with `Notes/Untitled.md` open,
+ * `../Escaped` joined to `Notes` and resolved to `Escaped` at the vault root.
+ * Nothing escaped the vault — `resolveInVault` in the main process is what
+ * guarantees that and still does — but the control created a folder somewhere
+ * the user did not point at, which is its own kind of lying about what it does.
+ *
+ * NOT a containment check and no substitute for one. That check is in main,
+ * where a renderer cannot skip it. This is about the promise the prompt makes.
+ */
+export function isPlainName(name: string): boolean {
+  const trimmed = name.trim()
+  if (!trimmed || trimmed === '.' || trimmed === '..') return false
+  // Backslash as well as forward slash: this runs on Windows, where a user
+  // types the separator they see in File Explorer.
+  return !/[/\\]/.test(trimmed)
+}
+
+/** The folder a vault path sits in. `''` for a note at the vault root. */
+export function folderOf(path: string): string {
+  const cut = path.lastIndexOf('/')
+  return cut === -1 ? '' : path.slice(0, cut)
+}
+
+/**
+ * The first free `Untitled.md`, `Untitled 1.md`, … in `folder`.
+ *
+ * Checked against the tree the renderer already holds rather than asking the
+ * main process, and compared case-INSENSITIVELY: this vault lives on NTFS,
+ * where `untitled.md` and `Untitled.md` are the same file, so a case-sensitive
+ * check would hand back a path that `save()` then writes straight over an
+ * existing note. The tree is a snapshot, so this is a collision-avoider and not
+ * a lock — the only real guarantee against clobbering is save()'s own mtime
+ * guard, which is why the caller sends mtime 0 and lets a genuine race lose.
+ */
+export function nextUntitledPath(
+  root: VaultTreeNode | null,
+  folder: string,
+): string {
+  const taken = new Set<string>()
+  const walk = (n: VaultTreeNode | null): void => {
+    if (!n) return
+    if (n.kind === 'note') taken.add(n.path.toLowerCase())
+    for (const child of n.children ?? []) walk(child)
+  }
+  walk(root)
+  for (let i = 0; ; i++) {
+    const name = i === 0 ? 'Untitled.md' : `Untitled ${i}.md`
+    const path = folder ? `${folder}/${name}` : name
+    if (!taken.has(path.toLowerCase())) return path
+  }
+}
+
+/**
  * Normalisation shared by the indexer and the resolver. Must match the one in
  * src/main/vault.ts `graph()`, or a link the graph draws will not open here.
  */

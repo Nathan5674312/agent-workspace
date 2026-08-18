@@ -2,7 +2,7 @@
 tier: WIRE
 control: The vertical-ellipsis button at the far right of the tab bar
 location: src/renderer/panes/vault/TabBar.tsx:46-48
-status: NOT STARTED
+status: DONE
 ---
 
 # Tab menu (ellipsis)

@@ -2,7 +2,7 @@
 tier: WIRE
 control: The tab strip and the "+" new-tab button in the tab bar
 location: src/renderer/panes/vault/TabBar.tsx:24-37
-status: NOT STARTED
+status: DONE
 ---
 
 # Tabs and "+" new tab

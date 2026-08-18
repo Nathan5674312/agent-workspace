@@ -30,18 +30,25 @@ import { SidebarPlaceholder } from './SidebarPlaceholder.js'
 import { ExplorerHeader } from './ExplorerHeader.js'
 import { FolderTree } from './FolderTree.js'
 import { VaultSwitcher } from './VaultSwitcher.js'
-import { TabBar } from './TabBar.js'
+import { TabBar, type VaultTab } from './TabBar.js'
 import { MainCanvas } from './MainCanvas.js'
 import { ConflictDialog } from './ConflictDialog.js'
 import { SettingsDialog } from './SettingsDialog.js'
+import { HelpDialog } from './HelpDialog.js'
 import { ArtCredit } from './ArtCredit.js'
 import {
   collectFolderPaths,
+  folderOf,
   indexNotesByName,
   isBufferDirty,
+  isPlainName,
+  nextUntitledPath,
   resolveWikilink,
+  sortTree,
+  type TreeSort,
 } from './helpers.js'
 import type { VaultNoteBody } from '../../../shared/ipc.js'
+import './split.css'
 
 export function VaultPane(): React.ReactElement {
   const vault = useVault()
@@ -50,10 +57,25 @@ export function VaultPane(): React.ReactElement {
   /** The live edit buffer. Never written to disk without an explicit click. */
   const [buffer, setBuffer] = useState('')
   const [backlinks, setBacklinks] = useState<string[]>([])
-  const [tabs, setTabs] = useState([{ id: 'default', name: 'Universal Vault' }])
+  const [tabs, setTabs] = useState<VaultTab[]>([
+    { id: 'default', name: 'Universal Vault', path: null },
+  ])
   const [activeTabId, setActiveTabId] = useState('default')
+  /**
+   * Two canvases over one note and one buffer, differing only in view mode —
+   * which <MainCanvas> already owns locally, so this is a boolean rather than a
+   * layout system. Per-pane notes and drag-to-resize are separate features.
+   */
+  const [split, setSplit] = useState(false)
+  /**
+   * Explorer sort order, applied to a COPY of the tree below. Not persisted:
+   * `AppSettings` holds the vault directory and nothing else, and a sort order
+   * is not worth growing that contract for.
+   */
+  const [sort, setSort] = useState<TreeSort>('folders-asc')
   const [conflictOpen, setConflictOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
+  const [helpOpen, setHelpOpen] = useState(false)
   const [conflictData, setConflictData] = useState<{
     diskMtime: number
     diskText: string
@@ -107,6 +129,18 @@ export function VaultPane(): React.ReactElement {
   const noteIndex = useMemo(() => indexNotesByName(vault.tree), [vault.tree])
 
   /**
+   * The tree as the explorer draws it. A memo because this pane re-renders on
+   * every keystroke in the editor — it owns the buffer — and re-sorting the
+   * whole vault per character would be a real cost for a result that changes
+   * only when the tree or the mode does.
+   *
+   * The wikilink index above is built from the UNSORTED tree on purpose: it is
+   * a lookup, order means nothing to it, and keying it to the sort would throw
+   * the map away every time the dropdown moved.
+   */
+  const sortedTree = useMemo(() => sortTree(vault.tree, sort), [vault.tree, sort])
+
+  /**
    * Backlinks for the open note. Cancelled on note change / unmount so a slow
    * response cannot overwrite a newer note's backlinks.
    *
@@ -142,7 +176,10 @@ export function VaultPane(): React.ReactElement {
    * changed. It can decline for three reasons: an open conflict, a declined
    * discard prompt, or a failed read.
    */
-  const loadNote = async (path: string): Promise<boolean> => {
+  const loadNote = async (
+    path: string,
+    tabId: string = activeTabId,
+  ): Promise<boolean> => {
     // An open conflict must be resolved before anything else can move. Closing
     // it implicitly is how the buffer used to vanish.
     if (conflictOpen) return false
@@ -158,6 +195,18 @@ export function VaultPane(): React.ReactElement {
       setBuffer(note.text)
       setDiscarded(null)
       setOpenError(null)
+      // The tab records the note HERE rather than in each caller, because this
+      // is the single point where a note actually became current — the tree, a
+      // wikilink, a backlink, a graph node, a database row and the inbox all
+      // funnel through it, and six copies of this line would drift.
+      //
+      // `tabId` is a parameter and not just `activeTabId` for the tab-click
+      // case: that click has to open the note BEFORE it switches tabs (the open
+      // can be refused), so at this moment `activeTabId` is still the tab being
+      // navigated away from, and defaulting would rename the wrong one.
+      setTabs((ts) =>
+        ts.map((t) => (t.id === tabId ? { ...t, name: note.title, path } : t)),
+      )
       return true
     } catch (e) {
       setOpenError(
@@ -175,8 +224,8 @@ export function VaultPane(): React.ReactElement {
    * discard prompt, and a failed read -- and a caller that switches view
    * regardless yanks the user somewhere they just said no to.
    */
-  const openNote = async (path: string): Promise<boolean> => {
-    if (!(await loadNote(path))) return false
+  const openNote = async (path: string, tabId?: string): Promise<boolean> => {
+    if (!(await loadNote(path, tabId))) return false
     // Browser semantics: opening from the tree truncates any forward history.
     // Trail and cursor move together, both read from the same `n`.
     setNav((n) => ({
@@ -344,20 +393,143 @@ export function VaultPane(): React.ReactElement {
     }
   }
 
-  const handleNewNote = () => {
-    // ponytail: the IPC contract exposes no create call, so this stays a stub.
-    console.log('New note')
+  /**
+   * Where a new note or folder goes: beside the note you are reading, or the
+   * vault root when nothing is open.
+   *
+   * There is no selected-FOLDER anywhere in this pane — the tree tracks
+   * expansion and nothing else — so this is the only signal available about
+   * where the user is working, and it is the one a person means by "new note"
+   * while reading something.
+   */
+  const targetFolder = () => (selectedNote ? folderOf(selectedNote.path) : '')
+
+  /**
+   * Create an empty note and open it.
+   *
+   * `save()` with mtime 0 IS the create. The guard it enforces only runs when
+   * the file already exists — there is no version to lose on a file that does
+   * not — so no second write door had to be opened for this, and there is
+   * deliberately no `vault:create`: two ways to write a note means two places
+   * to keep the lost-update guard correct.
+   *
+   * If the name collided anyway (the tree is a snapshot), the mtime 0 does not
+   * force anything: an existing file has a real mtime, 0 fails the comparison,
+   * and the save raises a conflict rather than flattening a note.
+   */
+  const handleNewNote = async () => {
+    const path = nextUntitledPath(vault.tree, targetFolder())
+    try {
+      await vault.saveNote(path, '', 0)
+      vault.reload()
+      await openNote(path)
+    } catch (e) {
+      setOpenError(`Could not create ${path}: ${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
-  const handleNewFolder = () => {
-    // ponytail: the IPC contract exposes no create call, so this stays a stub.
-    console.log('New folder')
+  /**
+   * Create a folder and reveal it.
+   *
+   * `window.prompt` rather than a dialog: this file already asks with
+   * `window.confirm` on every dirty-buffer guard, so a native prompt is an
+   * established idiom here and not a new one. Cancel returns null, which is a
+   * decision and not an error — nothing is created and nothing is said.
+   *
+   * CONTAINMENT is not checked here and must not be: the name crosses IPC from
+   * a renderer that is untrusted by design, so that check lives in
+   * `vault.mkdir` where no caller can skip it, and its refusal lands in the
+   * banner below.
+   *
+   * What IS checked here is a different thing — that the input is a NAME. The
+   * prompt asks for one, and a name with a separator in it quietly becomes a
+   * path: typed while `Notes/Untitled.md` was open, `../Escaped` joined to
+   * `Notes` and resolved to `Escaped` at the vault ROOT. Containment held, so
+   * main was right to allow it; it is this control that promised something
+   * narrower than it delivered. Found by driving the real app, not by reading.
+   */
+  const handleNewFolder = async () => {
+    const typed = window.prompt('New folder name')
+    if (typed === null) return
+    const name = typed.trim()
+    // Nothing typed is a decision, not an error. Saying nothing is the answer.
+    if (!name) return
+    if (!isPlainName(name)) {
+      setOpenError(
+        `"${name}" is a path, not a folder name. New folders are created beside the open note; type a plain name.`,
+      )
+      return
+    }
+    const parent = targetFolder()
+    const path = parent ? `${parent}/${name}` : name
+    try {
+      await vault.makeFolder(path)
+      vault.reload()
+      setExpanded((prev) => new Set(prev).add(path))
+    } catch (e) {
+      setOpenError(`Could not create ${path}: ${e instanceof Error ? e.message : String(e)}`)
+    }
   }
 
+  /**
+   * A new tab shows nothing until a note is opened into it, which is what makes
+   * the tab visibly real — it used to append a row to an array nothing read,
+   * and the canvas below never changed.
+   *
+   * Clearing the canvas discards the buffer, so it asks first, exactly as
+   * opening another note does.
+   */
   const handleNewTab = () => {
+    if (
+      isDirty &&
+      !window.confirm(
+        `"${selectedNote?.title ?? 'This note'}" has unsaved edits that will be lost. Discard them and open an empty tab?`,
+      )
+    ) {
+      return
+    }
     const newId = `tab-${Date.now()}`
-    setTabs([...tabs, { id: newId, name: 'New tab' }])
+    setTabs([...tabs, { id: newId, name: 'New tab', path: null }])
     setActiveTabId(newId)
+    setSelectedNote(null)
+    setBuffer('')
+  }
+
+  /**
+   * Switch tabs by opening the tab's note, so the dirty-buffer confirm and the
+   * conflict block apply to a tab click exactly as they do to the tree.
+   *
+   * The order matters: open FIRST, activate only on success. `openNote` returns
+   * false when the user cancelled the discard prompt or the read failed, and a
+   * tab that highlights itself over a note that did not open is the same lie as
+   * a button that does nothing.
+   */
+  const handleTabChange = async (id: string) => {
+    const tab = tabs.find((t) => t.id === id)
+    if (!tab) return
+    if (tab.path && !(await openNote(tab.path, id))) return
+    setActiveTabId(id)
+  }
+
+  /**
+   * Close a tab. The buffer is pane-wide and is NOT touched here — closing a
+   * tab is not a decision to throw text away, and the note stays open until
+   * something actually navigates.
+   */
+  const handleCloseTab = (id: string) => {
+    if (tabs.length <= 1) return
+    const closing = tabs.findIndex((t) => t.id === id)
+    const rest = tabs.filter((t) => t.id !== id)
+    setTabs(rest)
+    if (id !== activeTabId) return
+    // Its right-hand neighbour, or the new last tab when it was the rightmost.
+    void handleTabChange(rest[Math.min(closing, rest.length - 1)].id)
+  }
+
+  const handleCloseOthers = () => setTabs(tabs.filter((t) => t.id === activeTabId))
+
+  const handleCopyPath = () => {
+    if (selectedNote) void navigator.clipboard.writeText(selectedNote.path)
   }
 
   const handleToggleFolder = (path: string) => {
@@ -385,6 +557,36 @@ export function VaultPane(): React.ReactElement {
     return <div className="vault-pane-error">Error: {vault.error}</div>
   }
 
+  /**
+   * One element, rendered once or twice. React gives each position its own
+   * component instance, so the two canvases get independent `view` state — the
+   * editor on one side and the graph on the other — while every prop, and
+   * therefore the note and the buffer, is identical by construction rather than
+   * by remembering to keep two prop lists in step.
+   */
+  const canvas = (
+    <MainCanvas
+      note={selectedNote}
+      text={buffer}
+      onTextChange={setBuffer}
+      isDirty={isDirty}
+      onSave={handleSave}
+      onConflict={handleConflict}
+      onRestore={handleRestore}
+      getGraph={vault.getGraph}
+      getNotes={vault.getNotes}
+      getInbox={vault.getInbox}
+      backlinks={backlinks}
+      onBack={goBack}
+      onForward={goForward}
+      canGoBack={canGoBack}
+      canGoForward={canGoForward}
+      onOpenNote={openNote}
+      onOpenWikilink={handleOpenWikilink}
+      discarded={discarded}
+    />
+  )
+
   return (
     <div className="vault-pane">
       <div className="vault-layout">
@@ -394,13 +596,15 @@ export function VaultPane(): React.ReactElement {
           {activeRibbon === 'files' ? (
             <>
               <ExplorerHeader
-                onNewNote={handleNewNote}
-                onNewFolder={handleNewFolder}
+                onNewNote={() => void handleNewNote()}
+                onNewFolder={() => void handleNewFolder()}
                 onCollapse={handleCollapseAll}
                 onExpand={handleExpandAll}
+                sort={sort}
+                onSortChange={setSort}
               />
               <FolderTree
-                root={vault.tree}
+                root={sortedTree}
                 onSelectNote={openNote}
                 expanded={expanded}
                 onToggle={handleToggleFolder}
@@ -416,7 +620,7 @@ export function VaultPane(): React.ReactElement {
 
           <VaultSwitcher
             onSettings={() => setSettingsOpen(true)}
-            onHelp={() => console.log('Help')}
+            onHelp={() => setHelpOpen(true)}
           />
         </div>
 
@@ -424,8 +628,14 @@ export function VaultPane(): React.ReactElement {
           <TabBar
             tabs={tabs}
             activeTabId={activeTabId}
-            onTabChange={setActiveTabId}
+            onTabChange={(id) => void handleTabChange(id)}
             onNewTab={handleNewTab}
+            onCloseTab={handleCloseTab}
+            onCloseOthers={handleCloseOthers}
+            onCopyPath={handleCopyPath}
+            activePath={selectedNote?.path ?? null}
+            split={split}
+            onToggleSplit={() => setSplit((s) => !s)}
           />
 
           {openError && (
@@ -437,26 +647,13 @@ export function VaultPane(): React.ReactElement {
             </div>
           )}
 
-          <MainCanvas
-            note={selectedNote}
-            text={buffer}
-            onTextChange={setBuffer}
-            isDirty={isDirty}
-            onSave={handleSave}
-            onConflict={handleConflict}
-            onRestore={handleRestore}
-            getGraph={vault.getGraph}
-            getNotes={vault.getNotes}
-            getInbox={vault.getInbox}
-            backlinks={backlinks}
-            onBack={goBack}
-            onForward={goForward}
-            canGoBack={canGoBack}
-            canGoForward={canGoForward}
-            onOpenNote={openNote}
-            onOpenWikilink={handleOpenWikilink}
-            discarded={discarded}
-          />
+          {/* One column or two. The wrapper exists in both states so toggling
+              split does not remount the canvas that was already there and throw
+              away its view mode and whatever it had fetched. */}
+          <div className={split ? 'vault-canvas-row vault-canvas-row--split' : 'vault-canvas-row'}>
+            {canvas}
+            {split ? canvas : null}
+          </div>
 
           {/* Sibling of the canvas, not a child of it: the credit belongs to
               the artwork layer on `.vault-main`, and the canvas scrolls. */}
@@ -478,6 +675,13 @@ export function VaultPane(): React.ReactElement {
           "read settings on open" effect runs on every open. Nothing here can
           discard the edit buffer, so it needs no dirty guard. */}
       <SettingsDialog isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+
+      {/* Same treatment as Settings, and for the same reason it is safe: Help
+          is read-only text and cannot reach the buffer, so it needs no dirty
+          guard. It cannot bypass a conflict either — <ConflictDialog> is a
+          showModal() dialog in the top layer, and this one opening under it
+          changes nothing about which must be answered first. */}
+      <HelpDialog isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
     </div>
   )
 }

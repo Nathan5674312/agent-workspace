@@ -6,6 +6,7 @@ import { DatabaseView } from './DatabaseView.js'
 import { InboxView } from './InboxView.js'
 import { RoadmapView } from './RoadmapView.js'
 import { VersionsView } from './VersionsView.js'
+import { PaneMenu, PaneMenuItem } from './PaneMenu.js'
 import type { VaultNoteMeta, InboxItem } from '../../../shared/notemeta.js'
 import { ArrowLeft, ArrowRight, Ellipsis } from 'lucide-react'
 
@@ -209,9 +210,36 @@ export function MainCanvas({
                       `${note?.title ?? 'No note selected'} — versions`
                     : (note?.title ?? 'No note selected')}
         </span>
-        <button className="vault-note-menu" aria-label="More options" title="More options">
-          <Ellipsis size={15} aria-hidden="true" />
-        </button>
+        {/* This button had no onClick AND no `disabled`, so it took focus,
+            painted the app's hover and press feedback, announced itself to a
+            screen reader as actionable, and did nothing — sitting between two
+            arrows that disable themselves honestly when they cannot act.
+
+            Both rows copy to the clipboard, which is the entire set of things
+            that can be done to a note from here: rename, delete and move have
+            no IPC channel, and there is deliberately no shell.openPath on the
+            bridge, so "Reveal in Explorer" cannot be offered either. Disabled
+            with no note open, because then there is nothing to copy. */}
+        <PaneMenu
+          id="vault-note-options-menu"
+          className="vault-note-menu"
+          label="More options"
+          icon={<Ellipsis size={15} aria-hidden="true" />}
+          disabled={!note}
+        >
+          <PaneMenuItem
+            menu="vault-note-options-menu"
+            onClick={() => void navigator.clipboard.writeText(note?.path ?? '')}
+          >
+            Copy note path
+          </PaneMenuItem>
+          <PaneMenuItem
+            menu="vault-note-options-menu"
+            onClick={() => void navigator.clipboard.writeText(`[[${note?.title ?? ''}]]`)}
+          >
+            Copy wikilink
+          </PaneMenuItem>
+        </PaneMenu>
       </div>
 
       <div className="vault-view-controls">

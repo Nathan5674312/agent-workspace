@@ -59,6 +59,7 @@ export function registerIpc(): void {
   // channel by design.
   handle(CH.vaultVersions, (p: string) => versions.versions(p))
   handle(CH.vaultVersionText, (id: string) => versions.versionText(id))
+  handle(CH.vaultMkdir, (p: string) => vault.mkdir(p))
 
   corner.register(handle)
   network.register(handle)

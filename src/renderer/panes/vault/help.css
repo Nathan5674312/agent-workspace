@@ -1,0 +1,154 @@
+/**
+ * Help modal. Imported by HelpDialog.tsx, not by main.tsx — the styles arrive
+ * with the component instead of joining the app-wide sheet.
+ *
+ * Deliberately a near-copy of settings.css rather than a shared sheet the two
+ * dialogs both reach into: two modals is not a design system, and the moment
+ * one is a file both edit, a change to Settings starts moving Help.
+ *
+ * Values come from tokens.css only, except the backdrop scrim, which is Ink at
+ * alpha for the reason settings.css gives — a grey scrim on a warm ground reads
+ * as a dead pixel layer.
+ */
+
+/* The <dialog> itself: the full-viewport hit area the backdrop-dismiss rule
+   needs, not the panel. No z-index — showModal() puts this in the TOP LAYER. */
+.help-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: var(--space-6);
+  border: 0;
+  background: transparent;
+}
+
+/* `display`, not only the flex properties: the UA sheet closes a dialog with
+   `display: none`, and an unconditional `display: flex` would pin it open. */
+.help-overlay[open] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.help-overlay::backdrop {
+  background: rgba(22, 12, 8, 0.6);
+  backdrop-filter: var(--blur-regular);
+  -webkit-backdrop-filter: var(--blur-regular);
+}
+
+.help-panel {
+  width: min(560px, 100%);
+  max-height: 100%;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  padding: var(--space-6);
+
+  background: var(--bg-elevated);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 var(--edge-highlight);
+  color: var(--label);
+  font-family: var(--font-ui);
+}
+
+.help-title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
+  line-height: var(--leading-title);
+}
+
+.help-section {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+}
+
+/* Caps and tracking rather than a size jump: six headings at a larger size in
+   one scrolling panel reads as six documents. */
+.help-heading {
+  margin: 0;
+  color: var(--label-tertiary);
+  font-size: var(--text-sm);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+}
+
+.help-text {
+  margin: 0;
+  color: var(--label-secondary);
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
+}
+
+.help-list {
+  margin: 0;
+  padding-inline-start: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-2);
+  color: var(--label-secondary);
+  font-size: var(--text-base);
+  line-height: var(--leading-body);
+}
+
+.help-list strong {
+  color: var(--label);
+  font-weight: var(--weight-medium);
+}
+
+/* Inline literals the user types. Mono at the same optical size as the prose,
+   on the control film, so it reads as a token and not as an emphasis. */
+.help-code {
+  padding: 0 var(--space-2);
+  background: var(--material-light);
+  border-radius: var(--radius-sm);
+  color: var(--label);
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.help-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.help-close {
+  padding: var(--space-3) var(--space-5);
+  background: var(--material-light);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-md);
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-base);
+  cursor: default;
+}
+
+.help-close:hover {
+  background: var(--fill-hover);
+}
+
+.help-close:active {
+  background: var(--fill-active);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .help-overlay::backdrop {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+  }
+
+  .help-panel {
+    background: var(--bg-app);
+    box-shadow: none;
+    outline: 1px solid var(--separator-opaque);
+  }
+}

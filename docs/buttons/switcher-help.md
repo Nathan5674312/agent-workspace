@@ -2,7 +2,7 @@
 tier: WIRE
 control: The "?" help button in the vault switcher, bottom row of the sidebar
 location: src/renderer/panes/vault/VaultSwitcher.tsx:19-26
-status: NOT STARTED
+status: DONE
 ---
 
 # Help "?"

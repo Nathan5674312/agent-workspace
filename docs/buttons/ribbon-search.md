@@ -5,6 +5,15 @@ location: src/renderer/panes/vault/LeftRibbon.tsx:28 (definition), :41-52 (rende
 status: NOT STARTED
 ---
 
+> **⚠ STALE IN ONE PLACE (checked 2026-08-18).** Everything below about the
+> sidebar going blank when this icon is clicked is fixed. `activeRibbon` used
+> to have exactly one consumer; commit `4bc9878` added
+> `src/renderer/panes/vault/SidebarPlaceholder.tsx`, which renders a panel
+> naming the feature this icon is a promise of. Skip the "fix the blank panel
+> first" instruction. The scope question this file asks is still open and is
+> still why the icon is not built.
+
+
 # Ribbon: Search
 
 ## Today

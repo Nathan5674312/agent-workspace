@@ -2,7 +2,7 @@
 tier: WIRE
 control: "+ Folder" button in the explorer header, above the folder tree
 location: src/renderer/panes/vault/ExplorerHeader.tsx:38-45
-status: NOT STARTED
+status: DONE
 ---
 
 # + Folder

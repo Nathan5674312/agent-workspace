@@ -30,6 +30,7 @@ const api: Api = {
     backlinks: (path) => ipcRenderer.invoke(CH.vaultBacklinks, path),
     versions: (path) => ipcRenderer.invoke(CH.vaultVersions, path),
     versionText: (id) => ipcRenderer.invoke(CH.vaultVersionText, id),
+    mkdir: (path) => ipcRenderer.invoke(CH.vaultMkdir, path),
   },
   corner: {
     items: () => ipcRenderer.invoke(CH.cornerItems),

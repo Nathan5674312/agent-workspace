@@ -2,7 +2,7 @@
 tier: WIRE
 control: The chevron-down button at the right of the tab bar
 location: src/renderer/panes/vault/TabBar.tsx:40-42
-status: NOT STARTED
+status: DONE
 ---
 
 # Tab-list chevron

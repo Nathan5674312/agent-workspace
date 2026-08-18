@@ -2,7 +2,7 @@
 tier: WIRE
 control: The split-pane button (two columns icon) at the right of the tab bar
 location: src/renderer/panes/vault/TabBar.tsx:43-45
-status: NOT STARTED
+status: DONE
 ---
 
 # Split pane

@@ -214,6 +214,7 @@ export const CH = {
   vaultBacklinks: 'vault:backlinks',
   vaultVersions: 'vault:versions',
   vaultVersionText: 'vault:version-text',
+  vaultMkdir: 'vault:mkdir',
 
   claudeNewSession: 'claude:new-session',
   claudeSend: 'claude:send',
@@ -260,6 +261,16 @@ export type Api = {
      * they do to a typed edit. There is deliberately no restore call.
      */
     versionText(id: string): Promise<string>
+    /**
+     * Create one folder in the vault. The only write here that is not a note.
+     *
+     * A folder name is unavoidably renderer-supplied, unlike settings'
+     * `pickVaultDir()`, which takes no argument precisely so the renderer cannot
+     * nominate a directory. So the containment check is in main and this
+     * signature is the boundary it defends: it rejects `..`, an absolute path,
+     * a drive letter, and any name the explorer would then hide.
+     */
+    mkdir(path: string): Promise<void>
   }
   corner: {
     items(): Promise<CornerItem[]>

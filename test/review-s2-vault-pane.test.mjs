@@ -27,13 +27,17 @@ import { dirname, join } from 'node:path'
 import {
   MERGE_SEPARATOR,
   collectFolderPaths,
+  folderOf,
   indexNotesByName,
   isBufferDirty,
+  isPlainName,
   isSaveConflict,
   mergeVersions,
+  nextUntitledPath,
   parseWikilinks,
   resolvableLinks,
   resolveWikilink,
+  sortTree,
 } from '../src/renderer/panes/vault/helpers.ts'
 
 const HERE = dirname(fileURLToPath(import.meta.url))
@@ -502,6 +506,164 @@ test('collectFolderPaths keeps the root so expand-all can open the top level', (
   )
 })
 
+/** Two folders and two notes at each of two levels, so kind and name can be
+ *  told apart in every mode. */
+const SORT_FIXTURE = {
+  name: 'V',
+  path: '',
+  kind: 'folder',
+  children: [
+    { name: 'b.md', path: 'b.md', kind: 'note' },
+    {
+      name: 'Alpha',
+      path: 'Alpha',
+      kind: 'folder',
+      children: [
+        { name: 'z.md', path: 'Alpha/z.md', kind: 'note' },
+        { name: 'Nested', path: 'Alpha/Nested', kind: 'folder', children: [] },
+        { name: 'a.md', path: 'Alpha/a.md', kind: 'note' },
+      ],
+    },
+    { name: 'a.md', path: 'a.md', kind: 'note' },
+    { name: 'Zeta', path: 'Zeta', kind: 'folder', children: [] },
+  ],
+}
+
+const names = (node) => node.children.map((c) => c.name)
+
+test('sortTree: four modes, four different orders, recursively', () => {
+  assert.deepEqual(names(sortTree(SORT_FIXTURE, 'folders-asc')), [
+    'Alpha',
+    'Zeta',
+    'a.md',
+    'b.md',
+  ])
+  assert.deepEqual(names(sortTree(SORT_FIXTURE, 'folders-desc')), [
+    'Zeta',
+    'Alpha',
+    'b.md',
+    'a.md',
+  ])
+  assert.deepEqual(names(sortTree(SORT_FIXTURE, 'files-asc')), [
+    'a.md',
+    'b.md',
+    'Alpha',
+    'Zeta',
+  ])
+  assert.deepEqual(names(sortTree(SORT_FIXTURE, 'files-desc')), [
+    'b.md',
+    'a.md',
+    'Zeta',
+    'Alpha',
+  ])
+
+  // Every level, not just the top — a mode that only reorders the root looks
+  // right until a folder is expanded.
+  const nested = sortTree(SORT_FIXTURE, 'files-desc').children.find(
+    (c) => c.name === 'Alpha',
+  )
+  assert.deepEqual(names(nested), ['z.md', 'a.md', 'Nested'])
+})
+
+test('sortTree: the default mode reproduces the order the main process sends', () => {
+  // `folders-asc` must be a no-op on a tree that arrived from vault.ts `sort`,
+  // or the explorer would visibly reshuffle itself on first paint.
+  const already = sortTree(SORT_FIXTURE, 'folders-asc')
+  assert.deepEqual(names(sortTree(already, 'folders-asc')), names(already))
+})
+
+test('sortTree never mutates the tree it is given', () => {
+  // vault.tree is React state shared with the wikilink index and expand-all.
+  // Array.prototype.sort is in-place, so this is the whole risk of the feature.
+  const before = JSON.stringify(SORT_FIXTURE)
+  sortTree(SORT_FIXTURE, 'files-desc')
+  sortTree(SORT_FIXTURE, 'folders-desc')
+  assert.equal(JSON.stringify(SORT_FIXTURE), before, 'the source tree was reordered')
+
+  const sorted = sortTree(SORT_FIXTURE, 'files-asc')
+  assert.notEqual(sorted, SORT_FIXTURE, 'the root was returned by reference')
+  assert.notEqual(sorted.children[0], SORT_FIXTURE.children[0], 'children are shared')
+})
+
+test('sortTree tolerates the empty and the absent tree', () => {
+  assert.equal(sortTree(null, 'folders-asc'), null)
+  const leaf = { name: 'x.md', path: 'x.md', kind: 'note' }
+  assert.equal(sortTree(leaf, 'folders-asc'), leaf, 'a childless node need not be copied')
+})
+
+test('isPlainName rejects a path wearing the costume of a folder name', () => {
+  // Regression, found by driving the built app rather than by reading it: with
+  // `Notes/Untitled.md` open, "+ Folder" joined the typed `../Escaped` to
+  // `Notes` and created `Escaped` at the vault ROOT. Containment was never
+  // breached — main's resolveInVault saw a path inside the vault and was right
+  // to allow it — but the prompt says "name" and this is what holds it to that.
+  for (const bad of ['../Escaped', '..', '.', 'a/b', 'a\\b', '/abs', 'C:\\x', '', '   ']) {
+    assert.equal(isPlainName(bad), false, `${JSON.stringify(bad)} should be refused`)
+  }
+  for (const ok of ['Scratch', 'My Notes', 'a.b', '2026-08-18', 'Ünïcode', '..leading']) {
+    assert.equal(isPlainName(ok), true, `${JSON.stringify(ok)} should be allowed`)
+  }
+  // Surrounding whitespace is trimmed before the verdict, since the caller
+  // trims before joining too.
+  assert.equal(isPlainName('  Scratch  '), true)
+})
+
+test('folderOf: the folder a note sits in, empty at the vault root', () => {
+  assert.equal(folderOf('Business/Playbooks/Launch.md'), 'Business/Playbooks')
+  assert.equal(folderOf('Home.md'), '')
+  assert.equal(folderOf(''), '')
+})
+
+test('nextUntitledPath skips names already taken, in the right folder', () => {
+  const tree = {
+    name: 'V',
+    path: '',
+    kind: 'folder',
+    children: [
+      { name: 'Untitled.md', path: 'Untitled.md', kind: 'note' },
+      { name: 'Untitled 1.md', path: 'Untitled 1.md', kind: 'note' },
+      {
+        name: 'Business',
+        path: 'Business',
+        kind: 'folder',
+        children: [{ name: 'Untitled.md', path: 'Business/Untitled.md', kind: 'note' }],
+      },
+    ],
+  }
+  assert.equal(nextUntitledPath(tree, ''), 'Untitled 2.md')
+  // Per folder, not global: Business has only the first one taken.
+  assert.equal(nextUntitledPath(tree, 'Business'), 'Business/Untitled 1.md')
+  assert.equal(nextUntitledPath(tree, 'Empty'), 'Empty/Untitled.md')
+  assert.equal(nextUntitledPath(null, ''), 'Untitled.md')
+})
+
+test('nextUntitledPath compares case-insensitively, because NTFS does', () => {
+  // `untitled.md` and `Untitled.md` are ONE file on this filesystem. A
+  // case-sensitive check would hand back a path that save() then writes over an
+  // existing note.
+  const tree = {
+    name: 'V',
+    path: '',
+    kind: 'folder',
+    children: [{ name: 'untitled.md', path: 'untitled.md', kind: 'note' }],
+  }
+  assert.equal(nextUntitledPath(tree, ''), 'Untitled 1.md')
+})
+
+test('nextUntitledPath ignores folders that share the name', () => {
+  // A folder called `Untitled.md` is legal and is not a note; treating it as
+  // taken would skip a name that is genuinely free.
+  const tree = {
+    name: 'V',
+    path: '',
+    kind: 'folder',
+    children: [
+      { name: 'Untitled.md', path: 'Untitled.md', kind: 'folder', children: [] },
+    ],
+  }
+  assert.equal(nextUntitledPath(tree, ''), 'Untitled.md')
+})
+
 test('parseWikilinks: plain, aliased, headed, deduped, ordered', () => {
   assert.deepEqual(parseWikilinks('see [[Home]] and [[Projects/AI]]'), [
     'Home',
@@ -808,6 +970,107 @@ test('helpers.ts stays pure: no React, no DOM, no node, no window', () => {
   // Type-only import of the contract is fine; a value import is not.
   for (const m of body.matchAll(/^import (?!type )/gm)) {
     assert.fail(`helpers has a value import: ${m[0]}`)
+  }
+})
+
+/**
+ * THE INVARIANT THE WHOLE docs/buttons QUEUE EXISTS FOR: no control in this
+ * pane may look live and silently do nothing.
+ *
+ * A button qualifies as honest if it has an `onClick`, a `disabled`, or a
+ * `popoverTarget` — the last because a popover invoker acts through the
+ * platform rather than through a handler, and PaneMenu.tsx uses it.
+ *
+ * Grep-shaped, and honest about it: it proves no button is inert, not that the
+ * thing it does is the right thing. The failure it prevents is real and has
+ * happened twice — the note header's ellipsis shipped with no handler AND no
+ * `disabled`, taking focus and painting press feedback for an action that did
+ * not exist.
+ */
+test('every button in the pane either acts or admits it cannot', () => {
+  for (const [name, code] of all()) {
+    const body = stripComments(code)
+    for (const m of body.matchAll(/<button\b[^>]*>/g)) {
+      assert.match(
+        m[0],
+        /onClick|disabled|popoverTarget/,
+        `${name} has a button that is neither wired nor disabled: ${m[0].slice(0, 90)}`,
+      )
+    }
+  }
+})
+
+/**
+ * The same rule for the OTHER interactive elements. A `<select>` with no
+ * `onChange` is the sort dropdown's original defect and is invisible to the
+ * button check above.
+ */
+test('every select in the pane is controlled or disabled', () => {
+  for (const [name, code] of all()) {
+    for (const m of stripComments(code).matchAll(/<select\b[^>]*>/g)) {
+      assert.match(m[0], /onChange|disabled/, `${name} has an inert select: ${m[0]}`)
+    }
+  }
+})
+
+/**
+ * Failures belong in the UI. Every console call in this pane's history was a
+ * click that appeared to do nothing: `console.log('Help')` behind the "?" for
+ * one, and the two explorer create handlers for another.
+ */
+test('the pane reports to the user, never to a console nobody reads', () => {
+  for (const [name, code] of all()) {
+    assert.doesNotMatch(stripComments(code), /\bconsole\.\w+\(/, `${name} logs to the console`)
+  }
+})
+
+/**
+ * Menus are held to the same standard one level down: a row that can never act
+ * is the same lie as a dead button, just harder to see. PaneMenuItem takes
+ * `disabled` with a `reason`, so a row that is merely unavailable right now can
+ * say why — but every row must carry an onClick regardless.
+ */
+test('every menu row is wired', () => {
+  for (const [name, code] of all()) {
+    for (const m of stripComments(code).matchAll(/<PaneMenuItem\b[\s\S]*?>/g)) {
+      assert.match(m[0], /onClick/, `${name} has a dead menu row`)
+      if (/disabled/.test(m[0])) {
+        assert.match(m[0], /reason=/, `${name} disables a menu row without saying why`)
+      }
+    }
+  }
+})
+
+/**
+ * Every menu must be anchored to the button that opens it.
+ *
+ * A popover is in the top layer with no containing block, so an unanchored one
+ * does not land somewhere slightly wrong — it lands at the viewport origin,
+ * across the app, with nothing on screen to suggest why. The spec says the
+ * invoker is the implicit anchor; Chromium 130 does not implement that, so the
+ * pair is written by hand in menu.css and this is what stops the next one being
+ * forgotten.
+ */
+test('every PaneMenu has an anchor pair in menu.css', () => {
+  const css = readFileSync(join(PANE, 'menu.css'), 'utf8')
+  const ids = new Set()
+  for (const [, code] of all()) {
+    for (const m of stripComments(code).matchAll(/<PaneMenu\b[\s\S]*?>/g)) {
+      const id = /id="([^"]+)"/.exec(m[0])
+      assert.ok(id, `a PaneMenu has no literal id: ${m[0].slice(0, 80)}`)
+      ids.add(id[1])
+    }
+  }
+  assert.ok(ids.size > 0, 'no menus found — this test has stopped checking anything')
+  for (const id of ids) {
+    assert.ok(
+      css.includes(`anchor-name: --${id}`),
+      `menu.css never names an anchor for ${id}; its menu will open in the corner`,
+    )
+    assert.ok(
+      css.includes(`position-anchor: --${id}`),
+      `menu.css never points #${id} at its anchor`,
+    )
   }
 })
 

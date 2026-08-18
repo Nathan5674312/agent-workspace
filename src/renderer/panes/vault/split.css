@@ -1,0 +1,40 @@
+/**
+ * The split canvas. Imported by VaultPane.tsx.
+ *
+ * Two <MainCanvas> instances side by side over one note and one buffer. The
+ * only thing that differs between them is the view mode, which each canvas
+ * already owns — so this file is a flex row and a separator, and there is no
+ * layout system behind it.
+ */
+
+/* Present in BOTH states, so toggling split does not remount the canvas that
+   was already on screen. `min-height: 0` is the one non-obvious line: without
+   it a flex child refuses to shrink below its content and the editor's own
+   scroll container never gets a bounded height. */
+.vault-canvas-row {
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+.vault-canvas-row--split {
+  flex-direction: row;
+  gap: 0;
+}
+
+/* Equal columns that each scroll on their own. `min-width: 0` for the same
+   reason as `min-height` above — a flex item's automatic minimum size is its
+   content, so a long note title would push the other column off screen. */
+.vault-canvas-row--split > * {
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 0;
+  overflow: auto;
+}
+
+/* A hairline between the panes, on the second one so it never paints at the
+   outer edge of the row. */
+.vault-canvas-row--split > * + * {
+  border-inline-start: 1px solid var(--separator);
+}

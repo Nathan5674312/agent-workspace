@@ -2,7 +2,7 @@
 tier: WIRE
 control: The "More options" ellipsis at the right of the note header, above the view switcher
 location: src/renderer/panes/vault/MainCanvas.tsx:200-202
-status: NOT STARTED
+status: DONE
 ---
 
 # Note header "More options"

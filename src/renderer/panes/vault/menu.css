@@ -1,0 +1,146 @@
+/**
+ * Dropdown menus. Imported by PaneMenu.tsx, not by main.tsx — the styles arrive
+ * with the component instead of joining the app-wide sheet.
+ *
+ * Values come from tokens.css only. Nothing here invents a colour, a radius or
+ * a duration; the palette is monochrome by design (tokens.css §4b), so a
+ * hovered or pressed row is a luminance step, never a hue.
+ */
+
+/* The popover panel.
+
+   No z-index: a popover is in the TOP LAYER, above every stacking context in
+   the app, so a number here would be ignored and would only invite tuning.
+
+   The UA sheet gives [popover] `position: fixed`, `inset: 0`, `margin: auto`
+   and a border — i.e. centred in the viewport. The three resets below undo the
+   centring so the anchor rules can place it, and `position-area` does the rest. */
+.pane-menu {
+  inset: auto;
+  margin: 0;
+  border: 1px solid var(--separator);
+  padding: var(--space-2);
+
+  /* Anchored to the button that opened it, so nothing measures a rect in JS.
+
+     `position-area` places it below the button with their right edges aligned
+     — these menus all hang off controls at the right end of a toolbar — and
+     `position-try-fallbacks` flips it when the window is too short or too
+     narrow, which is the one case a hand-rolled dropdown always ships broken.
+
+     The ANCHOR ITSELF is named per menu at the bottom of this file rather than
+     here. The spec makes a popover's invoker its implicit anchor, which would
+     have made this rule complete on its own; Chromium 130 (Electron 33) does
+     not apply that yet — measured, not assumed: with `position-area` alone the
+     panel lands at the viewport origin instead of under its button. */
+  position-area: block-end span-inline-start;
+  position-try-fallbacks: flip-block, flip-inline;
+  margin-block-start: var(--space-2);
+
+  min-width: 11rem;
+  max-width: 20rem;
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+
+  background: var(--bg-elevated);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-md), inset 0 1px 0 var(--edge-highlight);
+  color: var(--label);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+}
+
+/* One row. Full-width and left-aligned: a menu row is a target to hit, not a
+   label to read, so it takes the whole panel width rather than the text's. */
+.pane-menu-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--label);
+  font: inherit;
+  text-align: left;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.pane-menu-item:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.pane-menu-item:active:not(:disabled) {
+  background: var(--fill-active);
+}
+
+/* Present but unusable, and it says so with a title. Quaternary is the
+   decorative step in tokens.css §3 — correct here precisely because a disabled
+   row is not something to read, it is something to see is unavailable. */
+.pane-menu-item:disabled {
+  color: var(--label-quaternary);
+}
+
+/* The secondary line under a row's label — a path, a note title. Truncates
+   rather than widening the panel, since a deep vault path is unbounded. */
+.pane-menu-detail {
+  margin-inline-start: auto;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  color: var(--label-tertiary);
+  font-size: var(--text-sm);
+}
+
+/* The tab the chevron menu is currently on. Weight, not colour. */
+.pane-menu-item[aria-current='true'] {
+  font-weight: var(--weight-semibold);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .pane-menu {
+    background: var(--bg-app);
+    box-shadow: none;
+    outline: 1px solid var(--separator-opaque);
+  }
+}
+
+/* ---------------------------------------------------------------- anchors
+
+   One pair per menu: `anchor-name` on the invoking button, `position-anchor`
+   on the panel it opens.
+
+   This cannot be written once and shared, and it is worth saying why so the
+   next person does not spend the afternoon trying. `anchor-name` takes a
+   dashed-ident, and CSS has no way to derive one from an attribute value — so
+   a single rule cannot give each instance its own name. The alternative is an
+   inline style per instance, which this pane bans outright.
+
+   So: a new <PaneMenu id="x"> needs a pair here. Forgetting is not silent —
+   review-s2-vault-pane.test.mjs fails on any menu id with no anchor pair,
+   because the symptom otherwise is a menu that opens in the corner of the
+   window with nothing to explain it. */
+
+[popovertarget='vault-tab-list-menu']:not(.pane-menu-item) {
+  anchor-name: --vault-tab-list-menu;
+}
+#vault-tab-list-menu {
+  position-anchor: --vault-tab-list-menu;
+}
+
+[popovertarget='vault-tab-actions-menu']:not(.pane-menu-item) {
+  anchor-name: --vault-tab-actions-menu;
+}
+#vault-tab-actions-menu {
+  position-anchor: --vault-tab-actions-menu;
+}
+
+[popovertarget='vault-note-options-menu']:not(.pane-menu-item) {
+  anchor-name: --vault-note-options-menu;
+}
+#vault-note-options-menu {
+  position-anchor: --vault-note-options-menu;
+}

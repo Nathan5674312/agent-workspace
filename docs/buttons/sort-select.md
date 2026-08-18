@@ -2,7 +2,7 @@
 tier: WIRE
 control: The sort dropdown in the explorer header ("Sort by name")
 location: src/renderer/panes/vault/ExplorerHeader.tsx:63-70
-status: NOT STARTED
+status: DONE
 ---
 
 # Sort select

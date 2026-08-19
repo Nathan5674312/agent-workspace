@@ -77,7 +77,7 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
     const token = (name: string, fallback: string) =>
       css.getPropertyValue(name).trim() || fallback
     const COL = {
-      link: token('--label-quaternary', 'GrayText'),
+      link: token('--label-tertiary', 'GrayText'),
       node: token('--label-secondary', 'CanvasText'),
       hot: token('--accent', 'Highlight'),
       label: token('--label-secondary', 'CanvasText'),
@@ -375,12 +375,28 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         ctx.drawImage(halo, n.x! - R, n.y! - R, R * 2, R * 2)
       }
 
-      ctx.lineWidth = 0.7 / k
+      /**
+       * Links are STRUCTURE, not decoration.
+       *
+       * They used to draw as `--label-quaternary` at 0.16 alpha — the dimmest
+       * entry in the palette, which tokens.css marks "decorative ONLY", at a
+       * sixth of its opacity. On Ink that is very nearly invisible, so the
+       * graph read as scattered dots rather than a network: the nodes were at
+       * full opacity and the edges between them were not there.
+       *
+       * One step up the ramp (Clay, 5.0:1) and a little over twice the alpha.
+       * Emphasis in this palette comes from luminance rather than hue, so this
+       * is the lever the design system actually provides. The hover states are
+       * untouched — a lit edge is still `--accent` at 0.95, and it still reads
+       * as clearly lit because the resting state is a contrast BELOW it rather
+       * than a near-absence.
+       */
+      ctx.lineWidth = 0.9 / k
       for (const l of links) {
         const lit = dim && (l.source.id === hover!.id || l.target.id === hover!.id)
         if (dim && !lit) continue // dimmed edges are simply not drawn — cheaper and cleaner
         ctx.strokeStyle = lit ? COL.hot : COL.link
-        ctx.globalAlpha = lit ? 0.95 : 0.16
+        ctx.globalAlpha = lit ? 0.95 : 0.4
         ctx.beginPath()
         ctx.moveTo(l.source.x!, l.source.y!)
         ctx.lineTo(l.target.x!, l.target.y!)

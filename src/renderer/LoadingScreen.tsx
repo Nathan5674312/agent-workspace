@@ -115,7 +115,16 @@ function SplitFlapText({ phrases }: { phrases: string[] }) {
     }
     stop()
 
-    let index = 0
+    /**
+     * START ANYWHERE. This was `0`, which meant the board always opened on
+     * PHRASES[0] and, because of the timing below, never got off it.
+     *
+     * The scramble takes FLIPS_PER_CHAR x FLIP_DURATION (~1.26s) and the first
+     * advance is scheduled HOLD_MS after that — ~2.76s — while BOOT_MIN_MS is
+     * 3000 and the tree usually resolves sooner. So a boot shows ONE phrase in
+     * practice. Cycling was never the feature; which one you get is.
+     */
+    let index = Math.floor(Math.random() * padded.length)
     let cancelled = false
     const flipMs = FLIP_DURATION * 1000
 
@@ -217,7 +226,7 @@ function SplitFlapText({ phrases }: { phrases: string[] }) {
     // board is already showing noise, and the first thing it should do is
     // resolve. Everything after that is on the hold cycle.
     currentText.current = randomPhrase(width)
-    const opening = animateTo(padded[0] ?? '')
+    const opening = animateTo(padded[index] ?? '')
     if (padded.length > 1) schedule(HOLD_MS + opening)
 
     return () => {

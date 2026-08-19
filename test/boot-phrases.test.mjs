@@ -91,3 +91,25 @@ test('no duplicates — a repeat halves the odds of something else', () => {
   const all = phrases()
   assert.equal(new Set(all).size, all.length, 'PHRASES contains a duplicate')
 })
+
+test('the board does not always open on the same phrase', () => {
+  /**
+   * The regression this exists for, because it shipped: `let index = 0` plus
+   * `animateTo(padded[0])` meant every boot opened on PHRASES[0] — and the
+   * timing means a boot shows ONE phrase before the tree resolves, so it never
+   * advanced off it either. Fifteen phrases, one of them ever seen.
+   *
+   * Cycling was never the feature. Which one you get is. That makes the START
+   * index the whole mechanism, so it is worth a guard.
+   */
+  assert.doesNotMatch(
+    SRC,
+    /animateTo\(padded\[0\]/,
+    'the opening phrase is hardcoded to the first entry',
+  )
+  assert.match(
+    SRC,
+    /let index = Math\.floor\(Math\.random\(\) \* padded\.length\)/,
+    'the starting index is not randomised',
+  )
+})

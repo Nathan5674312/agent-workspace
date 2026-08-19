@@ -6,48 +6,60 @@
  * Every colour is a token. The React Bits original hard-coded cool slate
  * (#111827) and near-white (#f8fafc) plus a dozen rgba() shadows; this app is
  * warm earthy monochrome and its own test suite bans hex and rgb() in pane
- * sources. The mechanical read — the bevel, the seam, the shadow under a
- * turning leaf — is kept, but it is built out of the palette's own Ink, Bistre,
- * Coffee, Sand and Cream rather than out of white and black.
+ * sources. The mechanical read is kept, but it is built out of the palette's
+ * own Ink, Bistre, Coffee, Sand and Cream rather than out of white and black.
  */
 
 .boot {
   position: fixed;
   inset: 0;
   z-index: 100;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  /**
+   * The field is deliberately WIDER AND TALLER than the window — see the
+   * `ceil(...) + 1` in LoadingScreen.tsx — so there is a partial cell at every
+   * edge and this clips it.
+   *
+   * That clipping is the point. A board that stopped neatly inside the window
+   * would read as a panel sitting on the screen; one that runs off all four
+   * sides reads as the screen itself being the board.
+   */
+  overflow: hidden;
   background: var(--bg-app);
-  /* Fades itself out of existence. The screen underneath is already painted, so
-     this is a reveal rather than a load — nothing is waiting on the fade. */
-  animation: boot-out var(--duration-normal) var(--ease-out) 2.65s both;
-}
 
-@keyframes boot-out {
-  to { opacity: 0; visibility: hidden; }
-}
+  /* ------------------------------------------------------- cell geometry
+   * UNITLESS on purpose. These three numbers are multiplied by 1em below,
+   * and LoadingScreen.tsx reads them straight back off the computed style,
+   * multiplying by the RESOLVED font-size to count rows and columns.
+   *
+   * One source of truth, because the failure mode of two is silent: a tile
+   * size duplicated in the TSX would drift the moment either side changed,
+   * and the result is a field that no longer lines up with its own letters.
+   */
+  --cell-w: 0.72;
+  --cell-h: 1.16;
+  --cell-gap: 0.22;
 
-/**
- * Separate cells, but CUT INTO the ground rather than sitting on top of it.
- *
- * The stock split-flap tile is a raised glossy chip: soft rounded corners, a
- * white inset highlight along the top, a black one along the bottom, and a drop
- * shadow underneath. That combination is the component's signature and it is
- * why it reads as borrowed. It is also the opposite of how this app draws
- * everything else — nothing here is raised, and nothing here is glossy.
- *
- * So the cells keep their separation and lose the chrome. Each is a flush
- * aperture: the ground colour showing through a hairline aperture, squared off
- * rather than pill-soft, with no highlight, no bevel and no shadow. The only
- * modelling left is the faint tonal step between the upper and lower half,
- * which is the one piece of shading that is doing real work — it is what makes
- * the flap read as a flap.
- */
-.flap {
-  display: inline-flex;
-  align-items: center;
-  gap: 0.22em;
+  /**
+   * EVERY cell is a child of ONE grid — the lettered ones and the thousand
+   * blank ones alike.
+   *
+   * That is the entire alignment strategy, and it is why there is no
+   * alignment maths anywhere in this file. The obvious cheaper build is to
+   * paint the field as a repeating background gradient behind a centred row
+   * of tiles, which costs one element instead of thousands. It was rejected:
+   * the pattern origin and the centred row are positioned by two different
+   * mechanisms, so keeping them in step needs a calc() chain against the
+   * phrase width, the gap, and the percentage-background-position formula —
+   * and every one of those drifts independently. Cells in a shared grid
+   * cannot drift, because there are not two things to align.
+   */
+  display: grid;
+  grid-template-columns: repeat(var(--cols, 1), calc(var(--cell-w) * 1em));
+  grid-auto-rows: calc(var(--cell-h) * 1em);
+  gap: calc(var(--cell-gap) * 1em);
+  align-content: center;
+  justify-content: center;
+
   font-family: var(--font-terminal, ui-monospace, monospace);
   font-size: clamp(1.4rem, 4.2vw, 2.6rem);
   /* Tracking is size-specific and this is large type, so it tightens rather
@@ -58,9 +70,18 @@
   font-variant-numeric: tabular-nums;
   white-space: pre;
   user-select: none;
+
+  /* Fades itself out of existence. The screen underneath is already painted, so
+     this is a reveal rather than a load — nothing is waiting on the fade. */
+  animation: boot-out var(--duration-normal) var(--ease-out) 2.65s both;
 }
 
-/* The announced phrase. Present for assistive tech, never painted. */
+@keyframes boot-out {
+  to { opacity: 0; visibility: hidden; }
+}
+
+/* The announced phrase. Present for assistive tech, never painted — and
+   absolutely positioned so it does not consume a cell of the grid. */
 .flap-live {
   position: absolute;
   width: 1px; height: 1px;
@@ -69,36 +90,50 @@
   white-space: nowrap;
 }
 
+/**
+ * A well CUT INTO the ground, not a chip sitting on it.
+ *
+ * The stock split-flap tile is a raised glossy chip: soft rounded corners, a
+ * white inset highlight along the top, a black one along the bottom, and a drop
+ * shadow underneath. That combination is the component's signature and it is
+ * why it reads as borrowed. It is also the opposite of how this app draws
+ * everything else — nothing here is raised, and nothing here is glossy.
+ *
+ * So: no highlight, no bevel, no shadow, and no outline either. The cell is one
+ * step DOWN from the page (Ink to Ink-one-step-down), and that is the whole of
+ * the modelling. An earlier pass drew a hairline aperture instead and filled the
+ * cell with the page colour, which meant the cells were not cut into anything —
+ * the comment claimed a sunken well while the code painted a flat rectangle
+ * behind an 8%-opacity edge nobody could see.
+ *
+ * Size comes from the grid tracks above, deliberately. A width and height here
+ * would be the same two numbers written twice.
+ */
 .flap-tile {
   position: relative;
-  /* Taller than it is wide, like a real board cell. The stock ratio is closer
-     to square, which is part of why it reads as a chip. */
-  width: 0.72em;
-  height: 1.16em;
   overflow: hidden;
-  /* Squared, not pill-soft. 2px is enough to stop the corner looking cut. */
-  border-radius: 2px;
+  /* Squared, not pill-soft. 3px is enough to stop the corner looking cut. */
+  border-radius: 3px;
+  background: var(--bg-sunken);
   perspective: 520px;
   transform-style: preserve-3d;
   isolation: isolate;
 }
 
-/* The aperture edge. One hairline, drawn over the halves so the cell reads as
-   an opening in a surface rather than an object with an outline. */
-.flap-tile::after {
-  content: '';
-  position: absolute;
-  inset: 0;
-  z-index: 10;
-  border: 1px solid var(--separator);
-  border-radius: inherit;
-  pointer-events: none;
-}
+/**
+ * A BLANK cell is `.flap-tile` and nothing else — no halves, no char, no
+ * children at all. There are up to a few thousand of them, so every node not
+ * created is a node not created a few thousand times.
+ *
+ * They are indistinguishable from a lettered cell until a letter lands in one,
+ * which is exactly how a real departure board looks when most of it is idle.
+ */
 
 /* NO SEAM. A split-flap board has one because it is a physical object made of
    two halves; this is pretending to be a console, and a console has no hinge
-   across the middle of its characters. Removed along with the tonal step below,
-   which drew the same line a second time in a fainter ink. */
+   across the middle of its characters. The tonal step between the halves is
+   gone for the same reason — two different grounds meeting at 50% IS a midline,
+   whether or not a seam is drawn over it. */
 
 .flap-half,
 .flap-leaf {
@@ -107,24 +142,17 @@
   width: 100%;
   height: 50%;
   overflow: hidden;
-  /* The GROUND colour, not an elevated one. That is what makes the cell read as
-     cut into the surface instead of laid on top of it. */
-  background: var(--bg-app);
+  /* The SAME well colour as the tile behind them. That is what lets a lettered
+     cell and a blank cell read as the same object. */
+  background: var(--bg-sunken);
   backface-visibility: hidden;
 }
 
 .flap-half--top,
 .flap-leaf--front { top: 0; }
 
-/* Same ground as the top half. The shading here used to be "the part that makes
-   a flap look like a flap" — which is exactly the impression being dropped. Two
-   different grounds meeting at 50% IS a midline, whether or not a seam is drawn
-   over it. */
 .flap-half--bottom,
-.flap-leaf--back {
-  bottom: 0;
-  background: var(--bg-app);
-}
+.flap-leaf--back { bottom: 0; }
 
 .flap-char {
   position: absolute;
@@ -186,7 +214,13 @@
   .boot { background: var(--bg-app); }
 }
 
+/**
+ * The well is a small tonal step against the page — ample for decorative
+ * separation, nowhere near enough for someone who has asked for more contrast.
+ * An inset shadow rather than a border, so the cell keeps its exact size and
+ * the grid does not shift by 2px per cell across a thousand of them.
+ */
 @media (prefers-contrast: more) {
-  .flap-tile::after { border-color: var(--separator-opaque); }
+  .flap-tile { box-shadow: inset 0 0 0 1px var(--separator-opaque); }
   .flap-char { color: var(--label); }
 }

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import './LoadingScreen.css'
 
 /**
@@ -22,6 +22,10 @@ import './LoadingScreen.css'
  * Also trimmed, per the same reasoning: tileRadius, gap, fontSize, charset,
  * padTo and className were props with exactly one caller. They are constants or
  * CSS now. What remains is the flap engine, which is the part worth having.
+ *
+ * The board is now FULL SCREEN. The phrase occupies a run of cells in the middle
+ * row of a field of identical blank wells that runs off all four edges, which is
+ * how a real departure board looks when most of it is idle. See `useField`.
  */
 
 const CHARSET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
@@ -86,11 +90,98 @@ function usePrefersReducedMotion(): boolean {
   return reduced
 }
 
+/**
+ * The blank cells surrounding the phrase.
+ *
+ * `memo` is load-bearing, not tidiness. There are up to a few thousand of these
+ * and the tile state above updates on nearly every animation frame; without the
+ * bailout, every frame of the scramble would reconcile the entire field to
+ * produce fifteen changed glyphs. Count is the only input, and it changes only
+ * when the window is resized.
+ */
+const Blanks = memo(function Blanks({ count }: { count: number }) {
+  return (
+    <>
+      {Array.from({ length: count }, (_, i) => (
+        <span className="flap-tile" aria-hidden="true" key={i} />
+      ))}
+    </>
+  )
+})
+
+/**
+ * How many cells cover the window.
+ *
+ * Geometry is read off the element's own computed style rather than duplicated
+ * here — LoadingScreen.css owns `--cell-w/h/gap` as unitless numbers, and the
+ * resolved `font-size` turns them into pixels. A copy of those numbers in this
+ * file would drift silently and the field would stop lining up with its letters.
+ *
+ * Writes the column count back as `--cols` imperatively. It could be an inline
+ * style prop instead, but that re-renders the whole field to change one integer
+ * that the grid reads directly.
+ */
+function useField(
+  ref: React.RefObject<HTMLDivElement | null>,
+  boardWidth: number,
+): { cols: number; rows: number } {
+  const [field, setField] = useState({ cols: 0, rows: 0 })
+
+  // Layout, not effect: this measures and fills before paint, so the board is
+  // never briefly a bare row of letters on an empty screen.
+  useLayoutEffect(() => {
+    const el = ref.current
+    if (!el) return
+
+    const measure = () => {
+      const cs = getComputedStyle(el)
+      const em = parseFloat(cs.fontSize)
+      const w = parseFloat(cs.getPropertyValue('--cell-w')) * em
+      const h = parseFloat(cs.getPropertyValue('--cell-h')) * em
+      const gap = parseFloat(cs.getPropertyValue('--cell-gap')) * em
+      if (!(w > 0) || !(h > 0)) return
+
+      /**
+       * `ceil` covers the window; the `+ 1` overshoots it by a whole cell so
+       * there is a PARTIAL cell at every edge for `.boot`'s overflow to clip.
+       * A field that ended flush would read as a panel, not as the screen.
+       */
+      let cols = Math.ceil((el.clientWidth + gap) / (w + gap)) + 1
+      let rows = Math.ceil((el.clientHeight + gap) / (h + gap)) + 1
+
+      // Never narrower than the phrase, or it wraps onto a second row.
+      cols = Math.max(cols, boardWidth)
+
+      /**
+       * Parity, so the phrase lands DEAD centre rather than half a cell off.
+       * The side padding is `(cols - boardWidth) / 2`, which only divides
+       * evenly when the two share a parity; and a true middle row exists only
+       * when the row count is odd. Half a cell is ~15px at this size — small,
+       * but on a grid this regular it is the kind of thing you see without
+       * being able to say what is wrong.
+       */
+      if ((cols - boardWidth) % 2 !== 0) cols += 1
+      if (rows % 2 === 0) rows += 1
+
+      el.style.setProperty('--cols', String(cols))
+      setField((p) => (p.cols === cols && p.rows === rows ? p : { cols, rows }))
+    }
+
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [ref, boardWidth])
+
+  return field
+}
+
 function SplitFlapText({ phrases }: { phrases: string[] }) {
   const reduced = usePrefersReducedMotion()
   const raf = useRef<number | null>(null)
   const timer = useRef<number | null>(null)
   const currentText = useRef('')
+  const board = useRef<HTMLDivElement>(null)
 
   /** Wide enough for the longest phrase, so nothing is ever cut. */
   const width = useMemo(
@@ -105,6 +196,8 @@ function SplitFlapText({ phrases }: { phrases: string[] }) {
   // resolve out of noise is the whole effect, and starting on the finished
   // phrase threw that away on the one appearance that matters most.
   const [tiles, setTiles] = useState<Tile[]>(() => createTiles(randomPhrase(width)))
+
+  const field = useField(board, width)
 
   useEffect(() => {
     const stop = () => {
@@ -237,11 +330,27 @@ function SplitFlapText({ phrases }: { phrases: string[] }) {
 
   const settled = tiles.map((t) => t.current).join('').trimEnd()
 
+  /**
+   * Where the phrase sits in the field, in plain cell counts.
+   *
+   * Grid auto-placement does the positioning, so this is just "how many blanks
+   * come first" and "how many come after" — no coordinates, no `grid-column`,
+   * nothing that could disagree with where the browser actually put a cell.
+   */
+  const total = field.cols * field.rows
+  const lead =
+    total > 0
+      ? Math.floor((field.rows - 1) / 2) * field.cols +
+        Math.floor((field.cols - tiles.length) / 2)
+      : 0
+  const trail = Math.max(0, total - lead - tiles.length)
+
   return (
-    <div className="flap">
+    <div className="boot" role="status" ref={board}>
       {/* The tiles are decoration; three halves per glyph would be read out as
           gibberish. The phrase is announced once, politely, from here. */}
       <span className="flap-live" aria-live="polite">{settled}</span>
+      <Blanks count={lead} />
       {tiles.map((tile, i) => (
         <span className="flap-tile" aria-hidden="true" key={i}>
           <span className="flap-half flap-half--top">
@@ -265,6 +374,7 @@ function SplitFlapText({ phrases }: { phrases: string[] }) {
           )}
         </span>
       ))}
+      <Blanks count={trail} />
     </div>
   )
 }
@@ -332,9 +442,5 @@ export function LoadingScreen(): React.ReactElement | null {
 
   if (done) return null
 
-  return (
-    <div className="boot" role="status">
-      <SplitFlapText phrases={PHRASES} />
-    </div>
-  )
+  return <SplitFlapText phrases={PHRASES} />
 }

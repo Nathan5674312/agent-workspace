@@ -56,6 +56,23 @@ export const ipcMain = {
 export const contextBridge = { exposeInMainWorld() {} }
 export const ipcRenderer = { invoke() {}, on() {}, removeListener() {} }
 
+/**
+ * Agent turns run in their own OS processes (src/main/supervisor.ts), which
+ * imports this. Only the shape matters here: no suite under `node --test` may
+ * spawn a real child, so `fork` throwing is the honest stand-in — a test that
+ * reaches it has escaped its own boundary and should say so loudly rather than
+ * silently talk to a fake.
+ *
+ * The isolation guarantee itself cannot be proved here at all; it needs real
+ * processes, and it is verified by an Electron probe against a child that
+ * crashes on purpose (see `_setHostEntryForTest`).
+ */
+export const utilityProcess = {
+  fork() {
+    throw new Error('utilityProcess.fork is not available under node --test')
+  },
+}
+
 export default {
   app,
   shell,
@@ -64,4 +81,5 @@ export default {
   ipcMain,
   contextBridge,
   ipcRenderer,
+  utilityProcess,
 }

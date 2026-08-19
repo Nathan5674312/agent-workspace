@@ -5,7 +5,22 @@ import { resolve } from 'node:path'
 export default defineConfig({
   main: {
     build: {
-      lib: { entry: resolve(__dirname, 'src/main/index.ts') },
+      /**
+       * TWO entries, not one. `agentHost.ts` is imported by nothing — the
+       * supervisor launches it as a separate OS process by path — so without
+       * naming it here Rollup would tree-shake it out of existence and every
+       * agent run would fail with "module not found" at spawn time.
+       *
+       * Both land in `out/main/`, which is what makes
+       * `join(__dirname, 'agentHost.js')` in supervisor.ts resolve in dev and in
+       * the packaged app without a branch.
+       */
+      lib: {
+        entry: [
+          resolve(__dirname, 'src/main/index.ts'),
+          resolve(__dirname, 'src/main/agentHost.ts'),
+        ],
+      },
       rollupOptions: { external: ['electron'] },
     },
   },

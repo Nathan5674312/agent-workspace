@@ -165,7 +165,14 @@ test('no node, electron or network access anywhere in the pane', () => {
  * omissions carry: `corner` and `network` belong to other panes, and the vault
  * pane reaching into either is the coupling this guards against.
  */
-const ALLOWED_API = new Set(['vault', 'settings'])
+/**
+ * `terminal` joined `vault` and `settings` when the ribbon's terminal icon
+ * became a real panel, on the same footing settings joined on: the panel is
+ * rendered BY this pane, so this pane is where it reads from. The rule the
+ * omissions carry is unchanged — `corner` and `network` belong to other panes,
+ * and this pane reaching into either is the coupling being guarded against.
+ */
+const ALLOWED_API = new Set(['vault', 'settings', 'terminal'])
 
 test('the pane reaches only into its own window.api surfaces', () => {
   for (const [name, code] of all()) {

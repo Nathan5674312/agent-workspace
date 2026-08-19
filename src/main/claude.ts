@@ -17,10 +17,10 @@ import { app, BrowserWindow } from 'electron'
 import { writeFileSync, readFileSync, existsSync, mkdirSync, renameSync } from 'node:fs'
 import { join } from 'node:path'
 import { randomUUID } from 'node:crypto'
-import { query, type Query } from '@anthropic-ai/claude-agent-sdk'
 import type { Handle } from './ipc.js'
-import { CH, EV, type Session, type ChatMessage, type PermissionMode, type ChatBlock } from '../shared/ipc.js'
+import { CH, EV, type Session, type ChatMessage, type PermissionMode } from '../shared/ipc.js'
 import { requestConsent } from './corner.js'
+import * as supervisor from './supervisor.js'
 
 // ================================================================ Types
 
@@ -44,26 +44,6 @@ function isSafeId(id: unknown): id is string {
   return typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id)
 }
 
-/**
- * Our contract exposes three modes; the SDK's union has six. Map explicitly.
- *
- * 'ask' maps to 'default', NOT to 'plan'. Plan mode is read-only planning — a
- * session in it will not execute anything, which is a different product
- * behaviour, not a stricter version of "ask me first". Getting this wrong makes
- * the agent look broken rather than cautious.
- */
-function toSdkPermissionMode(
-  mode: PermissionMode | undefined,
-): 'default' | 'acceptEdits' | 'bypassPermissions' {
-  switch (mode) {
-    case 'accept-edits':
-      return 'acceptEdits'
-    case 'bypass':
-      return 'bypassPermissions'
-    default:
-      return 'default'
-  }
-}
 
 // ================================================================ Persistence
 
@@ -131,21 +111,6 @@ function loadSessionHistory(id: string): ChatMessage[] {
   }
 }
 
-/**
- * Tool results arrive as either a plain string or Anthropic content blocks.
- * The contract's `tool_result` block is a string, so flatten here rather than
- * letting `[object Object]` reach the pane.
- */
-function renderToolResult(content: unknown): string {
-  if (typeof content === 'string') return content
-  if (Array.isArray(content)) {
-    return content
-      .map((c) => (c && typeof c === 'object' && 'text' in c ? String((c as { text: unknown }).text) : ''))
-      .filter(Boolean)
-      .join('\n')
-  }
-  return ''
-}
 
 function saveSessionHistory(id: string, messages: ChatMessage[]): void {
   const file = join(getSessionDir(id), 'history.json')
@@ -167,12 +132,6 @@ function getSessions(): StoredSession[] {
   if (!sessionCache) sessionCache = loadSessions()
   return sessionCache
 }
-
-/**
- * In-flight SDK queries, keyed by our session id. Held so `claude:interrupt`
- * can actually stop the run instead of only relabelling the status dot.
- */
-const running = new Map<string, Query>()
 
 function getWindow(): BrowserWindow | null {
   // Not `require('electron')` — this module is ESM, and the import above is
@@ -217,7 +176,7 @@ export function register(handle: Handle): void {
     const session = sessions.find((s) => s.id === id)
     if (!session) throw new Error(`Session ${id} not found`)
 
-    if (running.has(id)) throw new Error(`Session ${id} is already running`)
+    if (supervisor.isRunning(id)) throw new Error(`Session ${id} is already running`)
 
     const setStatus = (status: Session['status']): void => {
       session.status = status
@@ -247,123 +206,68 @@ export function register(handle: Handle): void {
 
     setStatus('running')
 
-    try {
-      const run = query({
-        prompt: text,
-        options: {
-          // `cwd` is the whole of project scoping. Without it every session ran
-          // in the Electron app's own working directory regardless of which
-          // project the row in the sidebar claimed to be bound to.
-          cwd: session.cwd,
-          // `tools` restricts what exists. `allowedTools` was used here before
-          // and does the opposite of what the comment claimed: per the SDK it
-          // is the AUTO-APPROVE list, so Read/Glob/Grep executed without ever
-          // reaching canUseTool, while every other tool stayed available.
-          tools: ['Read', 'Glob', 'Grep'],
-          permissionMode: toSdkPermissionMode(session.permissionMode),
-          // The SDK refuses 'bypassPermissions' unless this is set — the mode
-          // was previously reachable from the UI and simply errored the run.
-          allowDangerouslySkipPermissions: session.permissionMode === 'bypass',
-          // Continue the same SDK conversation across turns. Absent this the
-          // agent re-met the user on every send.
-          resume: session.sdkSessionId,
-          canUseTool: async (toolName, input, _options) => {
-            // The ONE consent surface: pane 3. No prompt path exists here.
-            setStatus('awaiting-permission')
-            try {
-              const allow = await requestConsent({
-                title: `Allow ${toolName}`,
-                detail: `The agent wants to ${toolName} with these arguments: ${JSON.stringify(input)}`,
-                severity: 'info',
-              })
-              return allow
-                ? { behavior: 'allow', updatedInput: input }
-                : { behavior: 'deny', message: 'User denied' }
-            } finally {
-              // Never leave the dot stuck on "awaiting-permission" — including
-              // when requestConsent rejects.
-              if (session.status === 'awaiting-permission') setStatus('running')
-            }
-          },
-        },
-      })
-      running.set(id, run)
-
-      for await (const sdkMsg of run) {
+    /**
+     * The turn runs in ITS OWN PROCESS now (src/main/supervisor.ts). Nothing
+     * about the conversation changed; what changed is that a session which dies
+     * badly can no longer take the window, the editor buffer and every other
+     * session with it.
+     *
+     * This never throws for an agent failure. It used to rethrow, which turned
+     * a failed run into a rejected IPC call and a red toast with no transcript;
+     * the outcome is now a record, and a failure or a crash is written INTO the
+     * transcript where the user is already looking.
+     */
+    const record = await supervisor.run(session, text, {
+      onSdkSession: (sdkSessionId) => {
         // Remember the SDK's own session id so the next turn can resume it.
-        if ('session_id' in sdkMsg && sdkMsg.session_id) {
-          session.sdkSessionId = sdkMsg.session_id
-        }
+        session.sdkSessionId = sdkSessionId
+      },
+      onBlocks: (role, blocks) => {
+        const msg: ChatMessage = { id: randomUUID(), role, blocks, at: Date.now() }
+        history.push(msg)
+        pushMessage(id, msg)
+      },
+      onStatus: (status) => setStatus(status),
+      onConsent: (toolName, input) =>
+        // The ONE consent surface: pane 3. The child process cannot reach it and
+        // is not allowed to become a second one.
+        requestConsent({
+          title: `Allow ${toolName}`,
+          detail: `The agent wants to ${toolName} with these arguments: ${JSON.stringify(input)}`,
+          severity: 'info',
+        }),
+      onExit: () => {},
+    })
 
-        if (sdkMsg.type === 'assistant' && sdkMsg.message?.content) {
-          const blocks: ChatBlock[] = []
-          for (const block of sdkMsg.message.content) {
-            // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const anyBlock = block as any
-            if ('text' in block) {
-              blocks.push({ kind: 'text', text: anyBlock.text })
-            } else if ('thinking' in block) {
-              blocks.push({ kind: 'thinking', text: anyBlock.thinking })
-            } else if ('type' in block && anyBlock.type === 'tool_use') {
-              blocks.push({ kind: 'tool_use', id: anyBlock.id, name: anyBlock.name, input: anyBlock.input })
-            }
-          }
-          if (blocks.length > 0) {
-            const msg: ChatMessage = {
-              id: randomUUID(),
-              role: 'assistant',
-              blocks,
-              at: Date.now(),
-            }
-            history.push(msg)
-            pushMessage(id, msg)
-          }
-        }
-
-        // Tool results arrive as SDK `user` messages. The contract has a
-        // `tool_result` block and the renderer draws it; nothing was ever
-        // emitting one, so every tool call showed a call with no outcome.
-        if (sdkMsg.type === 'user' && !('isReplay' in sdkMsg && sdkMsg.isReplay)) {
-          const content = sdkMsg.message?.content
-          if (Array.isArray(content)) {
-            const blocks: ChatBlock[] = []
-            for (const block of content) {
-              // eslint-disable-next-line @typescript-eslint/no-explicit-any
-              const anyBlock = block as any
-              if (anyBlock?.type !== 'tool_result') continue
-              blocks.push({
-                kind: 'tool_result',
-                id: anyBlock.tool_use_id,
-                content: renderToolResult(anyBlock.content),
-                isError: anyBlock.is_error === true,
-              })
-            }
-            if (blocks.length > 0) {
-              const msg: ChatMessage = { id: randomUUID(), role: 'user', blocks, at: Date.now() }
-              history.push(msg)
-              pushMessage(id, msg)
-            }
-          }
-        }
-
-        if (sdkMsg.type === 'result') {
-          setStatus(sdkMsg.subtype === 'success' ? 'idle' : 'error')
-        }
+    /**
+     * A crash is TRANSCRIPT CONTENT, not a console line.
+     *
+     * The session it happened in is the only place the user will look, and an
+     * agent that stops mid-sentence with the dot flicking to "idle" is
+     * indistinguishable from one that simply finished. Say which happened, and
+     * say the thing that is easy to doubt: the others are still alive.
+     */
+    if (record.reason === 'crash' || record.reason === 'failed') {
+      const msg: ChatMessage = {
+        id: randomUUID(),
+        role: 'assistant',
+        blocks: [
+          {
+            kind: 'text',
+            text:
+              record.reason === 'crash'
+                ? `⚠ This agent's process stopped unexpectedly. Other sessions are unaffected.\n\n${record.message}`
+                : `⚠ This turn failed.\n\n${record.message}`,
+          },
+        ],
+        at: Date.now(),
       }
-    } catch (err) {
-      setStatus('error')
-      throw err
-    } finally {
-      running.delete(id)
-      // A run that ends without a `result` message — transport death, an
-      // interrupt, an abort — must not leave the session pinned on 'running'
-      // forever. And the transcript is written here so a mid-run failure does
-      // not discard everything the agent already said.
-      if (session.status === 'running' || session.status === 'awaiting-permission') {
-        setStatus('idle')
-      }
-      saveSessionHistory(id, history)
+      history.push(msg)
+      pushMessage(id, msg)
     }
+
+    saveSessionHistory(id, history)
+    setStatus(record.reason === 'done' || record.reason === 'killed' ? 'idle' : 'error')
   })
 
   handle(CH.claudeInterrupt, async (id: string) => {
@@ -371,18 +275,10 @@ export function register(handle: Handle): void {
     const session = sessions.find((s) => s.id === id)
     if (!session) return
 
-    // Actually stop the run. Flipping the status alone left the SDK query
-    // streaming in the background: tools kept executing and the next `result`
-    // message overwrote the status back again.
-    const run = running.get(id)
-    if (run) {
-      try {
-        await run.interrupt()
-      } catch {
-        // Interrupt is best-effort; the finally block in send() still settles
-        // the status either way.
-      }
-    }
+    // Ask the child's SDK to stop the turn. Still best-effort, and still not a
+    // kill: an interrupt should end the turn, not lose the process and with it
+    // the resume id. `/kill` is the bigger hammer and is a separate command.
+    supervisor.interrupt(id)
 
     if (session.status === 'running' || session.status === 'awaiting-permission') {
       session.status = 'idle'

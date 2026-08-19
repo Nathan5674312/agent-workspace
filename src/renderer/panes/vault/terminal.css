@@ -1,0 +1,114 @@
+/**
+ * The terminal panel. Imported by TerminalView.tsx.
+ *
+ * Values come from tokens.css only. Monospace throughout, because the output is
+ * column-aligned with padStart/padEnd in the component — a proportional font
+ * would turn the /agents table into ragged prose.
+ */
+
+.terminal-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+  font-family: var(--font-mono);
+  font-size: var(--text-sm);
+}
+
+.terminal-log {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: var(--space-3);
+  /* Wrap rather than scroll sideways: a long stack trace read one word per line
+     is still readable, where a horizontal scrollbar on every line is not. */
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: var(--leading-body);
+}
+
+.terminal-line {
+  color: var(--label-secondary);
+}
+
+/* What the user typed, brightest — it is the anchor when scanning back. */
+.terminal-line--input {
+  color: var(--label);
+  font-weight: var(--weight-medium);
+}
+
+.terminal-line--output {
+  color: var(--label-secondary);
+}
+
+/* The one place a hue is spent. tokens.css keeps the palette monochrome so
+   emphasis is luminance, and --danger exists for exactly this: something went
+   wrong and must not read as ordinary output. */
+.terminal-line--error {
+  color: var(--danger);
+}
+
+.terminal-line--note {
+  color: var(--label-tertiary);
+}
+
+.terminal-input-row {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-3);
+  border-top: 1px solid var(--separator);
+  background: var(--material-regular);
+}
+
+.terminal-prompt {
+  color: var(--accent);
+  font-weight: var(--weight-semibold);
+}
+
+.terminal-input {
+  flex: 1;
+  min-width: 0;
+  background: transparent;
+  border: none;
+  outline: none;
+  color: var(--label);
+  font-family: inherit;
+  font-size: inherit;
+}
+
+.terminal-input::placeholder {
+  color: var(--label-quaternary);
+}
+
+.terminal-input:disabled {
+  color: var(--label-tertiary);
+}
+
+.terminal-clear {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  padding: var(--space-1);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--label-tertiary);
+  cursor: default;
+}
+
+.terminal-clear:hover:not(:disabled) {
+  background: var(--fill-hover);
+  color: var(--label);
+}
+
+.terminal-clear:disabled {
+  color: var(--label-quaternary);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .terminal-input-row {
+    background: var(--bg-app);
+  }
+}

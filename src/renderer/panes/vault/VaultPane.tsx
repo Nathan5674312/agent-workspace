@@ -27,6 +27,7 @@ import { useEffect, useMemo, useState } from 'react'
 import { useVault } from './useVault.js'
 import { LeftRibbon, ribbonLabel } from './LeftRibbon.js'
 import { SidebarPlaceholder } from './SidebarPlaceholder.js'
+import { TerminalView } from './TerminalView.js'
 import { ExplorerHeader } from './ExplorerHeader.js'
 import { FolderTree } from './FolderTree.js'
 import { VaultSwitcher } from './VaultSwitcher.js'
@@ -682,6 +683,10 @@ export function VaultPane(): React.ReactElement {
                 onToggle={handleToggleFolder}
               />
             </>
+          ) : activeRibbon === 'terminal' ? (
+            /* The first ribbon icon to graduate from a placeholder to a real
+               panel. The rest still describe themselves; see SidebarPlaceholder. */
+            <TerminalView onClose={() => setActiveRibbon('files')} />
           ) : (
             /* Every non-files ribbon icon used to fall through to nothing, so
                the sidebar went blank while the icon reported itself pressed.

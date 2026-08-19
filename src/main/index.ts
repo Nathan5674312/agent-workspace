@@ -3,6 +3,7 @@ import { join } from 'node:path'
 import { registerIpc } from './ipc.js'
 import { checkRoots } from './vault.js'
 import { applySettings, setRootMismatch } from './settings.js'
+import { killAll } from './supervisor.js'
 
 /**
  * Only http(s) may be handed to the OS. `new URL` is the parser, not a regex —
@@ -102,4 +103,21 @@ void app.whenReady().then(() => {
 
 app.on('window-all-closed', () => {
   if (process.platform !== 'darwin') app.quit()
+})
+
+/**
+ * Take every agent process down with the app.
+ *
+ * Agent turns run in their own OS processes (src/main/supervisor.ts) precisely
+ * so one dying cannot kill the app — but that independence cuts both ways: a
+ * child has no way to notice its parent going away, because `parentPort` emits
+ * no `close`. Without this, quitting mid-run leaves a Node process holding an
+ * SDK subprocess, invisible in the UI the user just shut, until it finishes on
+ * its own or is killed from Task Manager.
+ *
+ * `will-quit` rather than `window-all-closed`: on macOS the app outlives its
+ * windows, and a session should survive the window being closed and reopened.
+ */
+app.on('will-quit', () => {
+  killAll()
 })

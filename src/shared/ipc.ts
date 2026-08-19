@@ -82,6 +82,48 @@ export type MoveRecord = {
   at: number
 }
 
+// ------------------------------------------------------------------ terminal
+
+/**
+ * One live agent process, as the supervisor sees it.
+ *
+ * `pid` is the point of the whole record: it is what makes "each agent is its
+ * own process" checkable by the user in Task Manager rather than a claim they
+ * have to take on faith.
+ */
+export type AgentProcess = {
+  sessionId: string
+  pid: number | null
+  startedAt: number
+  status: 'starting' | 'running' | 'awaiting-permission'
+  rss: number | null
+  heapUsed: number | null
+}
+
+/** How an agent process ended. `crash` is the one worth surfacing loudly. */
+export type AgentExit = {
+  sessionId: string
+  reason: 'done' | 'failed' | 'killed' | 'crash'
+  code: number | null
+  message: string
+  at: number
+}
+
+/**
+ * The outcome of a shell command.
+ *
+ * `denied` is separate from `ok` on purpose: a refused command and a failed one
+ * are different events, and collapsing them would let the panel print "command
+ * failed" at someone who declined it themselves.
+ */
+export type ShellResult = {
+  ok: boolean
+  denied: boolean
+  code: number | null
+  stdout: string
+  stderr: string
+}
+
 /** One edge of the graph view. Derived from [[wikilinks]], never authoritative. */
 export type VaultLink = { from: string; to: string }
 
@@ -308,6 +350,18 @@ export const CH = {
   settingsGet: 'settings:get',
   settingsPickVaultDir: 'settings:pick-vault-dir',
   settingsSetAppearance: 'settings:set-appearance',
+
+  terminalProcesses: 'terminal:processes',
+  terminalExits: 'terminal:exits',
+  terminalKill: 'terminal:kill',
+  /**
+   * THE ONLY CHANNEL IN THIS APP THAT REACHES THE OPERATING SYSTEM.
+   *
+   * Every call is gated by an explicit human approval showing the exact command
+   * — see the reasoning at the top of src/main/terminal.ts for why this one is
+   * gated on the ACT rather than on the actor, unlike everything in consent.ts.
+   */
+  terminalRun: 'terminal:run',
 } as const
 
 /** main -> renderer pushes. */
@@ -381,6 +435,20 @@ export type Api = {
     /** Marks the CURRENT network trusted/untrusted. Human action only. */
     trust(trusted: boolean): Promise<NetworkTrust>
     onChanged(cb: (t: NetworkTrust) => void): () => void
+  }
+  terminal: {
+    /** Live agent processes, one per running session. */
+    processes(): Promise<AgentProcess[]>
+    /** Recent exits, newest last. How a crash stays visible after the fact. */
+    exits(): Promise<AgentExit[]>
+    /** Terminate one agent process. False when there was nothing to kill. */
+    kill(sessionId: string): Promise<boolean>
+    /**
+     * Run a shell command in the vault directory, after the user approves the
+     * exact text. Never resolves to a run that was not approved — a refusal
+     * comes back as `denied`, not as an error.
+     */
+    run(command: string): Promise<ShellResult>
   }
   settings: {
     get(): Promise<AppSettings>

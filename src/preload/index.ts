@@ -34,6 +34,12 @@ const api: Api = {
     move: (from, to) => ipcRenderer.invoke(CH.vaultMove, from, to),
     undoMove: (id) => ipcRenderer.invoke(CH.vaultUndoMove, id),
   },
+  terminal: {
+    processes: () => ipcRenderer.invoke(CH.terminalProcesses),
+    exits: () => ipcRenderer.invoke(CH.terminalExits),
+    kill: (sessionId) => ipcRenderer.invoke(CH.terminalKill, sessionId),
+    run: (command) => ipcRenderer.invoke(CH.terminalRun, command),
+  },
   corner: {
     items: () => ipcRenderer.invoke(CH.cornerItems),
     decide: (d) => ipcRenderer.invoke(CH.cornerDecide, d),

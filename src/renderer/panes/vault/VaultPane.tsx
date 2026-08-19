@@ -23,10 +23,11 @@
  * snapshot. There is no auto-save, no debounce, no save-on-blur and no
  * save-on-unmount anywhere in this pane. Writes happen only on an explicit click.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVault } from './useVault.js'
 import { LeftRibbon, ribbonLabel } from './LeftRibbon.js'
 import { SidebarPlaceholder } from './SidebarPlaceholder.js'
+import { SidebarResizer } from './SidebarResizer.js'
 import { TerminalView } from './TerminalView.js'
 import { ExplorerHeader } from './ExplorerHeader.js'
 import { FolderTree } from './FolderTree.js'
@@ -71,6 +72,13 @@ import './split.css'
 
 export function VaultPane(): React.ReactElement {
   const vault = useVault()
+  /**
+   * The layout box. <SidebarResizer> writes `--vault-sidebar-w` onto it during
+   * a drag, and `.vault-sidebar` reads it — so a resize reflows two boxes and
+   * re-renders nothing. Deliberately not width state: this component owns the
+   * edit buffer and re-renders on every keystroke already.
+   */
+  const layoutRef = useRef<HTMLDivElement>(null)
   const [activeRibbon, setActiveRibbon] = useState('files')
   const [selectedNote, setSelectedNote] = useState<VaultNoteBody | null>(null)
   /** The live edit buffer. Never written to disk without an explicit click. */
@@ -662,7 +670,7 @@ export function VaultPane(): React.ReactElement {
 
   return (
     <div className="vault-pane">
-      <div className="vault-layout">
+      <div className="vault-layout" ref={layoutRef}>
         <LeftRibbon activeView={activeRibbon} onViewChange={setActiveRibbon} />
 
         <div className="vault-sidebar">
@@ -700,6 +708,8 @@ export function VaultPane(): React.ReactElement {
             onHelp={() => setHelpOpen(true)}
           />
         </div>
+
+        <SidebarResizer targetRef={layoutRef} />
 
         <div className="vault-main">
           <TabBar

@@ -1,0 +1,42 @@
+/**
+ * The sidebar drag handle. Imported by SidebarResizer.tsx.
+ *
+ * Values come from tokens.css only.
+ */
+
+/* A 1px border is the right LOOK and a terrible target — the usability rule of
+   thumb is ~6px, and people miss a hairline repeatedly before they find it. So
+   the handle is 6px wide and sits in the layout in place of the sidebar's own
+   right border, which app.css drops when the resizer is present. */
+.vault-sidebar-resizer {
+  flex: none;
+  width: 6px;
+  align-self: stretch;
+  cursor: col-resize;
+  background: var(--separator);
+  /* The drag must not select the tree text it passes over. `user-select` covers
+     the pointer path; the pointerdown handler's preventDefault covers the rest. */
+  user-select: none;
+  -webkit-user-select: none;
+  /* Nothing inside it should ever become the pointer target mid-drag. */
+  touch-action: none;
+}
+
+.vault-sidebar-resizer:hover,
+.vault-sidebar-resizer:active {
+  background: var(--accent);
+}
+
+/* Keyboard users get the same affordance the mouse gets on hover — this is the
+   whole visible evidence that arrow keys will do something here. */
+.vault-sidebar-resizer:focus-visible {
+  background: var(--accent);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .vault-sidebar-resizer {
+    background: var(--separator-opaque);
+  }
+}

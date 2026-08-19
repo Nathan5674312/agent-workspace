@@ -1156,6 +1156,36 @@ test('every PaneMenu has an anchor pair in menu.css', () => {
   }
 })
 
+/**
+ * The resizer's drag listeners must not outlive the drag.
+ *
+ * It adds window listeners on pointerdown, which is the pattern this pane has
+ * been bitten by before — hence the ResizeObserver and rAF checks above. A
+ * missed teardown here is invisible: the sidebar keeps resizing to a stale
+ * origin on the next stray pointer move, and every drag adds another pair.
+ *
+ * It is written this way on purpose rather than with `setPointerCapture`, which
+ * needs no teardown at all: capture does not retarget synthesized input, so a
+ * captured drag cannot be driven in a test, and an unverifiable mechanism is
+ * how the last bug shipped. The trade is a teardown obligation, so it is
+ * checked.
+ */
+test('the sidebar resizer removes every listener it adds', () => {
+  const code = stripComments(src('SidebarResizer.tsx'))
+  const added = [...code.matchAll(/window\.addEventListener\('([a-z]+)'/g)].map((m) => m[1])
+  const removed = [...code.matchAll(/window\.removeEventListener\('([a-z]+)'/g)].map((m) => m[1])
+  assert.ok(added.length > 0, 'the resizer no longer adds listeners — has it been rewritten?')
+  for (const ev of added) {
+    assert.ok(removed.includes(ev), `"${ev}" is added to window and never removed`)
+  }
+  // And a drag interrupted by unmount must still tear down.
+  assert.match(
+    code,
+    /useEffect\(\(\) => \(\) => .*\(\)/s,
+    'no unmount cleanup: a drag in flight when the pane closes leaks its listeners',
+  )
+})
+
 test('the conflict dialog still has no escape hatch after gaining an error prop', () => {
   const dialog = stripComments(src('ConflictDialog.tsx'))
   assert.doesNotMatch(dialog, /onCancel|onClose|onDismiss|onEscape/, 'dialog can be dismissed')

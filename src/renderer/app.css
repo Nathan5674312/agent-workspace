@@ -125,12 +125,17 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
 .vault-ribbon-icon--active { color: var(--label); background: var(--fill-selected); }
 
 .vault-sidebar {
-  width: 15rem; flex: none;
+  /* Set by SidebarResizer, which writes the variable straight onto
+     `.vault-layout` during a drag rather than through React state. The fallback
+     is the width this pane shipped with, so an untouched sidebar is unchanged. */
+  width: var(--vault-sidebar-w, 15rem); flex: none;
   display: flex; flex-direction: column; min-height: 0;
   background: var(--material-heavy);
   backdrop-filter: var(--blur-regular);
   -webkit-backdrop-filter: var(--blur-regular);
-  border-right: 1px solid var(--separator);
+  /* No border-right: `.vault-sidebar-resizer` is the seam now, and it has to be
+     the element that lights up on hover. A 1px border beside a 6px handle reads
+     as a double rule and leaves the thin one looking like the draggable edge. */
 }
 .vault-explorer-header {
   display: flex; align-items: center; gap: var(--space-1);

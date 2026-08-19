@@ -412,12 +412,24 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
        * as clearly lit because the resting state is a contrast BELOW it rather
        * than a near-absence.
        */
-      ctx.lineWidth = 0.9 / k
       for (const l of links) {
         const lit = dim && (l.source.id === hover!.id || l.target.id === hover!.id)
-        if (dim && !lit) continue // dimmed edges are simply not drawn — cheaper and cleaner
+        /**
+         * Dimmed edges are DRAWN, faintly, not skipped.
+         *
+         * They used to `continue`, which is cheaper but means the graph does
+         * not recede on hover so much as partly vanish: the structure you were
+         * orienting by disappears the instant you point at something, and you
+         * lose the sense of where in the vault the highlighted neighbourhood
+         * actually sits. Obsidian keeps its unhighlighted web visible behind
+         * the highlight, and that residue is what makes the focus read as a
+         * spotlight rather than a deletion.
+         *
+         * 0.07 against a resting 0.4 — present enough to hold the shape, far
+         * enough below the lit 0.95 that nothing competes with the answer.
+         */
         ctx.strokeStyle = lit ? COL.hot : COL.link
-        ctx.globalAlpha = lit ? 0.95 : 0.4
+        ctx.globalAlpha = lit ? 0.95 : dim ? 0.07 : 0.4
         // A lit edge is the thing being traced, so it also gets weight. At one
         // width the highlight relied on colour alone and thin Cream on Ink is
         // easy to lose against a dense cluster behind it.

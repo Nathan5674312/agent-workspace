@@ -31,7 +31,25 @@ import { ExplorerHeader } from './ExplorerHeader.js'
 import { FolderTree } from './FolderTree.js'
 import { VaultSwitcher } from './VaultSwitcher.js'
 import { TabBar, type VaultTab } from './TabBar.js'
-import { MainCanvas } from './MainCanvas.js'
+import { MainCanvas, type MainView } from './MainCanvas.js'
+
+/**
+ * What a tab is CALLED when it holds no note.
+ *
+ * A tab showing the database used to still read "New tab", because the name was
+ * only ever written by `loadNote` and a view change is not a note. A label that
+ * does not describe its own contents is the same lie as a button that does
+ * nothing. Once a tab has a note, the note's title wins — the view is then a
+ * lens on that note rather than the whole of it.
+ */
+const VIEW_LABEL: Record<MainView, string> = {
+  editor: 'New tab',
+  versions: 'Versions',
+  graph: 'Graph',
+  database: 'Database',
+  inbox: 'Inbox',
+  roadmap: 'Roadmap',
+}
 import { ConflictDialog } from './ConflictDialog.js'
 import { SettingsDialog } from './SettingsDialog.js'
 import { HelpDialog } from './HelpDialog.js'
@@ -58,9 +76,33 @@ export function VaultPane(): React.ReactElement {
   const [buffer, setBuffer] = useState('')
   const [backlinks, setBacklinks] = useState<string[]>([])
   const [tabs, setTabs] = useState<VaultTab[]>([
-    { id: 'default', name: 'Universal Vault', path: null },
+    { id: 'default', name: 'Universal Vault', path: null, view: 'editor' },
   ])
   const [activeTabId, setActiveTabId] = useState('default')
+  /**
+   * The SECOND canvas's view, when split. It is pane state and not tab state on
+   * purpose: the point of split is looking at two views of one note at once, so
+   * the right-hand pane is a lens, not a document. The left-hand view is the
+   * tab's and travels with it.
+   */
+  const [splitView, setSplitView] = useState<MainView>('graph')
+
+  /**
+   * The primary canvas's view IS the active tab's view. Derived, not mirrored:
+   * a second copy in state would drift the moment a tab switch raced a view
+   * click, and there is no state here that the tabs array does not already hold.
+   */
+  const view: MainView = tabs.find((t) => t.id === activeTabId)?.view ?? 'editor'
+
+  const handleViewChange = (next: MainView) => {
+    setTabs((ts) =>
+      ts.map((t) =>
+        t.id === activeTabId
+          ? { ...t, view: next, name: t.path ? t.name : VIEW_LABEL[next] }
+          : t,
+      ),
+    )
+  }
   /**
    * Two canvases over one note and one buffer, differing only in view mode —
    * which <MainCanvas> already owns locally, so this is a boolean rather than a
@@ -489,7 +531,7 @@ export function VaultPane(): React.ReactElement {
       return
     }
     const newId = `tab-${Date.now()}`
-    setTabs([...tabs, { id: newId, name: 'New tab', path: null }])
+    setTabs([...tabs, { id: newId, name: 'New tab', path: null, view: 'editor' }])
     setActiveTabId(newId)
     setSelectedNote(null)
     setBuffer('')
@@ -507,7 +549,35 @@ export function VaultPane(): React.ReactElement {
   const handleTabChange = async (id: string) => {
     const tab = tabs.find((t) => t.id === id)
     if (!tab) return
-    if (tab.path && !(await openNote(tab.path, id))) return
+    if (tab.path) {
+      if (!(await openNote(tab.path, id))) return
+    } else {
+      /**
+       * A tab holding no note must SHOW no note.
+       *
+       * This branch used to be absent: `if (tab.path && ...)` simply fell
+       * through to `setActiveTabId`, leaving the previous tab's note on screen.
+       * That is why a new tab looked like a copy of the one before it, and why
+       * switching back appeared to change nothing — both tabs were rendering
+       * the same pane-wide `selectedNote`.
+       *
+       * The dirty confirm is repeated rather than shared with `loadNote`,
+       * because there is no note to load here and nothing else would ask.
+       */
+      if (
+        isDirty &&
+        !window.confirm(
+          `"${selectedNote?.title ?? 'This note'}" has unsaved edits that will be lost. Discard them and switch tabs?`,
+        )
+      ) {
+        return
+      }
+      setSelectedNote(null)
+      setBuffer('')
+      setBacklinks([])
+      setDiscarded(null)
+      setOpenError(null)
+    }
     setActiveTabId(id)
   }
 
@@ -564,7 +634,7 @@ export function VaultPane(): React.ReactElement {
    * therefore the note and the buffer, is identical by construction rather than
    * by remembering to keep two prop lists in step.
    */
-  const canvas = (
+  const canvasWith = (v: MainView, onChange: (v: MainView) => void) => (
     <MainCanvas
       note={selectedNote}
       text={buffer}
@@ -584,6 +654,8 @@ export function VaultPane(): React.ReactElement {
       onOpenNote={openNote}
       onOpenWikilink={handleOpenWikilink}
       discarded={discarded}
+      view={v}
+      onViewChange={onChange}
     />
   )
 
@@ -651,8 +723,8 @@ export function VaultPane(): React.ReactElement {
               split does not remount the canvas that was already there and throw
               away its view mode and whatever it had fetched. */}
           <div className={split ? 'vault-canvas-row vault-canvas-row--split' : 'vault-canvas-row'}>
-            {canvas}
-            {split ? canvas : null}
+            {canvasWith(view, handleViewChange)}
+            {split ? canvasWith(splitView, setSplitView) : null}
           </div>
 
           {/* Sibling of the canvas, not a child of it: the credit belongs to

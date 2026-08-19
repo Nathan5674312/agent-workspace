@@ -15,11 +15,19 @@
 import { ChevronDown, Columns2, EllipsisVertical } from 'lucide-react'
 import { PaneMenu, PaneMenuItem } from './PaneMenu.js'
 
+import type { MainView } from './MainCanvas.js'
+
 export interface VaultTab {
   id: string
   name: string
   /** The note this tab is showing. `null` on a tab opened but not yet used. */
   path: string | null
+  /**
+   * The view this tab was last on. Restored on switch, so a tab that was
+   * showing the graph comes back to the graph rather than to whatever the
+   * previous tab was doing.
+   */
+  view: MainView
 }
 
 export interface TabBarProps {

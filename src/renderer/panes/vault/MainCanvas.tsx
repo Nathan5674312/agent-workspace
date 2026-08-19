@@ -17,6 +17,12 @@ import { ArrowLeft, ArrowRight, Ellipsis } from 'lucide-react'
  * The editor unmounts when the graph is shown. That is only safe because the
  * edit buffer is owned by <VaultPane>; nothing note-related may be stored here.
  */
+/**
+ * Which view the canvas is showing. Exported because a TAB owns one: a tab that
+ * cannot remember it was on the database is a label, not a tab.
+ */
+export type MainView = 'editor' | 'versions' | 'graph' | 'database' | 'inbox' | 'roadmap'
+
 export interface MainCanvasProps {
   note: VaultNoteBody | null
   text: string
@@ -40,6 +46,13 @@ export interface MainCanvasProps {
   onForward: () => void
   canGoBack: boolean
   canGoForward: boolean
+  /**
+   * LIFTED to <VaultPane>, which owns the tabs. While this lived here it was
+   * pane-wide: every tab showed whatever view the canvas happened to be on, so
+   * switching tabs could not restore where you were.
+   */
+  view: MainView
+  onViewChange: (view: MainView) => void
 }
 
 export function MainCanvas({
@@ -61,10 +74,9 @@ export function MainCanvas({
   onForward,
   canGoBack,
   canGoForward,
+  view,
+  onViewChange,
 }: MainCanvasProps) {
-  const [view, setView] = useState<
-    'editor' | 'versions' | 'graph' | 'database' | 'inbox' | 'roadmap'
-  >('editor')
   const [graph, setGraph] = useState<VaultGraph | null>(null)
   const [loadingGraph, setLoadingGraph] = useState(false)
   const [graphError, setGraphError] = useState<string | null>(null)
@@ -88,7 +100,7 @@ export function MainCanvas({
    * knows when it is stale — instead of a permanent one up here that never did.
    */
   const handleSwitchToGraph = async () => {
-    setView('graph')
+    onViewChange('graph')
     try {
       setLoadingGraph(true)
       setGraphError(null)
@@ -118,7 +130,7 @@ export function MainCanvas({
    * do not read this as "something upstream is caching for me".
    */
   const handleSwitchToDatabase = async () => {
-    setView('database')
+    onViewChange('database')
     try {
       setLoadingNotes(true)
       setNotesError(null)
@@ -148,7 +160,7 @@ export function MainCanvas({
    */
   const openPath = note?.path
   useEffect(() => {
-    if (openPath) setView('editor')
+    if (openPath) onViewChange('editor')
   }, [openPath])
 
   /**
@@ -157,7 +169,7 @@ export function MainCanvas({
    * looked. A cached inbox is a lie about the present.
    */
   const handleSwitchToInbox = async () => {
-    setView('inbox')
+    onViewChange('inbox')
     try {
       setLoadingInbox(true)
       setInboxError(null)
@@ -243,7 +255,7 @@ export function MainCanvas({
       <div className="vault-view-controls">
         <button
           className={`vault-view-button ${view === 'editor' ? 'active' : ''}`}
-          onClick={() => setView('editor')}
+          onClick={() => onViewChange('editor')}
         >
           Editor
         </button>
@@ -253,7 +265,7 @@ export function MainCanvas({
             this needs no loading state up here. */}
         <button
           className={`vault-view-button ${view === 'versions' ? 'active' : ''}`}
-          onClick={() => setView('versions')}
+          onClick={() => onViewChange('versions')}
         >
           Versions
         </button>
@@ -289,7 +301,7 @@ export function MainCanvas({
             is about the app, not about the vault. */}
         <button
           className={`vault-view-button ${view === 'roadmap' ? 'active' : ''}`}
-          onClick={() => setView('roadmap')}
+          onClick={() => onViewChange('roadmap')}
         >
           Roadmap
         </button>
@@ -314,7 +326,7 @@ export function MainCanvas({
             // Inbox/ until something actually moves it.
             onOpenNote={async (path) => {
               const opened = await onOpenNote(path)
-              if (opened) setView('editor')
+              if (opened) onViewChange('editor')
               return opened
             }}
           />
@@ -330,7 +342,7 @@ export function MainCanvas({
               // resolves false when the user declined a discard prompt or a
               // conflict dialog is up, and switching anyway drags them out of
               // the table they were reading into an editor they refused.
-              if (await onOpenNote(path)) setView('editor')
+              if (await onOpenNote(path)) onViewChange('editor')
             }}
           />
         ) : view === 'editor' ? (
@@ -357,7 +369,7 @@ export function MainCanvas({
               // happen — the click reads as broken even though it worked.
               // Conditional for the same reason as the table: a refused open
               // must not move the user.
-              if (await onOpenNote(path)) setView('editor')
+              if (await onOpenNote(path)) onViewChange('editor')
             }}
           />
         )}

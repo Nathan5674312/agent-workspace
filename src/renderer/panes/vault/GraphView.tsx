@@ -97,9 +97,8 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       css.getPropertyValue(name).trim() || fallback
     const COL = {
       link: token('--label-tertiary', 'GrayText'),
-      node: token('--graph-focus', 'CanvasText'),
-      near: token('--accent', 'CanvasText'),
-      hot: token('--graph-focus', 'Highlight'),
+      node: token('--label-secondary', 'CanvasText'),
+      hot: token('--accent', 'Highlight'),
       label: token('--label-secondary', 'CanvasText'),
       /** The window ground, for refilling the erased disc under each node. */
       ground: token('--bg-app', 'Canvas'),
@@ -517,15 +516,21 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
        *   neighbour   --label   (Sand)   one step down, still clearly present
        *   rest        --label-secondary at 0.09, effectively gone
        *
-       * All three tiers are LUMINANCE, no hue anywhere — which is what §4b said
-       * to do, and the reason the earlier accent-hue experiments were a detour.
+       * TWO states, not three: highlighted, and not.
        *
-       * The problem was never that the ramp lacked range. It was that the ramp
-       * stopped at Cream and the focus was already spending it, so neighbours
-       * had nothing left above them and sat at the same tone as the graph you
-       * were ignoring. Adding one rung ABOVE Cream fixes it without a hue:
-       * white takes the focus, Cream drops to the neighbourhood, and the tiers
-       * separate on brightness alone.
+       * Everything the hover is answering about — the node under the cursor,
+       * its neighbours, and the edges between them — is drawn in ONE tone,
+       * `--accent` (Cream), the brightest thing in the supplied palette.
+       * Everything else stays the ordinary `--label-secondary` and falls to
+       * 0.09.
+       *
+       * Earlier attempts split the highlight into a focus tone and a separate
+       * neighbour tone, first with a hue and then with white above Cream. Both
+       * were solving a problem that does not exist: at this dot size a viewer
+       * does not read three shades as a hierarchy, they read them as noise. One
+       * highlight colour says "this is the answer" in a single glance, and the
+       * focus is still identifiable inside it by being larger and by owning
+       * every lit edge.
        */
       for (const n of nodes) {
         const focus = n.id === hover?.id || pressed?.id === n.id

@@ -62,7 +62,7 @@ export const ROADMAP: FeatureGroup[] = [
         surface: 'ribbon:files',
         note: 'Folder tree follows Windows junctions and terminates on link cycles.',
       },
-      { label: 'Clean modern UI (Notion-level polish)', status: 'partial', note: '16 controls are still inert; see docs/buttons/INDEX.md.' },
+      { label: 'Clean modern UI (Notion-level polish)', status: 'partial', note: 'No inert controls remain. Audited across every .tsx in src/renderer on 2026-08-18: 66 wired, 0 disabled, 4 read-only textareas that are read-only by design. The nine listed in docs/buttons/ were built; the ribbon icons were never inert once SidebarPlaceholder landed, and two of them (terminal, daily notes) are now real panels. Still partial for the honest reason: five ribbon icons show a panel naming an unbuilt feature rather than the feature.' },
       {
         label: 'Offline access',
         status: 'partial',
@@ -122,7 +122,7 @@ export const ROADMAP: FeatureGroup[] = [
     subtitle: 'your edge',
     features: [
       { label: 'AI that actually knows your content', status: 'planned', surface: 'ribbon:terminal' },
-      { label: 'Agents that read, write, and act on the vault', status: 'planned', surface: 'ribbon:terminal', note: 'Five claude:* IPC channels are declared and unimplemented.' },
+      { label: 'Agents that read, write, and act on the vault', status: 'planned', surface: 'ribbon:terminal', note: 'All five claude:* channels are implemented, and each turn runs in its own OS process so one crashing cannot take the app or the other sessions down. Still planned because the agent can only READ: the tool list is hard-coded to Read/Glob/Grep in claude.ts, so it cannot yet write or act on the vault.' },
       { label: 'Contextual retrieval, not just keyword search', status: 'planned', surface: 'ribbon:search' },
       { label: 'Autonomous organization and curation', status: 'planned', surface: 'Inbox tab', note: 'The Inbox already shows agent-proposed filing; nothing acts on it.' },
     ],

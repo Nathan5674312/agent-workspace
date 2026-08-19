@@ -97,7 +97,7 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       css.getPropertyValue(name).trim() || fallback
     const COL = {
       link: token('--label-tertiary', 'GrayText'),
-      node: token('--label-secondary', 'CanvasText'),
+      node: token('--graph-focus', 'CanvasText'),
       near: token('--accent', 'CanvasText'),
       hot: token('--graph-focus', 'Highlight'),
       label: token('--label-secondary', 'CanvasText'),
@@ -365,7 +365,18 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
        * which is a surface you push into; this is an object you take hold of,
        * and the two want opposite signs.
        */
-      const drawRadius = (n: Node) => radius(n) * (pressed?.id === n.id ? 1.35 : 1)
+      /**
+       * The focus grows, because colour can no longer tell it apart.
+       *
+       * Nodes rest at the top of the ramp now, so the node under the cursor
+       * cannot be brighter than its neighbours — there is nothing above white.
+       * Size takes over the job: 1.18 on hover reads as "this one" without the
+       * lurch of the 1.35 press, which stays reserved for the physical act of
+       * grabbing.
+       */
+      const drawRadius = (n: Node) =>
+        radius(n) *
+        (pressed?.id === n.id ? 1.35 : n.id === hover?.id ? 1.18 : 1)
 
       /**
        * The halos, FIRST — before the links, not after the erase.
@@ -521,7 +532,11 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         const near = dim && neighbours.has(n.id)
         const lit = !dim || focus || near
         ctx.globalAlpha = lit ? 1 : 0.09
-        ctx.fillStyle = focus ? COL.hot : near ? COL.near : COL.node
+        // One tone for every node that is lit. The neighbourhood is identified
+        // by still BEING there while the rest falls away, and the focus by
+        // being larger and by owning every lit edge — not by three shades of
+        // the same white, which at this dot size nobody can resolve anyway.
+        ctx.fillStyle = focus || near ? COL.hot : COL.node
         ctx.beginPath()
         ctx.arc(n.x!, n.y!, drawRadius(n), 0, Math.PI * 2)
         ctx.fill()

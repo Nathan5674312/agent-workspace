@@ -267,7 +267,27 @@ function SplitFlapText({ phrases }: { phrases: string[] }) {
  * Kept to A–Z and spaces: CHARSET is the alphabet, so a digit or punctuation
  * would land on a tile that never tumbled to it and break the illusion.
  */
-const PHRASES = ['SYSTEMS READY', 'READING NOTES', 'AGENT WORKSPACE']
+const PHRASES = [
+  // The board is a mechanism and the fun is not knowing which one you get, so
+  // these are a grab bag rather than a sequence. Nothing here reports real
+  // state — the tree either resolved or it did not, and a splash that claimed
+  // 'NOTES INDEXED' while indexing had failed would be lying decoratively.
+  'AGENT WORKSPACE',
+  'SYSTEMS READY',
+  'READING NOTES',
+  'LINKS RESOLVED',
+  'NOTES INDEXED',
+  'VAULT ONLINE',
+  'WELCOME BACK',
+  'STANDING BY',
+  'GOOD TO GO',
+  'FINISHED',
+  'MOUNTED',
+  'ALL SET',
+  'LOADED',
+  'READY',
+  'DONE',
+]
 
 /**
  * Holds the boot screen over the app until the vault tree resolves.

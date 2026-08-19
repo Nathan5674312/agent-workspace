@@ -98,6 +98,7 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
     const COL = {
       link: token('--label-tertiary', 'GrayText'),
       node: token('--label-secondary', 'CanvasText'),
+      near: token('--label', 'CanvasText'),
       hot: token('--accent', 'Highlight'),
       label: token('--label-secondary', 'CanvasText'),
       /** The window ground, for refilling the erased disc under each node. */
@@ -417,6 +418,10 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         if (dim && !lit) continue // dimmed edges are simply not drawn — cheaper and cleaner
         ctx.strokeStyle = lit ? COL.hot : COL.link
         ctx.globalAlpha = lit ? 0.95 : 0.4
+        // A lit edge is the thing being traced, so it also gets weight. At one
+        // width the highlight relied on colour alone and thin Cream on Ink is
+        // easy to lose against a dense cluster behind it.
+        ctx.lineWidth = (lit ? 1.6 : 0.9) / k
         ctx.beginPath()
         ctx.moveTo(l.source.x!, l.source.y!)
         ctx.lineTo(l.target.x!, l.target.y!)
@@ -476,10 +481,30 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         ctx.fill()
       }
 
+      /**
+       * THREE tiers on hover, not two.
+       *
+       * This used to be lit-or-dim: the hovered node went to `--accent` and
+       * everything else it touched stayed exactly the colour it already was. So
+       * the neighbourhood you were asking about looked identical to the graph
+       * you were ignoring, and the answer to "what is this connected to" was
+       * carried entirely by what had FADED rather than by what had lit up.
+       *
+       *   focus       --accent  (Cream)  the node under the cursor
+       *   neighbour   --label   (Sand)   one step down, still clearly present
+       *   rest        --label-secondary at 0.09, effectively gone
+       *
+       * Obsidian does this with a hue shift to purple. This palette is
+       * monochrome by decision (tokens.css §4b) and gets the same separation out
+       * of the luminance ramp, which is what that decision says to use. The ramp
+       * was already there; only the top of it was being spent.
+       */
       for (const n of nodes) {
-        const lit = !dim || n.id === hover!.id || neighbours.has(n.id)
-        ctx.globalAlpha = lit ? 1 : 0.18
-        ctx.fillStyle = n.id === hover?.id || pressed?.id === n.id ? COL.hot : COL.node
+        const focus = n.id === hover?.id || pressed?.id === n.id
+        const near = dim && neighbours.has(n.id)
+        const lit = !dim || focus || near
+        ctx.globalAlpha = lit ? 1 : 0.09
+        ctx.fillStyle = focus ? COL.hot : near ? COL.near : COL.node
         ctx.beginPath()
         ctx.arc(n.x!, n.y!, drawRadius(n), 0, Math.PI * 2)
         ctx.fill()
@@ -494,12 +519,17 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       // were actually pointing at. The neighbours are already identified by
       // being lit while everything else dims; they do not also need naming.
       ctx.globalAlpha = 1
-      ctx.fillStyle = COL.label
-      ctx.font = `${11 / k}px ${css.fontFamily}`
       ctx.textAlign = 'center'
       if (hover) {
-        ctx.fillText(hover.label, hover.x!, hover.y! - radius(hover) - 4 / k)
+        // The one name you asked for, so it is allowed to be the brightest
+        // thing on the canvas. At `--label-secondary` and 11px it read as just
+        // another label while the node under it had gone to `--accent`.
+        ctx.fillStyle = COL.hot
+        ctx.font = `${13 / k}px ${css.fontFamily}`
+        ctx.fillText(hover.label, hover.x!, hover.y! - radius(hover) - 6 / k)
       } else {
+        ctx.fillStyle = COL.label
+        ctx.font = `${11 / k}px ${css.fontFamily}`
         // Progressive, by degree — see `labelZoom`. Hubs name themselves while
         // the whole graph is still in frame; leaves wait until you are actually
         // reading that corner of it.

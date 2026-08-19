@@ -29,6 +29,7 @@ import { LeftRibbon, ribbonLabel } from './LeftRibbon.js'
 import { SidebarPlaceholder } from './SidebarPlaceholder.js'
 import { SidebarResizer } from './SidebarResizer.js'
 import { TerminalView } from './TerminalView.js'
+import { DailyNotesView } from './DailyNotesView.js'
 import { ExplorerHeader } from './ExplorerHeader.js'
 import { FolderTree } from './FolderTree.js'
 import { VaultSwitcher } from './VaultSwitcher.js'
@@ -691,6 +692,14 @@ export function VaultPane(): React.ReactElement {
                 onToggle={handleToggleFolder}
               />
             </>
+          ) : activeRibbon === 'calendar' ? (
+            /* Daily notes. The tree is the source for which days exist, so this
+               reads the same data the explorer draws rather than asking again. */
+            <DailyNotesView
+              tree={vault.tree}
+              onOpenNote={(path) => void openNote(path)}
+              onCreated={vault.reload}
+            />
           ) : activeRibbon === 'terminal' ? (
             /* The first ribbon icon to graduate from a placeholder to a real
                panel. The rest still describe themselves; see SidebarPlaceholder. */

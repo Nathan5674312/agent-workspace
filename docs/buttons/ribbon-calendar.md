@@ -2,8 +2,19 @@
 tier: DECIDE
 control: The calendar "Daily notes" icon in the left ribbon
 location: src/renderer/panes/vault/LeftRibbon.tsx:32 (definition), :41-52 (render)
-status: NOT STARTED
+status: DONE
 ---
+
+> **✅ BUILT 2026-08-18.** The scope question this file says a human must answer
+> was answered by LOOKING, not by guessing: the vault has `Daily/YYYY-MM-DD.md`
+> plus a `Daily/_Template.md`, and no date-named notes anywhere else. So the
+> panel reads the folder and the filename shape off the vault tree, marks days
+> that have notes, and creates a missing day from that template — which is the
+> "does clicking a date CREATE one" question answered yes, because that is the
+> point of daily notes. See `src/renderer/panes/vault/DailyNotesView.tsx` and
+> `src/shared/daily.ts`. The Obsidian-duplication argument below still stands
+> and is worth reading before this grows further.
+
 
 > **⚠ STALE IN ONE PLACE (checked 2026-08-18).** Everything below about the
 > sidebar going blank when this icon is clicked is fixed. `activeRibbon` used

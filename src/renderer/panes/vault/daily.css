@@ -1,0 +1,159 @@
+/**
+ * Daily notes panel. Imported by DailyNotesView.tsx.
+ *
+ * Built for the SIDEBAR, which is narrow — the grid has to stay readable at the
+ * 180px minimum the resizer allows, so the cells are square-ish and carry a
+ * number and nothing else. Values come from tokens.css only.
+ */
+
+.daily-view {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-3);
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.daily-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+}
+
+.daily-month {
+  flex: 1;
+  text-align: center;
+  font-size: var(--text-base);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
+  color: var(--label);
+  /* The month name is the widest thing here and must not force the panel wider
+     than the sidebar the user chose. */
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.daily-nav {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  padding: var(--space-1);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--label-secondary);
+  cursor: default;
+}
+
+.daily-nav:hover {
+  background: var(--fill-hover);
+  color: var(--label);
+}
+
+.daily-grid {
+  display: grid;
+  grid-template-columns: repeat(7, minmax(0, 1fr));
+  gap: var(--space-1);
+}
+
+.daily-weekday {
+  text-align: center;
+  font-size: var(--text-xs);
+  color: var(--label-quaternary);
+  padding-bottom: var(--space-1);
+}
+
+/* `aspect-ratio` rather than a fixed height: the cells then track whatever
+   width the sidebar has been dragged to, instead of going oblong. */
+.daily-cell {
+  aspect-ratio: 1;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: var(--radius-sm);
+  font-size: var(--text-xs);
+  font-family: inherit;
+}
+
+.daily-cell--blank {
+  visibility: hidden;
+}
+
+.daily-day {
+  background: transparent;
+  border: none;
+  color: var(--label-tertiary);
+  cursor: default;
+  position: relative;
+}
+
+.daily-day:hover:not(:disabled) {
+  background: var(--fill-hover);
+  color: var(--label);
+}
+
+.daily-day:disabled {
+  color: var(--label-quaternary);
+}
+
+/* A day that HAS a note. Filled, not dotted: at this size a dot is a stray
+   pixel, and the whole point of the grid is telling written days from empty
+   ones at a glance. */
+.daily-day--has {
+  background: var(--material-light);
+  color: var(--label);
+  font-weight: var(--weight-medium);
+}
+
+.daily-day--has:hover:not(:disabled) {
+  background: var(--fill-active);
+}
+
+/* Today is a ring, so it can coexist with the filled state above rather than
+   overriding it — the common case is that today both exists and is today. */
+.daily-day--today {
+  outline: 1px solid var(--accent);
+  outline-offset: -1px;
+  color: var(--label);
+}
+
+.daily-today {
+  padding: var(--space-2);
+  background: var(--material-light);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-md);
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-sm);
+  cursor: default;
+}
+
+.daily-today:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+
+.daily-today:disabled {
+  color: var(--label-tertiary);
+}
+
+.daily-hint,
+.daily-error {
+  margin: 0;
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+}
+
+.daily-hint {
+  color: var(--label-tertiary);
+}
+
+.daily-error {
+  color: var(--danger);
+}
+
+.daily-hint code {
+  font-family: var(--font-mono);
+}

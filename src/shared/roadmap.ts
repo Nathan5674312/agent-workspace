@@ -128,6 +128,17 @@ export const ROADMAP: FeatureGroup[] = [
     ],
   },
   {
+    title: 'Daily practice',
+    features: [
+      {
+        label: 'Daily notes with a month calendar',
+        status: 'built',
+        surface: 'ribbon:calendar',
+        note: 'Reads Daily/YYYY-MM-DD.md off the vault tree rather than a configured format, marks the days that have notes, and creates a missing day from Daily/_Template.md following the instruction that template itself carries. Dates are local, so a note written late in the evening is not filed as yesterday. Not built: a template picker, or any format other than the one this vault uses.',
+      },
+    ],
+  },
+  {
     title: 'Nice to haves',
     features: [
       { label: 'API / plugin ecosystem', status: 'planned', surface: 'ribbon:plugins' },

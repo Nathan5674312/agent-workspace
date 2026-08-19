@@ -40,6 +40,14 @@ export interface PaneMenuProps {
   /** Accessible name and tooltip. Icon-only buttons have nothing else. */
   label: string
   icon: ReactNode
+  /**
+   * Visible text in the trigger, before the icon. Icon-only menus leave this
+   * out; a select-style menu shows its current value here, which is the whole
+   * difference between the two shapes.
+   */
+  text?: string
+  /** Extra class on the PANEL, for alignment variants. See menu.css. */
+  panelClass?: string
   /** True when there is nothing for the menu to act on at all. */
   disabled?: boolean
   children: ReactNode
@@ -50,6 +58,8 @@ export function PaneMenu({
   className,
   label,
   icon,
+  text,
+  panelClass,
   disabled,
   children,
 }: PaneMenuProps) {
@@ -71,12 +81,13 @@ export function PaneMenu({
         aria-expanded={open}
         title={label}
       >
+        {text}
         {icon}
       </button>
       <div
         id={id}
         popover="auto"
-        className="pane-menu"
+        className={panelClass ? `pane-menu ${panelClass}` : 'pane-menu'}
         role="menu"
         aria-label={label}
         onToggle={(e) => setOpen(e.currentTarget.matches(':popover-open'))}

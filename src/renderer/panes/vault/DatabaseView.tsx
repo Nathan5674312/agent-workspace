@@ -28,6 +28,7 @@ import {
   type TypeFamily,
   type VaultNoteMeta,
 } from '../../../shared/notemeta.js'
+import { SelectMenu } from './SelectMenu.js'
 
 /**
  * The database view — the Notion half of the app.
@@ -396,19 +397,20 @@ function CalendarView({
           <ChevronRight size={14} aria-hidden="true" />
         </button>
         {/* Jumping to a month that HAS something beats paging through empties. */}
-        <select
+        <SelectMenu
+          id="db-cal-jump-menu"
+          label="Jump to a month with notes"
           className="db-cal-jump"
-          value={months.includes(current) ? current : ''}
-          onChange={(e) => e.target.value && setCursor(e.target.value)}
-          aria-label="Jump to a month with notes"
-        >
-          {!months.includes(current) && <option value="">{current} (empty)</option>}
-          {months.map((mo) => (
-            <option key={mo} value={mo}>
-              {mo} · {[...byDay.entries()].filter(([k]) => k.startsWith(mo)).reduce((a, [, v]) => a + v.length, 0)}
-            </option>
-          ))}
-        </select>
+          value={current}
+          options={[
+            ...(months.includes(current) ? [] : [{ value: current, label: `${current} (empty)` }]),
+            ...months.map((mo) => ({
+              value: mo,
+              label: `${mo} · ${[...byDay.entries()].filter(([k]) => k.startsWith(mo)).reduce((a, [, v]) => a + v.length, 0)}`,
+            })),
+          ]}
+          onChange={setCursor}
+        />
       </div>
 
       <div className="db-cal-grid" role="grid" aria-label={`${MONTH_NAMES[m - 1]} ${y}`}>
@@ -626,19 +628,16 @@ export function DatabaseView({
           />
         </label>
 
-        <label className="db-control">
+        <span className="db-control">
           Group by
-          <select
+          <SelectMenu
+            id="db-group-by-menu"
+            label="Group by"
             value={groupBy}
-            onChange={(e) => setGroupBy(e.target.value as GroupKey)}
-          >
-            {GROUPS.map((g) => (
-              <option key={g.key} value={g.key}>
-                {g.label}
-              </option>
-            ))}
-          </select>
-        </label>
+            options={GROUPS.map((g) => ({ value: g.key, label: g.label }))}
+            onChange={setGroupBy}
+          />
+        </span>
 
         {/* Reachability is the one column Notion has no answer for, so it gets
             a control rather than being buried as a column you have to sort. */}

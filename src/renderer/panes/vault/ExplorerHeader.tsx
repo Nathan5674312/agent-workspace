@@ -14,6 +14,7 @@
  * than one that admits it cannot act.
  */
 import { Minus } from 'lucide-react'
+import { SelectMenu } from './SelectMenu.js'
 import type { TreeSort } from './helpers.js'
 
 export interface ExplorerHeaderProps {
@@ -85,19 +86,14 @@ export function ExplorerHeader({
       {/* Controlled, so the tree and the dropdown cannot disagree. The sort
           itself happens one level up in <VaultPane>, against a COPY of the tree
           — <FolderTree> holds no state and simply renders what it is handed. */}
-      <select
+      <SelectMenu
+        id="vault-sort-menu"
         className="vault-sort-select"
+        label="Sort the folder tree"
         value={sort}
-        onChange={(e) => onSortChange(e.target.value as TreeSort)}
-        aria-label="Sort the folder tree"
-        title="Sort the folder tree"
-      >
-        {SORTS.map((s) => (
-          <option key={s.value} value={s.value}>
-            {s.label}
-          </option>
-        ))}
-      </select>
+        options={SORTS}
+        onChange={onSortChange}
+      />
     </div>
   )
 }

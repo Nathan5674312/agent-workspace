@@ -1136,10 +1136,22 @@ test('no ungated rule sets display on the popover panel', () => {
 test('every PaneMenu has an anchor pair in menu.css', () => {
   const css = readFileSync(join(PANE, 'menu.css'), 'utf8')
   const ids = new Set()
-  for (const [, code] of all()) {
-    for (const m of stripComments(code).matchAll(/<PaneMenu\b[\s\S]*?>/g)) {
+  for (const [name, code] of all()) {
+    // <SelectMenu> is a <PaneMenu> wearing a select's clothes, so its call
+    // sites own popover ids too and need anchors just as much.
+    for (const m of stripComments(code).matchAll(/<(?:PaneMenu|SelectMenu)\b[\s\S]*?>/g)) {
       const id = /id="([^"]+)"/.exec(m[0])
-      assert.ok(id, `a PaneMenu has no literal id: ${m[0].slice(0, 80)}`)
+      if (!id) {
+        // A WRAPPER forwards `id={id}` from its own caller; the literal lives
+        // there and is checked there. Anything else with no literal id is the
+        // mistake this test exists for.
+        assert.match(
+          m[0],
+          /id=\{id\}/,
+          `${name} has a menu with neither a literal id nor a forwarded one: ${m[0].slice(0, 80)}`,
+        )
+        continue
+      }
       ids.add(id[1])
     }
   }

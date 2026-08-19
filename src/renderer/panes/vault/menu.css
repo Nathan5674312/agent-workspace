@@ -123,6 +123,50 @@
   }
 }
 
+/* -------------------------------------------------------------- select menu
+
+   The trigger for <SelectMenu>: a themed stand-in for a <select>, because the
+   list a real one opens is drawn by the OS and cannot be styled here (Chromium
+   130 has no `appearance: base-select`). It carries the current value as text
+   and a chevron, which is what makes it read as a select rather than a button. */
+.select-menu {
+  display: inline-flex;
+  align-items: center;
+  gap: var(--space-1);
+  padding: var(--space-1) var(--space-2);
+  background: var(--material-light);
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--label);
+  font: inherit;
+  cursor: default;
+}
+
+.select-menu:hover {
+  background: var(--fill-hover);
+}
+
+/* The chevron sits at the trailing edge and dims, so the VALUE is what the eye
+   lands on. */
+.select-menu svg {
+  color: var(--label-tertiary);
+  flex: none;
+}
+
+/* Left-aligned under the trigger. The icon menus in the tab bar hang off
+   controls at the right end of a toolbar and align to their right edge; a
+   select reads down its own left edge instead. */
+.pane-menu--start {
+  position-area: block-end span-inline-end;
+}
+
+/* The chosen row. Weight, not a tick: a check glyph needs a reserved column at
+   every row or the labels shift when the selection moves. */
+.pane-menu-item [aria-current='true'] {
+  font-weight: var(--weight-semibold);
+  color: var(--label);
+}
+
 /* ---------------------------------------------------------------- anchors
 
    One pair per menu: `anchor-name` on the invoking button, `position-anchor`
@@ -158,4 +202,25 @@
 }
 #vault-note-options-menu {
   position-anchor: --vault-note-options-menu;
+}
+
+[popovertarget='db-group-by-menu']:not(.pane-menu-item) {
+  anchor-name: --db-group-by-menu;
+}
+#db-group-by-menu {
+  position-anchor: --db-group-by-menu;
+}
+
+[popovertarget='db-cal-jump-menu']:not(.pane-menu-item) {
+  anchor-name: --db-cal-jump-menu;
+}
+#db-cal-jump-menu {
+  position-anchor: --db-cal-jump-menu;
+}
+
+[popovertarget='vault-sort-menu']:not(.pane-menu-item) {
+  anchor-name: --vault-sort-menu;
+}
+#vault-sort-menu {
+  position-anchor: --vault-sort-menu;
 }

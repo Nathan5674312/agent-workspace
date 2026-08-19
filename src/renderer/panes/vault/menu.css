@@ -39,9 +39,6 @@
 
   min-width: 11rem;
   max-width: 20rem;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-1);
 
   background: var(--bg-elevated);
   border-radius: var(--radius-md);
@@ -49,6 +46,24 @@
   color: var(--label);
   font-family: var(--font-ui);
   font-size: var(--text-base);
+}
+
+/* `display` lives HERE, not on `.pane-menu` above.
+
+   The UA sheet hides a closed popover with `[popover]:not(:popover-open) {
+   display: none }` — but that is a USER-AGENT rule, and any author rule beats
+   it. An unconditional `display: flex` on `.pane-menu` therefore painted both
+   menus permanently: visible at boot with nothing clicked, and un-dismissable,
+   because `:popover-open` was false the whole time so light-dismiss had no
+   open popover to close.
+
+   Same defect `settings.css` already documents for `<dialog>`, which gates on
+   `[open]`. A popover has no `open` attribute; `:popover-open` is its
+   equivalent. */
+.pane-menu:popover-open {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
 }
 
 /* One row. Full-width and left-aligned: a menu row is a target to hit, not a

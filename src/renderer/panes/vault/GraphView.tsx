@@ -99,7 +99,7 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       link: token('--label-tertiary', 'GrayText'),
       node: token('--label-secondary', 'CanvasText'),
       near: token('--label', 'CanvasText'),
-      hot: token('--accent', 'Highlight'),
+      hot: token('--graph-accent', 'Highlight'),
       label: token('--label-secondary', 'CanvasText'),
       /** The window ground, for refilling the erased disc under each node. */
       ground: token('--bg-app', 'Canvas'),
@@ -506,10 +506,16 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
        *   neighbour   --label   (Sand)   one step down, still clearly present
        *   rest        --label-secondary at 0.09, effectively gone
        *
-       * Obsidian does this with a hue shift to purple. This palette is
-       * monochrome by decision (tokens.css §4b) and gets the same separation out
-       * of the luminance ramp, which is what that decision says to use. The ramp
-       * was already there; only the top of it was being spent.
+       * The focus tier is `--graph-accent`, a COOL hue, and it is the one
+       * documented exception to the no-accent-hue rule — the argument for it is
+       * in tokens.css beside the token.
+       *
+       * Short version: luminance separates two things and this needs three at
+       * once, while all three are already drawn in the warm ramp because they
+       * are all notes. Spending Cream on the focus left neighbours
+       * indistinguishable from the background graph. The grammar is now WARM IS
+       * YOUR VAULT, COOL IS WHAT YOU ARE POINTING AT, and it cannot leak,
+       * because this colour is unreachable unless a pointer is over a node.
        */
       for (const n of nodes) {
         const focus = n.id === hover?.id || pressed?.id === n.id

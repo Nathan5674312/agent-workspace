@@ -163,7 +163,10 @@ test('the boot lasts long enough to finish its own animations', () => {
    */
   const css = read('src/renderer/LoadingScreen.css')
 
-  const crawl = css.match(/animation: boot-crawl ([\d.]+)s linear ([\d.]+)s/)
+  // The timing function is matched loosely on purpose: this test is about
+  // DURATION outliving the animation, and pinning the easing here made it
+  // fail the moment the crawl was quantised to steps().
+  const crawl = css.match(/animation: boot-crawl ([\d.]+)s [^;]*?([\d.]+)s both/)
   assert.ok(crawl, 'the crawl animation is gone or was rewritten')
   const crawlEnds = (Number(crawl[1]) + Number(crawl[2])) * 1000
 
@@ -213,5 +216,35 @@ test('the crawl moves a WHOLE number of cells, so the letters land in wells', ()
   assert.ok(
     Math.floor(drift / 2) >= cells,
     `${drift} surplus rows gives ${Math.floor(drift / 2)} cells of cover for a ${cells}-cell crawl`,
+  )
+})
+
+test('the crawl STEPS between wells instead of gliding across them', () => {
+  /**
+   * The defect, seen by Nathan and then in a screenshot: with a `linear` crawl
+   * the letters glide continuously down the board, so for all but three
+   * instants of a 2.6s animation they sit BETWEEN wells — the phrase floats on
+   * the grid rather than sitting in it. Landing on a whole cell at the end
+   * fixed the final frame and left the other 2.59 seconds wrong.
+   *
+   * `steps(n)` quantises the move to a cell at a time. Measured against the
+   * running app afterwards: 0px off its well at 2.4s, 3.2s and 3.9s, where the
+   * gliding version was 6.8px and 20.7px off.
+   *
+   * The step count must equal the cell distance, or it quantises to something
+   * that is not a cell and the whole point is lost.
+   */
+  const css = read('src/renderer/LoadingScreen.css')
+
+  const timing = css.match(/animation: boot-crawl [\d.]+s steps\((\d+)[^)]*\)/)
+  assert.ok(timing, 'the crawl is no longer stepped — it will float between wells')
+
+  const move = css.match(/@keyframes boot-crawl[\s\S]*?translateY\(calc\(var\(--pitch\) \* ([\d.]+)\)\)/)
+  assert.ok(move, 'the crawl no longer translates by a multiple of --pitch')
+
+  assert.equal(
+    Number(timing[1]),
+    Number(move[1]),
+    `${timing[1]} steps over ${move[1]} cells does not land on cell boundaries`,
   )
 })

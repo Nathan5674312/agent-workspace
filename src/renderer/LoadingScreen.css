@@ -100,12 +100,27 @@
  * is `clamp(1.4rem, 4.2vw, 2.6rem)`, so a pixel figure that read as a slow
  * drift on a wide window would be a third of the screen on a narrow one.
  *
- * `linear`, deliberately. Credits do not ease — an eased crawl reads as the
- * board settling, which is the opposite of the intent.
+ * `steps(3, end)`, NOT `linear`, and this is the whole point of the crawl.
+ *
+ * A linear crawl glides the letters continuously across the board, which means
+ * they are BETWEEN wells for all but the three instants they pass through one —
+ * so for the 2.6s the animation runs, the phrase visibly floats on top of the
+ * grid instead of sitting in it. Landing on a whole cell at the END was
+ * necessary and nowhere near sufficient; it fixed the last frame and left the
+ * other 2.59 seconds wrong.
+ *
+ * Stepping quantises the move to one cell at a time: the letters are in a well,
+ * then in the next well, and never in between. That is also what the object
+ * being imitated does — a board's rows advance a row at a time, they do not
+ * slide.
+ *
+ * Not an ease. An eased crawl reads as the board settling, which is still the
+ * opposite of the intent; `steps` changes WHERE it can rest, not how it
+ * accelerates.
  */
 .boot-letters {
   grid-template-columns: repeat(var(--block-w, 1), calc(var(--cell-w) * 1em));
-  animation: boot-crawl 2.6s linear 1.4s both;
+  animation: boot-crawl 2.6s steps(3, end) 1.4s both;
 }
 
 /**
@@ -169,6 +184,17 @@
   /* Squared, not pill-soft. 3px is enough to stop the corner looking cut. */
   border-radius: 3px;
   background: var(--bg-sunken);
+  /* THE RECESS. Without this the well was a 7-unit tonal step and nothing else
+     — Ink against Ink-one-step-down — so the board read as a faint grid and a
+     bright letter sat on top of it rather than down in it.
+
+     An inset shadow, not a bevel: the dark band is the underside of the top lip
+     of the hole, and the faint warm line along the bottom is the light that
+     reaches the far wall. That is the shading a cut-out has. The raised glossy
+     chip this design rejects is the same two edges the other way round. */
+  box-shadow:
+    inset 0 2px 3px rgba(0, 0, 0, 0.55),
+    inset 0 -1px 0 rgba(240, 203, 165, 0.05);
   perspective: 520px;
   transform-style: preserve-3d;
   isolation: isolate;
@@ -221,6 +247,10 @@
   align-items: center;
   justify-content: center;
   color: var(--accent);
+  /* The letter is DOWN IN the well, so the lip above it shades its top edge.
+     A text-shadow rather than a box: this cell paints no rectangle, because it
+     crawls and a rectangle would crawl with it. */
+  text-shadow: 0 -1px 1px rgba(0, 0, 0, 0.85);
 }
 
 .flap-char {

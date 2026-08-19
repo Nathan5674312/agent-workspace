@@ -157,6 +157,40 @@ export function typeFamily(type: string): TypeFamily {
  * with no way to tell from the UI. Anything that is not ISO-shaped groups as
  * unset, which is honest.
  */
+/**
+ * `updated` -> a real calendar day, or null when it is not one.
+ *
+ * The calendar view needs an actual day, which `monthOf` deliberately avoids
+ * providing — so this is the one place that turns hand-written frontmatter into
+ * numbers, and it is strict on purpose.
+ *
+ * NEVER `new Date(updated)`. That accepts `2026-8-1` and `August 2026`, and
+ * parses a bare `YYYY-MM-DD` as UTC midnight, which in any negative-offset
+ * timezone renders as the PREVIOUS day — a note filed on the 1st appearing on
+ * the 31st, silently, only for some users. Here the digits are read directly and
+ * `Date.UTC` is used solely for the arithmetic that needs a calendar (weekday,
+ * month length), where both sides are UTC and no shift is possible.
+ *
+ * The round-trip rejects days that do not exist: `2026-02-30` parses as three
+ * plausible numbers and is not a date.
+ */
+export function parseYmd(updated: string): { y: number; m: number; d: number } | null {
+  const match = /^(\d{4})-(\d{2})-(\d{2})/.exec(updated.trim())
+  if (!match) return null
+  const y = Number(match[1])
+  const m = Number(match[2])
+  const d = Number(match[3])
+  const probe = new Date(Date.UTC(y, m - 1, d))
+  if (
+    probe.getUTCFullYear() !== y ||
+    probe.getUTCMonth() !== m - 1 ||
+    probe.getUTCDate() !== d
+  ) {
+    return null
+  }
+  return { y, m, d }
+}
+
 export function monthOf(updated: string): string {
   const m = /^(\d{4})-(\d{2})/.exec(updated)
   return m ? `${m[1]}-${m[2]}` : ''

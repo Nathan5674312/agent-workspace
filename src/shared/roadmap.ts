@@ -82,9 +82,9 @@ export const ROADMAP: FeatureGroup[] = [
     features: [
       {
         label: 'Databases with views (table, kanban, calendar, gallery)',
-        status: 'partial',
+        status: 'built',
         surface: 'Database tab',
-        note: 'Table works, with filter, sort and group-by over frontmatter. Board, calendar and gallery are switchable and empty.',
+        note: 'All four views are built over one row set: table with filter, sort and group-by over frontmatter; board and gallery as groupings of the same rows; calendar placing them by `updated`. The calendar parses that date strictly and lists everything it cannot place rather than dropping it — most of this vault has no usable date. Kanban is the board, renamed. Not built: editing a value from a cell, which would need the lost-update guard from the save path somewhere a cell cannot show it.',
       },
       { label: 'Multi-hop lookup and rollup columns', status: 'planned', surface: 'Database tab' },
       { label: 'Linked / relational databases', status: 'planned', surface: 'Database tab' },

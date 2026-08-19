@@ -8,6 +8,7 @@
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import {
+  parseYmd,
   areaOf,
   toMeta,
   statusTone,
@@ -253,5 +254,44 @@ test('toMeta accepts tags from either shape on the wire', async (t) => {
 
   await t.test('a ragged array drops non-strings instead of rendering them', () => {
     assert.deepEqual(toMeta({ ...base, tags: ['ui', 3, null, ''] }).tags, ['ui'])
+  })
+})
+
+test('parseYmd turns hand-written frontmatter into a real day, or nothing', async (t) => {
+  await t.test('an ISO date yields its parts', () => {
+    assert.deepEqual(parseYmd('2026-08-18'), { y: 2026, m: 8, d: 18 })
+    // A time after the date is fine — the day is what a calendar needs.
+    assert.deepEqual(parseYmd('2026-01-02T13:45:00Z'), { y: 2026, m: 1, d: 2 })
+    assert.deepEqual(parseYmd('  2026-12-31  '), { y: 2026, m: 12, d: 31 })
+  })
+
+  await t.test('a day that does not exist is not a date', () => {
+    // The whole reason for the round trip: these parse as three plausible
+    // numbers, and `new Date` would roll them forward into March silently.
+    assert.equal(parseYmd('2026-02-30'), null)
+    assert.equal(parseYmd('2025-02-29'), null)
+    assert.equal(parseYmd('2026-13-01'), null)
+    assert.equal(parseYmd('2026-00-10'), null)
+    assert.equal(parseYmd('2026-01-32'), null)
+  })
+
+  await t.test('a leap day in a leap year IS a date', () => {
+    assert.deepEqual(parseYmd('2028-02-29'), { y: 2028, m: 2, d: 29 })
+  })
+
+  await t.test('anything not ISO-shaped is refused rather than guessed', () => {
+    // `new Date()` accepts every one of these. That is exactly the problem:
+    // it would place notes on days their author never wrote.
+    for (const bad of ['2026-8-1', 'August 2026', '18/08/2026', '2026', '', 'soon', 'yesterday']) {
+      assert.equal(parseYmd(bad), null, `${JSON.stringify(bad)} should not parse`)
+    }
+  })
+
+  await t.test('the day never shifts, whatever the local timezone', () => {
+    // The bug this guards: `new Date('2026-08-18')` is UTC midnight, which in
+    // any negative-offset zone renders as the 17th. Parsing digits cannot shift.
+    const parsed = parseYmd('2026-08-18')
+    assert.equal(parsed.d, 18)
+    assert.equal(new Date(Date.UTC(parsed.y, parsed.m - 1, parsed.d)).getUTCDate(), 18)
   })
 })

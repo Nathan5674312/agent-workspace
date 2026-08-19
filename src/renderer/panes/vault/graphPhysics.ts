@@ -29,16 +29,59 @@ export type Adjacency = Map<string, PhysicsNode[]>
 // ── layout constants (unchanged by the hold) ────────────────────
 
 /** Rest length for an ordinary link. */
-export const REST_NORMAL = 52
+/**
+ * Rest length for an ordinary link.
+ *
+ * Shorter than it was (52). Together with a firmer LINK_STRENGTH this is what
+ * pulls a set of mutually-linked notes into a recognisable clump rather than a
+ * loose constellation.
+ */
+export const REST_NORMAL = 38
 /** Rest length between two hubs, which need more room than leaves. */
 export const REST_HUB = 90
 /** A node counts as a hub above this degree. */
 export const HUB_DEGREE = 3
 
-export const LINK_STRENGTH = 0.16
+/**
+ * How hard a link pulls its two ends together.
+ *
+ * Was 0.16, which is very soft — links barely overcame repulsion, so connected
+ * notes drifted apart and the graph settled into one evenly-spread mass with no
+ * visible communities. Clustering IS the information a graph carries; a layout
+ * that spreads everything evenly has thrown it away.
+ *
+ * 0.2 is a MEASURED CEILING, not a preference. Stiffer links straighten the ring
+ * a held node pulls its neighbours into, and `graph-orbit.test.mjs` guards that
+ * ring being uneven rather than a compass circle. Swept against that test:
+ *
+ *     0.20  ring CV  passes
+ *     0.24  ring CV  21.3%   fails
+ *     0.28  ring CV  21.7%   fails
+ *     0.32  ring CV  21.4%   fails
+ *     0.38  ring CV  21.8%   fails
+ *     0.45  ring CV  20.3%   fails
+ *
+ * Note the cliff: everything from 0.24 up sits around 21% against a 25% floor,
+ * so this is a threshold rather than a gradient to trade against. Clustering
+ * therefore comes from CHARGE_MAX_DISTANCE and REST_NORMAL below, which do not
+ * touch the hold.
+ */
+export const LINK_STRENGTH = 0.2
 export const CHARGE_BASE = -78
 export const CHARGE_PER_DEGREE = -14
-export const CHARGE_MAX_DISTANCE = 420
+/**
+ * How far a node's repulsion reaches. THE lever for visible sections.
+ *
+ * Was 420, which on this canvas is most of the way across it: every node pushed
+ * every other node, so distinct groups could never settle near each other and
+ * the whole layout homogenised. Capping it makes repulsion LOCAL — a cluster
+ * spreads itself out internally, and two clusters can then sit side by side as
+ * two things instead of merging into one field.
+ *
+ * This is the difference between a graph you can point at a section of and a
+ * graph that is uniformly busy.
+ */
+export const CHARGE_MAX_DISTANCE = 240
 export const COLLIDE_PADDING = 6
 export const CENTRING_STRENGTH = 0.012
 export const VELOCITY_DECAY_NORMAL = 0.4

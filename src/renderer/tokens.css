@@ -75,41 +75,49 @@
   --accent-pressed: #d8b493; /* Sand — recedes under the press */
 
   /* ── graph focus — THE ONE DOCUMENTED EXCEPTION TO §4b ──────
-     §4b above says there is no accent hue: emphasis comes from luminance,
-     weight and space, and reaching for a colour is the thing to watch in
-     review. That rule stands everywhere in this app except here, and the
-     exception is deliberate, argued, and deliberately narrow.
+     §4b says there is no accent hue: emphasis comes from luminance, weight and
+     space, and reaching for a colour is the thing to watch in review. That rule
+     stands everywhere in this app except here, and the exception is deliberate,
+     argued, and deliberately narrow.
 
      WHY THE RULE FAILS FOR THIS ONE CASE.
      Luminance separates two things. The graph's hover has to separate THREE at
      once — the node under the cursor, its neighbours, and the 260 notes you are
-     not asking about — while every one of them is already drawn in the warm
-     ramp because they are all notes. Spending Cream on the focus left the
-     neighbours indistinguishable from the background graph, so the answer to
-     "what is this connected to" was carried entirely by what had faded rather
-     than by what had lit up. The ramp ran out of room before the question was
-     answered.
+     not asking about — while all of them are already drawn in the warm ramp,
+     because they are all notes. Spending Cream on the focus left the neighbours
+     indistinguishable from the background graph, so the answer to "what is this
+     connected to" was carried entirely by what had faded rather than by what had
+     lit up. The ramp ran out of room before the question was answered.
 
      WHY THIS DOES NOT LEAK.
      The exception is scoped to a TRANSIENT INTERACTION STATE, not to chrome. It
-     is impossible to see this colour at rest: it appears only while a pointer
-     is over a node and vanishes when it leaves. Nothing static in the app may
-     use it. That is what keeps the resting design language monochrome, which is
-     what §4b was actually protecting.
+     is impossible to see this colour at rest: it appears only while a pointer is
+     over a node and vanishes when it leaves. Nothing static in the app may use
+     it. That is what keeps the resting design language monochrome, which is what
+     §4b was actually protecting.
 
-     WHY COOL, AND WHY THIS COOL.
-     The palette is entirely warm, so a cool hue is the one thing guaranteed not
-     to be mistaken for another note. That gives the graph a readable grammar:
-     WARM IS YOUR VAULT, COOL IS WHAT YOU ARE POINTING AT. §5 warned that
-     Apple's #ff453a / #ff9f0a / #30d158 read as alien here, and it was right —
-     those are warm-adjacent and compete with the palette rather than standing
-     apart from it. A desaturated periwinkle does not compete; it sits in a
-     register the browns never occupy. It is also, not coincidentally, the
-     family Obsidian reaches for in the same situation.
+     WHY SAGE, AND NOT SOMETHING FURTHER AWAY.
+     A violet was tried first and rejected on sight. It separated maximally — it
+     is nearly opposite the browns on the wheel — and that was the problem: it
+     read as belonging to a different application pasted over this one. Maximum
+     contrast is not the goal; being legible while still belonging is.
 
-     Measured against Ink (#160C08): 8.4:1, comfortably AAA for the label it
-     also tints. */
-  --graph-accent: #a78bfa;
+     Sage is the one hue already sanctioned in this file that is not
+     warm-adjacent. §5's placeholders were "warmed into the family", and of the
+     three, `--success` (#8a9a5b) is the only one that steps out of the brown
+     band at all. Brown and sage is a pairing that occurs in nature and in every
+     earthy palette that has ever worked — earth and foliage — so it reads as
+     intentional rather than imported. This is that hue lifted for contrast on
+     Ink, not a new colour language.
+
+     Deliberately NOT `--success` itself: this means "you are pointing at this",
+     not "this went well", and a semantic token borrowed for a second meaning is
+     how palettes rot.
+
+     Measured against Ink (#160C08): 8.7:1, comfortably AAA for the label it
+     also tints. If it ever needs to sit further from the browns, a muted teal
+     (~#6FA8A0) is the next step out that stays earthy. */
+  --graph-accent: #a9be72;
 
   /* PROPOSED, not owner-supplied. The note's §5 lists semantic colour as still
      open ("hard to derive from browns"), so these are placeholders warmed into

@@ -513,9 +513,10 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
        * Short version: luminance separates two things and this needs three at
        * once, while all three are already drawn in the warm ramp because they
        * are all notes. Spending Cream on the focus left neighbours
-       * indistinguishable from the background graph. The grammar is now WARM IS
-       * YOUR VAULT, COOL IS WHAT YOU ARE POINTING AT, and it cannot leak,
-       * because this colour is unreachable unless a pointer is over a node.
+       * indistinguishable from the background graph. Sage is the one hue in this
+       * palette that steps out of the brown band without leaving the earth
+       * tones — brown and foliage, not brown and neon. It cannot leak, because
+       * the colour is unreachable unless a pointer is over a node.
        */
       for (const n of nodes) {
         const focus = n.id === hover?.id || pressed?.id === n.id

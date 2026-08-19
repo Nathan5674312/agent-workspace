@@ -98,8 +98,8 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
     const COL = {
       link: token('--label-tertiary', 'GrayText'),
       node: token('--label-secondary', 'CanvasText'),
-      near: token('--label', 'CanvasText'),
-      hot: token('--graph-accent', 'Highlight'),
+      near: token('--accent', 'CanvasText'),
+      hot: token('--graph-focus', 'Highlight'),
       label: token('--label-secondary', 'CanvasText'),
       /** The window ground, for refilling the erased disc under each node. */
       ground: token('--bg-app', 'Canvas'),
@@ -506,17 +506,15 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
        *   neighbour   --label   (Sand)   one step down, still clearly present
        *   rest        --label-secondary at 0.09, effectively gone
        *
-       * The focus tier is `--graph-accent`, a COOL hue, and it is the one
-       * documented exception to the no-accent-hue rule — the argument for it is
-       * in tokens.css beside the token.
+       * All three tiers are LUMINANCE, no hue anywhere — which is what §4b said
+       * to do, and the reason the earlier accent-hue experiments were a detour.
        *
-       * Short version: luminance separates two things and this needs three at
-       * once, while all three are already drawn in the warm ramp because they
-       * are all notes. Spending Cream on the focus left neighbours
-       * indistinguishable from the background graph. Sage is the one hue in this
-       * palette that steps out of the brown band without leaving the earth
-       * tones — brown and foliage, not brown and neon. It cannot leak, because
-       * the colour is unreachable unless a pointer is over a node.
+       * The problem was never that the ramp lacked range. It was that the ramp
+       * stopped at Cream and the focus was already spending it, so neighbours
+       * had nothing left above them and sat at the same tone as the graph you
+       * were ignoring. Adding one rung ABOVE Cream fixes it without a hue:
+       * white takes the focus, Cream drops to the neighbourhood, and the tiers
+       * separate on brightness alone.
        */
       for (const n of nodes) {
         const focus = n.id === hover?.id || pressed?.id === n.id

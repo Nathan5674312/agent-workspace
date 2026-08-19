@@ -10,12 +10,20 @@
  * No Electron, no vault, no network — same shape as section4-data-layer.
  */
 
+// Rewrites the sources' NodeNext `./foo.js` specifiers to the `.ts` files they
+// actually name, and stubs `electron`. Required by any suite that imports a
+// main-process module — vault.ts reaches consent.ts and corner.ts through it.
+import './fixtures/ts-hooks.mjs'
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { mkdtemp, mkdir, readFile, writeFile, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import * as vault from '../src/main/vault.ts'
+/**
+ * Dynamic, after the hook: a static import resolves during linking, before the
+ * hook that rewrites `./foo.js` -> `./foo.ts` has run. See consent-gate.test.mjs.
+ */
+const vault = await import('../src/main/vault.ts')
 
 /**
  * Every mutating vault call needs an actor, and none of them defaults to one.
@@ -24,7 +32,7 @@ import * as vault from '../src/main/vault.ts'
  */
 const USER = { kind: 'user' }
 
-import * as versions from '../src/main/versions.ts'
+const versions = await import('../src/main/versions.ts')
 
 /**
  * Windows file timestamps come off the system clock, whose tick is coarse. Two

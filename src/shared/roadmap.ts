@@ -128,6 +128,17 @@ export const ROADMAP: FeatureGroup[] = [
     ],
   },
   {
+    title: 'Bookmarks',
+    features: [
+      {
+        label: 'Bookmark notes, shared with Obsidian',
+        status: 'built',
+        surface: 'ribbon:bookmarks',
+        note: 'Stored in the .obsidian/bookmarks.json that Obsidian itself uses rather than a second list, so a bookmark made in either program shows in both. Writes re-read the file and save under its mtime, so a concurrent Obsidian write raises a conflict instead of dropping what it added. Saved searches and graph bookmarks are preserved and shown, but only files open from here. The honest gap: a RUNNING Obsidian rewrites that file from memory, so a bookmark added while it is open can be overwritten by it.',
+      },
+    ],
+  },
+  {
     title: 'Daily practice',
     features: [
       {

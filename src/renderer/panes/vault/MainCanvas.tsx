@@ -7,6 +7,7 @@ import { InboxView } from './InboxView.js'
 import { RoadmapView } from './RoadmapView.js'
 import { VersionsView } from './VersionsView.js'
 import { PaneMenu, PaneMenuItem } from './PaneMenu.js'
+import { BookmarkToggleItem } from './BookmarksView.js'
 import type { VaultNoteMeta, InboxItem } from '../../../shared/notemeta.js'
 import { ArrowLeft, ArrowRight, Ellipsis } from 'lucide-react'
 
@@ -249,6 +250,9 @@ export function MainCanvas({
           >
             Copy wikilink
           </PaneMenuItem>
+          {/* Writes Obsidian's own .obsidian/bookmarks.json, so a bookmark made
+              here is the same bookmark Obsidian shows. */}
+          <BookmarkToggleItem path={note?.path ?? null} title={note?.title ?? ''} />
         </PaneMenu>
       </div>
 

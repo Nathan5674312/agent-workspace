@@ -1,0 +1,127 @@
+/**
+ * Bookmarks panel. Imported by BookmarksView.tsx.
+ *
+ * Sits in the sidebar, which is narrow and resizable, so every row truncates
+ * rather than widening the panel. Values come from tokens.css only.
+ */
+
+.bookmarks-view {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-2);
+  gap: var(--space-1);
+}
+
+.bookmarks-empty {
+  padding: var(--space-3);
+  color: var(--label-tertiary);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+}
+
+.bookmarks-empty p { margin: 0 0 var(--space-2); }
+
+.bookmarks-hint { color: var(--label-quaternary); font-size: var(--text-xs); }
+.bookmarks-hint code { font-family: var(--font-mono); }
+
+.bookmarks-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+/* The row is a flex pair: the target, and the remove x. The x only appears on
+   hover or focus so a list of ten bookmarks is not a list of ten delete
+   buttons — but `:focus-within` keeps it reachable by keyboard, which
+   hover-only would not. */
+.bookmarks-item {
+  display: flex;
+  align-items: center;
+  border-radius: var(--radius-sm);
+}
+
+.bookmarks-item:hover { background: var(--fill-hover); }
+
+.bookmarks-open {
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: default;
+}
+
+/* Searches and graph bookmarks are kept in the file and shown, but this app
+   cannot open them. Quaternary says unavailable without hiding the row. */
+.bookmarks-open:disabled { color: var(--label-quaternary); }
+
+.bookmarks-open svg { flex: none; color: var(--label-tertiary); }
+
+.bookmarks-label {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* The group a bookmark sits in, when it came out of one. Pushed right and
+   dimmed: it is context, not the thing being named. */
+.bookmarks-group {
+  margin-inline-start: auto;
+  padding-inline-start: var(--space-2);
+  color: var(--label-quaternary);
+  font-size: var(--text-xs);
+  white-space: nowrap;
+}
+
+.bookmarks-remove {
+  flex: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: var(--space-1);
+  margin-inline-end: var(--space-1);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--label-tertiary);
+  cursor: default;
+  opacity: 0;
+}
+
+.bookmarks-item:hover .bookmarks-remove,
+.bookmarks-item:focus-within .bookmarks-remove {
+  opacity: 1;
+}
+
+.bookmarks-remove:hover:not(:disabled) { background: var(--fill-active); color: var(--label); }
+
+.bookmarks-error {
+  margin: var(--space-2);
+  color: var(--danger);
+  font-size: var(--text-xs);
+  line-height: var(--leading-body);
+}
+
+.bookmarks-reload {
+  background: transparent;
+  border: none;
+  padding: 0;
+  color: var(--accent);
+  font: inherit;
+  font-size: var(--text-xs);
+  text-decoration: underline;
+  cursor: default;
+}

@@ -13,12 +13,22 @@
  * No Electron, no IPC — same shape as versions.test.mjs and section4-data-layer.
  */
 
+// Rewrites the sources' NodeNext `./foo.js` specifiers to the `.ts` files they
+// actually name, and stubs `electron`. Required by any suite that imports a
+// main-process module — vault.ts reaches consent.ts and corner.ts through it.
+import './fixtures/ts-hooks.mjs'
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { mkdtemp, mkdir as mkdirp, stat, readdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import * as vault from '../src/main/vault.ts'
+/**
+ * Loaded DYNAMICALLY, after the hook above has registered. A static import is
+ * resolved while the module graph is linked — before any module body runs — so
+ * the rewrite would not yet exist and `vault.ts`'s own `./consent.js` would
+ * fail to resolve. Same pattern as consent-gate.test.mjs.
+ */
+const vault = await import('../src/main/vault.ts')
 
 /**
  * Every mutating vault call needs an actor, and none of them defaults to one.

@@ -2,8 +2,20 @@
 tier: DECIDE
 control: The bookmark "Bookmarks" icon in the left ribbon
 location: src/renderer/panes/vault/LeftRibbon.tsx:29 (definition), :41-52 (render)
-status: NOT STARTED
+status: DONE
 ---
+
+> **✅ BUILT 2026-08-18.** The scope question this file poses — where is a
+> bookmark stored — is answered by using OBSIDIAN'S store, not a second one:
+> `.obsidian/bookmarks.json`, in Obsidian's own format. Its Bookmarks core
+> plugin is enabled on this vault (`core-plugins.json` → `"bookmarks": true`),
+> there was simply no file yet. So a bookmark made here appears in Obsidian and
+> vice versa, which is the opposite of the duplication this file warned about.
+> Writes go through save()'s mtime guard, so a concurrent Obsidian write
+> conflicts rather than clobbering. Kinds this app cannot act on (saved
+> searches, graph) are preserved on write and shown as unopenable. See
+> `src/shared/bookmarks.ts` and `BookmarksView.tsx`.
+
 
 > **⚠ STALE IN ONE PLACE (checked 2026-08-18).** Everything below about the
 > sidebar going blank when this icon is clicked is fixed. `activeRibbon` used

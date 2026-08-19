@@ -3,6 +3,25 @@ import * as d3 from 'd3-force'
 import type { VaultGraph } from '../../../shared/ipc.js'
 import { resolvableLinks } from './helpers.js'
 import { buildSimulation, radius, HOLD } from './graphPhysics.js'
+
+/**
+ * Does this node say its name at this zoom?
+ *
+ * Measured in APPARENT PIXELS, not in zoom level. A fixed `k` threshold cannot
+ * work here: the view opens zoomed-to-fit, and what `k` that lands on depends
+ * entirely on how big the vault is and how large the window is. Any constant
+ * picked against one vault is wrong for the next.
+ *
+ * Screen radius is the honest signal, and it composes the way the eye does — a
+ * hub is drawn larger, so it crosses the legibility threshold sooner and names
+ * itself while the whole graph is still in frame. Leaves wait until you have
+ * actually zoomed into their corner. That progressive reveal is what makes
+ * Obsidian's graph read as a map instead of a decoration.
+ *
+ * 6px of radius is about where a dot stops being a speck and starts being a
+ * thing worth naming.
+ */
+const LABEL_MIN_SCREEN_RADIUS = 6
 import {
   Decay,
   Spring,
@@ -57,6 +76,23 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
    */
   const openRef = useRef(onOpenNote)
   openRef.current = onOpenNote
+
+  /**
+   * Layout and framing, remembered ACROSS remounts.
+   *
+   * <MainCanvas> refetches the graph on every view switch, deliberately — a
+   * cached graph went permanently stale and only an app restart cleared it. But
+   * a fresh fetch rebuilt every node without coordinates, so d3 re-scattered a
+   * 270-node simulation from random positions and you watched it converge again
+   * for a second. The freshness was worth keeping; paying for it twice was not.
+   *
+   * A ref, not state: writing this must never trigger a render, and it has to
+   * survive the effect being torn down and rebuilt when `graph` changes.
+   */
+  const layoutRef = useRef<{
+    pos: Map<string, { x: number; y: number }>
+    view: { k: number; tx: number; ty: number } | null
+  }>({ pos: new Map(), view: null })
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -150,11 +186,19 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       degree.set(l.to, (degree.get(l.to) ?? 0) + 1)
     }
 
-    const nodes: Node[] = graph.nodes.map((id) => ({
-      id,
-      label: titleOf(id),
-      degree: degree.get(id) ?? 0,
-    }))
+    // Seeded from the last layout where we have one. A node that is genuinely
+    // new gets no coordinates and d3 places it, so an added note still finds
+    // its home instead of being pinned wherever a stale entry said.
+    const nodes: Node[] = graph.nodes.map((id) => {
+      const prev = layoutRef.current.pos.get(id)
+      return {
+        id,
+        label: titleOf(id),
+        degree: degree.get(id) ?? 0,
+        ...(prev ? { x: prev.x, y: prev.y } : {}),
+      }
+    })
+    const seeded = nodes.length > 0 && nodes.every((n) => n.x !== undefined)
     // Dangling edges are dropped before d3 sees them: forceLink throws on an
     // unresolvable endpoint, synchronously, inside this effect.
     const links = resolvableLinks(graph.nodes, graph.links) as unknown as Link[]
@@ -199,11 +243,21 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       () => adjacency,
     )
 
+    /**
+     * A remembered layout is already settled. Letting d3 start hot would shake
+     * it apart and re-converge to somewhere slightly different, which reads as
+     * the graph "reloading" every time you glance at another tab. Enough alpha
+     * to absorb a genuinely new node, not enough to move the rest.
+     */
+    if (seeded) sim.alpha(0.05)
+
     // View transform. Pan/zoom is hand-rolled rather than pulling in d3-zoom
     // for ~30 lines of wheel and pointer maths.
-    let k = 1
-    let tx = 0
-    let ty = 0
+    // Framing is remembered too. Position without transform still snaps the
+    // camera back to a zoom-to-fit, which is the same jolt by another route.
+    let k = layoutRef.current.view?.k ?? 1
+    let tx = layoutRef.current.view?.tx ?? 0
+    let ty = layoutRef.current.view?.ty ?? 0
     const toGraph = (px: number, py: number) => ({ x: (px - tx) / k, y: (py - ty) / k })
 
     let hover: Node | null = null
@@ -479,9 +533,12 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       ctx.textAlign = 'center'
       if (hover) {
         ctx.fillText(hover.label, hover.x!, hover.y! - radius(hover) - 4 / k)
-      } else if (k > 1.5) {
+      } else {
+        // Progressive, by degree — see `labelZoom`. Hubs name themselves while
+        // the whole graph is still in frame; leaves wait until you are actually
+        // reading that corner of it.
         for (const n of nodes) {
-          if (n.degree < 2) continue
+          if (radius(n) * k < LABEL_MIN_SCREEN_RADIUS) continue
           ctx.fillText(n.label, n.x!, n.y! - radius(n) - 4 / k)
         }
       }
@@ -499,7 +556,8 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
      * `fitted` latches on the first user interaction — auto-framing a view the
      * user has just panned or zoomed would feel like the app fighting them.
      */
-    let fitted = false
+    // Already framed, so do not auto-fit over the user's own camera.
+    let fitted = seeded && layoutRef.current.view !== null
     const fit = () => {
       let minX = Infinity
       let minY = Infinity
@@ -930,6 +988,14 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       // A glide or a settle outlives the component otherwise: both hold a rAF
       // and a closure over `tx`/`ty`, so an unmount mid-flick leaks a frame
       // loop that writes to a canvas that is no longer in the document.
+      // Remember where everything ended up, for the next mount.
+      for (const n of nodes) {
+        if (n.x !== undefined && n.y !== undefined) {
+          layoutRef.current.pos.set(n.id, { x: n.x, y: n.y })
+        }
+      }
+      layoutRef.current.view = { k, tx, ty }
+
       stopMotion()
       sim.stop()
       canvas.removeEventListener('pointermove', onMove)

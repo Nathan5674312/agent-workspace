@@ -31,6 +31,8 @@ const api: Api = {
     versions: (path) => ipcRenderer.invoke(CH.vaultVersions, path),
     versionText: (id) => ipcRenderer.invoke(CH.vaultVersionText, id),
     mkdir: (path) => ipcRenderer.invoke(CH.vaultMkdir, path),
+    move: (from, to) => ipcRenderer.invoke(CH.vaultMove, from, to),
+    undoMove: (id) => ipcRenderer.invoke(CH.vaultUndoMove, id),
   },
   corner: {
     items: () => ipcRenderer.invoke(CH.cornerItems),

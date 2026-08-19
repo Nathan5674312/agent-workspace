@@ -15,6 +15,14 @@ import { join } from 'node:path'
 import * as vault from '../src/main/vault.ts'
 
 /**
+ * Every mutating vault call needs an actor, and none of them defaults to one.
+ * These suites exercise the USER path — the person clicked or typed — which is
+ * the path that must never prompt. The agent path is covered by consent.test.mjs.
+ */
+const USER = { kind: 'user' }
+
+
+/**
  * `tree()`, `list()` and `graph()` all read the real filesystem, so these tests
  * need a scratch directory. Without one the suite pointed them at the ACTUAL
  * Universal Vault: it walked every folder on disk, took minutes instead of
@@ -122,7 +130,7 @@ test('vault data layer', async (t) => {
 
   await t.test('save() writes the file and returns the new mtime', async () => {
     const before = await vault.read('Home.md')
-    const result = await vault.save('Home.md', 'Updated text', before.mtime)
+    const result = await vault.save('Home.md', 'Updated text', before.mtime, USER)
     assert.equal(result.path, 'Home.md')
     assert.equal(result.title, 'Home')
 
@@ -131,7 +139,7 @@ test('vault data layer', async (t) => {
     assert.equal((await stat(join(dir, 'Home.md'))).mtimeMs, result.mtime)
 
     // And the stamp it returns is immediately usable as the next guard value.
-    const again = await vault.save('Home.md', 'Updated twice', result.mtime)
+    const again = await vault.save('Home.md', 'Updated twice', result.mtime, USER)
     assert.equal(await readFile(join(dir, 'Home.md'), 'utf-8'), 'Updated twice')
     assert.ok(Number.isFinite(again.mtime))
   })
@@ -139,7 +147,7 @@ test('vault data layer', async (t) => {
   await t.test('save() throws SaveConflict on stale mtime, and writes nothing', async () => {
     const onDisk = await readFile(join(dir, 'Home.md'), 'utf-8')
     try {
-      await vault.save('Home.md', 'Conflicting text', 0) // never the disk value
+      await vault.save('Home.md', 'Conflicting text', 0, USER) // never the disk value
       assert.fail('should have thrown SaveConflict')
     } catch (e) {
       assert.ok(e instanceof vault.SaveConflict)
@@ -272,14 +280,14 @@ test('save() creates a note that does not exist yet', async () => {
   // A path with no file has no version to lose, so the guard is skipped and 0
   // is the create stamp — server.py:765 did the same, and it is what makes
   // `save(path, '', 0)` the create call the new-note button is specified on.
-  const made = await vault.save('Created.md', '# new\n', 0)
+  const made = await vault.save('Created.md', '# new\n', 0, USER)
   assert.equal(await readFile(join(dir, 'Created.md'), 'utf-8'), '# new\n')
   assert.ok(made.mtime > 0)
   assert.equal(made.title, 'Created')
 
   // Once it exists it is an ordinary note and the create stamp is refused.
   await assert.rejects(
-    () => vault.save('Created.md', 'clobber', 0),
+    () => vault.save('Created.md', 'clobber', 0, USER),
     (e) => e instanceof vault.SaveConflict,
   )
   assert.equal(await readFile(join(dir, 'Created.md'), 'utf-8'), '# new\n')
@@ -294,7 +302,7 @@ test('save() writes into a folder that does not exist rather than inventing one'
   // Creating folders is a separate control with its own dialog; a save that
   // conjures directories out of a typo'd path is how a vault grows junk.
   await assert.rejects(
-    () => vault.save('Nope/Deep.md', 'text', 0),
+    () => vault.save('Nope/Deep.md', 'text', 0, USER),
     (e) => e instanceof Error && !(e instanceof vault.SaveConflict),
   )
   await assert.rejects(() => stat(join(dir, 'Nope')))
@@ -306,7 +314,7 @@ test('save() keeps a pre-edit copy under .backups/', async () => {
   vault._setVaultDirForTest(dir)
 
   const note = await vault.read('Projects/Backed.md')
-  await vault.save('Projects/Backed.md', 'second', note.mtime)
+  await vault.save('Projects/Backed.md', 'second', note.mtime, USER)
 
   const kept = await readdir(join(dir, '.backups', 'Projects'))
   const copy = kept.find((f) => f.startsWith('Backed.md.'))
@@ -348,7 +356,7 @@ test('a failed write cannot truncate the note', async () => {
   const note = await vault.read('Home.md')
   await makeDir(join(dir, 'Home.md.saving.tmp'))
 
-  await assert.rejects(() => vault.save('Home.md', 'replacement', note.mtime))
+  await assert.rejects(() => vault.save('Home.md', 'replacement', note.mtime, USER))
 
   assert.equal(
     await readFile(join(dir, 'Home.md'), 'utf-8'),
@@ -368,7 +376,7 @@ test('a successful save leaves no temp file behind', async () => {
   vault._setVaultDirForTest(dir)
 
   const note = await vault.read('Home.md')
-  await vault.save('Home.md', 'second', note.mtime)
+  await vault.save('Home.md', 'second', note.mtime, USER)
 
   const left = (await readdir(dir)).filter((f) => f.endsWith('.tmp'))
   assert.deepEqual(left, [], `temp files left in the vault: ${left}`)
@@ -392,7 +400,7 @@ test('every vault call works with nothing running but this process', async () =>
 
   const note = await vault.read('Home.md')
   assert.ok(note.text.includes('[[Deep]]'))
-  await vault.save('Home.md', '# Home\nno links', note.mtime)
+  await vault.save('Home.md', '# Home\nno links', note.mtime, USER)
   assert.equal(await readFile(join(dir, 'Home.md'), 'utf-8'), '# Home\nno links')
 
   assert.equal(vault.VaultUnavailable, undefined, 'the server error class outlived the server')
@@ -522,7 +530,7 @@ test('a failed save does not leak the vault path either', async () => {
   vault._setVaultDirForTest(dir)
 
   await assert.rejects(
-    () => vault.save('Missing/Deep.md', 'text', 0),
+    () => vault.save('Missing/Deep.md', 'text', 0, USER),
     (e) => {
       assert.ok(!e.message.includes(dir), `leaked the vault path: ${e.message}`)
       assert.ok(!/Nathan/i.test(e.message), `leaked the OS username: ${e.message}`)
@@ -539,8 +547,8 @@ test("scrub() does not eat our own messages", async () => {
 
   for (const [call, expected] of [
     [() => vault.read(''), 'vault: path must be a non-empty string'],
-    [() => vault.save('', 'x', 0), 'vault: path must be a non-empty string'],
-    [() => vault.save('Home.md', 'x', null), 'vault: mtime must be a finite number'],
+    [() => vault.save('', 'x', 0, USER), 'vault: path must be a non-empty string'],
+    [() => vault.save('Home.md', 'x', null, USER), 'vault: mtime must be a finite number'],
     [() => vault.read('../escaped.md'), 'vault: path escapes the vault'],
   ]) {
     await assert.rejects(call, (e) => {

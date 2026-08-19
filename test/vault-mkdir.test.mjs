@@ -20,6 +20,14 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as vault from '../src/main/vault.ts'
 
+/**
+ * Every mutating vault call needs an actor, and none of them defaults to one.
+ * These suites exercise the USER path — the person clicked or typed — which is
+ * the path that must never prompt. The agent path is covered by consent.test.mjs.
+ */
+const USER = { kind: 'user' }
+
+
 const isDir = async (p) => {
   const s = await stat(p).catch(() => null)
   return !!s && s.isDirectory()
@@ -41,12 +49,12 @@ test('vault.mkdir', async (t) => {
   vault._setVaultDirForTest(dir)
 
   await t.test('creates a folder at the vault root', async () => {
-    await vault.mkdir('Scratch')
+    await vault.mkdir('Scratch', USER)
     assert.ok(await isDir(join(dir, 'Scratch')))
   })
 
   await t.test('creates a folder inside an existing one', async () => {
-    await vault.mkdir('Scratch/Inner')
+    await vault.mkdir('Scratch/Inner', USER)
     assert.ok(await isDir(join(dir, 'Scratch', 'Inner')))
   })
 
@@ -54,11 +62,11 @@ test('vault.mkdir', async (t) => {
     // The whole reason mkdirSync is NOT recursive here: `recursive: true`
     // resolves happily on an existing directory, so typing the name of a folder
     // that is already there would report success and appear to do nothing.
-    await assert.rejects(() => vault.mkdir('Scratch'), /EEXIST|exists/i)
+    await assert.rejects(() => vault.mkdir('Scratch', USER), /EEXIST|exists/i)
   })
 
   await t.test('a missing parent is refused rather than conjured', async () => {
-    await assert.rejects(() => vault.mkdir('Nope/Deep'), /ENOENT|no such/i)
+    await assert.rejects(() => vault.mkdir('Nope/Deep', USER), /ENOENT|no such/i)
     assert.equal(await isDir(join(dir, 'Nope')), false)
   })
 
@@ -69,7 +77,7 @@ test('vault.mkdir', async (t) => {
    */
   await t.test('a path that climbs out of the vault creates nothing', async () => {
     for (const bad of ['../Escaped', '../../Escaped', 'Scratch/../../Escaped']) {
-      await assert.rejects(() => vault.mkdir(bad), /escapes the vault/)
+      await assert.rejects(() => vault.mkdir(bad, USER), /escapes the vault/)
     }
     // The filesystem is the assertion, not the message: a call that both threw
     // AND created would pass a rejects-only test.
@@ -78,14 +86,14 @@ test('vault.mkdir', async (t) => {
 
   await t.test('an absolute path or a drive letter creates nothing', async () => {
     for (const bad of ['C:\\Windows\\Temp\\Escaped', '/tmp/Escaped', 'C:/Escaped']) {
-      await assert.rejects(() => vault.mkdir(bad), /escapes the vault/)
+      await assert.rejects(() => vault.mkdir(bad, USER), /escapes the vault/)
     }
     assert.deepEqual(await readdir(parent), ['vault'])
   })
 
   await t.test('the vault root itself is not a folder to create', async () => {
     for (const bad of ['', '.', './']) {
-      await assert.rejects(() => vault.mkdir(bad), /vault:/)
+      await assert.rejects(() => vault.mkdir(bad, USER), /vault:/)
     }
   })
 
@@ -93,7 +101,7 @@ test('vault.mkdir', async (t) => {
     // The `path: string` annotation is erased at runtime and the renderer sends
     // whatever it likes, so the check has to be a real one.
     for (const bad of [undefined, null, 42, {}, ['Scratch']]) {
-      await assert.rejects(() => vault.mkdir(bad), /non-empty string/)
+      await assert.rejects(() => vault.mkdir(bad, USER), /non-empty string/)
     }
   })
 
@@ -102,7 +110,7 @@ test('vault.mkdir', async (t) => {
     // make a real folder that never appears in the sidebar — a button that
     // reports success and shows nothing, which is the defect being fixed.
     for (const bad of ['.obsidian', '.git', 'node_modules', 'Scratch/.hidden']) {
-      await assert.rejects(() => vault.mkdir(bad), /does not show folders/)
+      await assert.rejects(() => vault.mkdir(bad, USER), /does not show folders/)
     }
     assert.equal((await readdir(dir)).includes('.obsidian'), false)
   })
@@ -111,7 +119,7 @@ test('vault.mkdir', async (t) => {
     // Everything thrown here crosses IPC to an untrusted renderer, and node's
     // fs errors stringify with the absolute path they failed on — which would
     // leak the vault location, and with it the OS username, on every collision.
-    const e = await vault.mkdir('Scratch').catch((err) => err)
+    const e = await vault.mkdir('Scratch', USER).catch((err) => err)
     assert.ok(!e.message.includes(dir), e.message)
     assert.match(e.message, /<path>/)
   })

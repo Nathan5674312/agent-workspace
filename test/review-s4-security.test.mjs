@@ -31,6 +31,14 @@ process.env.TEST_USER_DATA = mkdtempSync(join(tmpdir(), 'aw-s4-'))
 import * as vault from '../src/main/vault.ts'
 
 /**
+ * Every mutating vault call needs an actor, and none of them defaults to one.
+ * These suites exercise the USER path — the person clicked or typed — which is
+ * the path that must never prompt. The agent path is covered by consent.test.mjs.
+ */
+const USER = { kind: 'user' }
+
+
+/**
  * A vault on disk. EVERY test in this file needs one now — read() and save()
  * included, which used to be answered by a mock HTTP server.
  *
@@ -72,10 +80,10 @@ async function scratchVault(notes) {
 //   NaN        | "mtime":null        | None        | guard SKIPPED -> CLOBBER
 //   null       | "mtime":null        | None        | guard SKIPPED -> CLOBBER
 //
-// The guard is vault.save()'s own now, comparing the caller's stamp against a
+// The guard is vault.save(, USER)'s own now, comparing the caller's stamp against a
 // fresh `statSync().mtimeMs`, and it cannot fail that way: a non-number is
 // unequal to every mtime on disk, so the default outcome is a refusal. The
-// `mtime: number` annotations on ipc.ts:53 and vault.save() are still erased at
+// `mtime: number` annotations on ipc.ts:53 and vault.save(, USER) are still erased at
 // runtime and still stop nothing, so requireMtime() still rejects junk at the
 // boundary — with the message the user can act on, and before the file is
 // touched. Both halves are asserted below, against the file itself.
@@ -108,7 +116,7 @@ test('lost-update guard: mtime is validated before anything is written', async (
       await reset()
       const before = (await stat(home)).mtimeMs
       await assert.rejects(
-        () => vault.save('Home.md', 'would have clobbered', value),
+        () => vault.save('Home.md', 'would have clobbered', value, USER),
         (e) => e.message === 'vault: mtime must be a finite number',
       )
       await untouched(before)
@@ -118,9 +126,9 @@ test('lost-update guard: mtime is validated before anything is written', async (
   await t.test('an omitted argument is refused, not silently defaulted', async () => {
     await reset()
     const before = (await stat(home)).mtimeMs
-    // Exactly what `window.api.vault.save(p, t)` produces.
+    // Exactly what `window.api.vault.save(p, t, USER)` produces.
     await assert.rejects(
-      () => vault.save('Home.md', 'two args only'),
+      () => vault.save('Home.md', 'two args only', USER),
       (e) => e.message === 'vault: mtime must be a finite number',
     )
     await untouched(before)
@@ -130,7 +138,7 @@ test('lost-update guard: mtime is validated before anything is written', async (
     await reset()
     const before = (await stat(home)).mtimeMs
     await assert.rejects(
-      () => vault.save('Home.md', 'from a stale buffer', 0),
+      () => vault.save('Home.md', 'from a stale buffer', 0, USER),
       (e) => e instanceof vault.SaveConflict && e.currentMtime === before,
     )
     await untouched(before)
@@ -139,7 +147,7 @@ test('lost-update guard: mtime is validated before anything is written', async (
   await t.test('a valid mtime saves, and its stamp is the file it just wrote', async () => {
     await reset()
     const before = (await stat(home)).mtimeMs
-    const r = await vault.save('Home.md', 'legitimate edit', before)
+    const r = await vault.save('Home.md', 'legitimate edit', before, USER)
     assert.equal(await readFile(home, 'utf-8'), 'legitimate edit')
     assert.equal(r.path, 'Home.md')
     assert.equal(r.title, 'Home')
@@ -150,7 +158,7 @@ test('lost-update guard: mtime is validated before anything is written', async (
     await reset()
     const before = (await stat(home)).mtimeMs
     await assert.rejects(
-      () => vault.save('Home.md', 'stale', before - 1),
+      () => vault.save('Home.md', 'stale', before - 1, USER),
       (e) =>
         e instanceof vault.SaveConflict &&
         e.currentMtime === before &&
@@ -166,11 +174,11 @@ test('lost-update guard: mtime is validated before anything is written', async (
     // note the user can never save again.
     await reset()
     await assert.rejects(
-      () => vault.save('Home.md', 'mine', 0),
+      () => vault.save('Home.md', 'mine', 0, USER),
       (e) => e instanceof vault.SaveConflict,
     )
     const fresh = await vault.read('Home.md')
-    await vault.save('Home.md', 'mine', fresh.mtime)
+    await vault.save('Home.md', 'mine', fresh.mtime, USER)
     assert.equal(await readFile(home, 'utf-8'), 'mine')
   })
 })
@@ -186,7 +194,7 @@ test('list() rows carry mtime 0 and are not a version', async () => {
   const [row] = await vault.list()
   assert.equal(row.mtime, 0)
   await assert.rejects(
-    () => vault.save(row.path, 'text', row.mtime),
+    () => vault.save(row.path, 'text', row.mtime, USER),
     (e) => e instanceof vault.SaveConflict,
   )
   assert.equal(await readFile(join(dir, 'Home.md'), 'utf-8'), 'disk')
@@ -271,7 +279,7 @@ test('paths cannot escape the vault, in either direction', async (t) => {
   await t.test('save() refuses every traversal, and writes nothing', async () => {
     for (const bad of escapes) {
       await assert.rejects(
-        () => vault.save(bad, 'CLOBBERED', 0),
+        () => vault.save(bad, 'CLOBBERED', 0, USER),
         (e) => e.message === 'vault: path escapes the vault',
         `save() accepted ${bad}`,
       )
@@ -314,7 +322,7 @@ test('paths cannot escape the vault, in either direction', async (t) => {
     // discovered as "the app cannot open half my notes".
     assert.equal((await vault.read('Projects/AI.md')).text, 'nested')
     assert.equal((await vault.read('./Home.md')).text, 'ok')
-    await vault.save('Odd #name & (chars).md', 'fine', 0)
+    await vault.save('Odd #name & (chars).md', 'fine', 0, USER)
     assert.equal(await readFile(join(dir, 'Odd #name & (chars).md'), 'utf-8'), 'fine')
   })
 
@@ -325,7 +333,7 @@ test('paths cannot escape the vault, in either direction', async (t) => {
         (e) => e.message === 'vault: path must be a non-empty string',
       )
       await assert.rejects(
-        () => vault.save(bad, 'text', 1),
+        () => vault.save(bad, 'text', 1, USER),
         (e) => e.message === 'vault: path must be a non-empty string',
       )
     }
@@ -467,7 +475,7 @@ test('a multi-megabyte note round-trips intact', async () => {
 
   // And back out again, through the temp file and the rename.
   const bigger = big + 'y'.repeat(1024)
-  const saved = await vault.save('Big.md', bigger, n.mtime)
+  const saved = await vault.save('Big.md', bigger, n.mtime, USER)
   assert.equal((await readFile(join(dir, 'Big.md'), 'utf-8')).length, bigger.length)
   assert.equal(saved.mtime, (await stat(join(dir, 'Big.md'))).mtimeMs)
 })
@@ -551,7 +559,7 @@ test('graph() memo is shared by concurrent callers and dropped by save()', async
   // through save() this time rather than around it, which is the whole point:
   // the writer and the memo are in the same process now.
   const cur = await vault.read('A.md')
-  await vault.save('A.md', 'still no links', cur.mtime)
+  await vault.save('A.md', 'still no links', cur.mtime, USER)
   assert.deepEqual((await vault.graph()).links, [], 'save() did not invalidate the memo')
 })
 

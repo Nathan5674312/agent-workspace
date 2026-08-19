@@ -16,6 +16,14 @@ import { mkdtemp, mkdir, readFile, writeFile, utimes } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import * as vault from '../src/main/vault.ts'
+
+/**
+ * Every mutating vault call needs an actor, and none of them defaults to one.
+ * These suites exercise the USER path — the person clicked or typed — which is
+ * the path that must never prompt. The agent path is covered by consent.test.mjs.
+ */
+const USER = { kind: 'user' }
+
 import * as versions from '../src/main/versions.ts'
 
 /**
@@ -37,7 +45,7 @@ test('version history', async (t) => {
     // a missing directory must not fail the panel.
     assert.deepEqual(await versions.versions('Projects/AI.md'), [])
 
-    await vault.save('Projects/AI.md', 'v1\n', 0)
+    await vault.save('Projects/AI.md', 'v1\n', 0, USER)
     // The create wrote no backup — there was no previous text to keep.
     assert.deepEqual(await versions.versions('Projects/AI.md'), [])
   })
@@ -45,9 +53,9 @@ test('version history', async (t) => {
   await t.test('each save leaves the PREVIOUS text, newest first', async () => {
     let note = await vault.read('Projects/AI.md')
     await settle()
-    note = await vault.save('Projects/AI.md', 'v2\n', note.mtime)
+    note = await vault.save('Projects/AI.md', 'v2\n', note.mtime, USER)
     await settle()
-    await vault.save('Projects/AI.md', 'v3\n', note.mtime)
+    await vault.save('Projects/AI.md', 'v3\n', note.mtime, USER)
 
     const list = await versions.versions('Projects/AI.md')
     assert.equal(list.length, 2)
@@ -96,10 +104,10 @@ test('version history', async (t) => {
   })
 
   await t.test('another note\'s backups are not listed', async () => {
-    await vault.save('Home.md', 'home v1\n', 0)
+    await vault.save('Home.md', 'home v1\n', 0, USER)
     await settle()
     const home = await vault.read('Home.md')
-    await vault.save('Home.md', 'home v2\n', home.mtime)
+    await vault.save('Home.md', 'home v2\n', home.mtime, USER)
 
     const homeVersions = await versions.versions('Home.md')
     assert.equal(homeVersions.length, 1)
@@ -120,7 +128,7 @@ test('version history', async (t) => {
     // This is exactly what the panel does — the same save() the Save button
     // calls, with the mtime read() handed out. There is no restore call and
     // nothing copies a file back over the note.
-    const saved = await vault.save('Projects/AI.md', oldText, before.mtime)
+    const saved = await vault.save('Projects/AI.md', oldText, before.mtime, USER)
     assert.equal(await readFile(join(dir, 'Projects', 'AI.md'), 'utf8'), 'v2\n')
     assert.ok(saved.mtime > 0)
 
@@ -134,10 +142,10 @@ test('version history', async (t) => {
     const stale = await vault.read('Projects/AI.md')
     await settle()
     // Someone else writes between the read and the restore.
-    const current = await vault.save('Projects/AI.md', 'theirs\n', stale.mtime)
+    const current = await vault.save('Projects/AI.md', 'theirs\n', stale.mtime, USER)
 
     await assert.rejects(
-      () => vault.save('Projects/AI.md', 'restored from history\n', stale.mtime),
+      () => vault.save('Projects/AI.md', 'restored from history\n', stale.mtime, USER),
       (e) => e.name === 'SaveConflict' && e.currentMtime === current.mtime,
     )
     // The guard is the reason restore goes through save(). Nothing was written.

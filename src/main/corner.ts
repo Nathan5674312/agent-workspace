@@ -2,8 +2,13 @@
  * SECTION 3 — Agent corner, main-process half.
  *
  * The ONE consent surface in the app. Everything consequential asks here:
- * vault syncs over the network, anything that
- * leaves the machine.
+ * agent tool calls, agent-originated vault mutations (via src/main/consent.ts),
+ * vault syncs over the network, anything that leaves the machine.
+ *
+ * Note what is NOT here: a user-originated vault write. The person clicked or
+ * typed, so there is nobody left to ask — see the actor rule in
+ * src/shared/ipc.ts. Prompting for those is what makes a consent surface
+ * background noise, and background noise is what gets clicked through.
  *
  * Design rules that are not up for negotiation:
  *   - Silence is the default. If the common path is not "nothing happened",
@@ -23,12 +28,21 @@ import { CH, EV, type CornerItem, type ConsentDecision } from '../shared/ipc.js'
  * Pending consents, keyed by generated ID. Resolve when the renderer answers
  * on CH.cornerDecide. A consent that is never answered never resolves.
  */
-const pending = new Map<
-  string,
-  {
-    resolver: (allow: boolean) => void
-  }
->()
+type PendingConsent = {
+  resolver: (allow: boolean) => void
+  /**
+   * The scope the human picked, stamped by decide() in the instant BEFORE it
+   * resolves. It travels on this object rather than through the resolver on
+   * purpose: the resolver stays `(allow: boolean)` so decide() can keep calling
+   * it as literally `resolver(decision.allow === true)`, which is the audited
+   * invariant that nothing but a human's explicit true ever grants permission.
+   * Widening the resolver to carry a decision object would have blurred that
+   * line for a field that only matters once the answer is already "allow".
+   */
+  scope: 'once' | 'session'
+}
+
+const pending = new Map<string, PendingConsent>()
 
 /**
  * Send an event to EVERY window, not just the focused one.
@@ -63,7 +77,32 @@ const items: CornerItem[] = []
 export function requestConsent(
   item: Omit<Extract<CornerItem, { kind: 'consent' }>, 'id' | 'at' | 'kind'>,
 ): Promise<boolean> {
-  return new Promise((resolve) => {
+  return requestConsentOutcome(item).then((outcome) => outcome !== 'deny')
+}
+
+/**
+ * What a human's answer authorises. 'deny' also covers dismissal and every
+ * malformed reply — there is no fourth value and no value that means "assume".
+ */
+export type ConsentOutcome = 'deny' | 'once' | 'session'
+
+/**
+ * As requestConsent, but reports WHETHER the allowance was for this one action
+ * or for the rest of the session. src/main/consent.ts needs that distinction
+ * to record a session-scoped allowance; claude.ts does not care and uses the
+ * boolean wrapper above. One code path, two views of it.
+ *
+ * Everything the boolean form promises still holds here: no timeout, no path
+ * that settles without a human, and denial is the value every non-answer takes.
+ */
+export function requestConsentOutcome(
+  item: Omit<Extract<CornerItem, { kind: 'consent' }>, 'id' | 'at' | 'kind'>,
+): Promise<ConsentOutcome> {
+  // Seeded with 'once' so a reply that names no scope narrows rather than
+  // widens, and so the field is never read before decide() has written it.
+  const entry: PendingConsent = { resolver: () => {}, scope: 'once' }
+
+  const answered = new Promise<boolean>((resolve) => {
     // Collision here means one human answer resolves a DIFFERENT tool call, so
     // this is not a place for Math.random().
     const id = randomUUID()
@@ -74,10 +113,13 @@ export function requestConsent(
       at: Date.now(),
     }
 
-    pending.set(id, { resolver: resolve })
+    entry.resolver = resolve
+    pending.set(id, entry)
     items.push(consent)
     push(consent)
   })
+
+  return answered.then((allowed) => (allowed ? entry.scope : 'deny'))
 }
 
 /**
@@ -137,6 +179,12 @@ function decide(decision: ConsentDecision): void {
 
   const idx = items.findIndex((i) => i.id === decision.id)
   if (idx >= 0) items.splice(idx, 1)
+
+  // Stamped before resolving, so the waiting caller reads a settled value.
+  // Only the exact string 'session' widens the answer; anything else — absent,
+  // misspelt, a truthy non-string — stays 'once', for the same reason
+  // `allow` is compared against literal true below.
+  pending_item.scope = decision.scope === 'session' ? 'session' : 'once'
 
   pending_item.resolver(decision.allow === true)
 

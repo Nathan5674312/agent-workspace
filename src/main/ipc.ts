@@ -1,5 +1,5 @@
 import { ipcMain, type IpcMainInvokeEvent } from 'electron'
-import { CH } from '../shared/ipc.js'
+import { CH, type Actor } from '../shared/ipc.js'
 import * as vault from './vault.js'
 import * as versions from './versions.js'
 import * as corner from './corner.js'
@@ -47,11 +47,29 @@ function handle(
   })
 }
 
+/**
+ * Every mutation reached through this file is USER-originated, and that is a
+ * fact about the boundary rather than an assumption made for convenience.
+ *
+ * A call only arrives here by crossing the context bridge from the renderer,
+ * and the renderer is a UI: it has no node integration, no agent loop, and no
+ * way to act except when a person clicks or types. So the person IS the
+ * consent, and prompting them to approve the save they just triggered would be
+ * approval fatigue — the thing that teaches people to click through the prompt
+ * that mattered. See src/main/consent.ts.
+ *
+ * An agent never appears here. It runs in MAIN and calls vault.ts directly with
+ * its own `{ kind: 'agent', … }`, which is why no channel accepts an Actor and
+ * why this constant is not a parameter: if the renderer could nominate an
+ * actor, it could nominate `user`, and the gate would be decoration.
+ */
+const USER: Actor = { kind: 'user' }
+
 export function registerIpc(): void {
   handle(CH.vaultTree, () => vault.tree())
   handle(CH.vaultList, () => vault.list())
   handle(CH.vaultRead, (p: string) => vault.read(p))
-  handle(CH.vaultSave, (p: string, t: string, m: number) => vault.save(p, t, m))
+  handle(CH.vaultSave, (p: string, t: string, m: number) => vault.save(p, t, m, USER))
   handle(CH.vaultGraph, () => vault.graph())
   handle(CH.vaultBacklinks, (p: string) => vault.backlinks(p))
   // Read-only. Restoring a version goes back out through CH.vaultSave above,
@@ -59,7 +77,12 @@ export function registerIpc(): void {
   // channel by design.
   handle(CH.vaultVersions, (p: string) => versions.versions(p))
   handle(CH.vaultVersionText, (id: string) => versions.versionText(id))
-  handle(CH.vaultMkdir, (p: string) => vault.mkdir(p))
+  handle(CH.vaultMkdir, (p: string) => vault.mkdir(p, USER))
+  // Both ends of a move are renderer-supplied, so both are resolved against the
+  // vault root in main — see vault.move(). Nothing is deleted here: the
+  // original is trashed and journalled so vault:undo-move can put it back.
+  handle(CH.vaultMove, (from: string, to: string) => vault.move(from, to, USER))
+  handle(CH.vaultUndoMove, (id: string) => vault.undoMove(id, USER))
 
   corner.register(handle)
   network.register(handle)

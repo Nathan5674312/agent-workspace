@@ -5,8 +5,20 @@
  *  - The renderer has NO node integration and NO network access to the vault.
  *    Everything crosses this boundary. If a pane needs data, it goes here first.
  *  - Channel names are namespaced by pane so ownership is obvious.
- *  - Anything that mutates the vault or touches the network is a `consent:` gated
- *    call — it goes through the agent corner before it happens.
+ *  - Mutation is gated on WHO is acting, not on WHAT is touched. A
+ *    user-originated call proceeds with no prompt: the person clicked or
+ *    typed, so they ARE the consent, and asking them to approve saving the
+ *    file they are typing is approval fatigue, not safety — it trains people
+ *    to click through, which is worse than no prompt at all. An AGENT-
+ *    originated call is gated: it goes through the agent corner and does not
+ *    happen until a human answers. `Actor` below says which one it is, and
+ *    src/main/consent.ts is where that decision is made.
+ *  - This boundary separates the two for free, which is why the rule can be
+ *    enforced rather than merely stated: everything arriving over IPC came
+ *    from the renderer, and the renderer has no agent in it. An agent is
+ *    main-process code calling src/main/vault.ts directly, so it can never
+ *    reach a handler here and can never pose as a user by crossing the bridge.
+ *  - Anything that touches the NETWORK is gated regardless of actor.
  */
 
 // ---------------------------------------------------------------- vault (pane 2)
@@ -50,6 +62,24 @@ export type NoteVersion = {
   at: number
   /** Bytes on disk. Shown because a 0-byte version is worth seeing before restoring it. */
   size: number
+}
+
+/**
+ * One completed move, as `<vault>/.trash/moves.jsonl` recorded it.
+ *
+ * Hold on to `id`: it is the only handle `undoMove()` accepts, and it is what
+ * makes an agent's filing reversible after the app has been restarted. The
+ * trash path the original went to is deliberately NOT here — the renderer has
+ * no business naming a file inside `.trash/`, and the journal already knows.
+ */
+export type MoveRecord = {
+  id: string
+  /** Where the note was, vault-relative. Where `undoMove()` puts it back. */
+  from: string
+  /** Where it is now, vault-relative. */
+  to: string
+  /** When the move happened, ms since epoch. */
+  at: number
 }
 
 /** One edge of the graph view. Derived from [[wikilinks]], never authoritative. */
@@ -157,6 +187,39 @@ export type PermissionMode = 'ask' | 'accept-edits' | 'bypass'
 // ---------------------------------------------------- agent corner
 
 /**
+ * WHO is asking for a mutation. Every mutating call in src/main/vault.ts takes
+ * one, and none of them has a default.
+ *
+ * A default is the one thing this must never grow. `actor` forgotten at a call
+ * site would quietly become `{ kind: 'user' }` — the gate would fail OPEN, and
+ * it would do so invisibly, which is the precise failure this whole mechanism
+ * exists to prevent. Missing or malformed is REFUSED instead; see consent.ts.
+ *
+ * This never crosses the bridge. There is no channel that accepts an Actor and
+ * the renderer cannot construct one: src/main/ipc.ts supplies `{ kind: 'user' }`
+ * itself, on the grounds that a call arriving over IPC came from the renderer
+ * and the renderer has no agent in it. An agent runs in MAIN and calls vault.ts
+ * directly, so it is the only caller that has to declare itself.
+ */
+export type Actor =
+  | { kind: 'user' }
+  | {
+      kind: 'agent'
+      /**
+       * Which agent session is acting. Session-scoped allowances are keyed by
+       * it, so it is also the thing that stops one session inheriting another
+       * session's permission. Must be a non-empty string.
+       */
+      sessionId: string
+      /**
+       * Why this is happening, as a sentence a human can judge. Shown verbatim
+       * in the consent prompt, and REQUIRED: an agent that cannot say why it is
+       * moving a file does not get to move it. Empty or whitespace is refused.
+       */
+      reason: string
+    }
+
+/**
  * Everything the corner can show. `consent` items BLOCK until answered;
  * `artifact` and `notice` items are informational.
  */
@@ -186,7 +249,19 @@ export type CornerItem =
     }
   | { kind: 'notice'; id: string; title: string; detail: string; at: number }
 
-export type ConsentDecision = { id: string; allow: boolean }
+/**
+ * A human's answer to one consent.
+ *
+ * `scope` is how "allow, and stop asking me for this run" is said. It is
+ * OPTIONAL and its absence means 'once', so the renderer — which does not send
+ * it, and which this change does not touch — keeps exactly its current
+ * meaning. Only 'session' widens anything, and only for the one sessionId and
+ * operation kind that was on screen when the human answered.
+ *
+ * Nothing here is written to disk. Allowances live in memory in
+ * src/main/consent.ts and die with the process, so a restart always re-asks.
+ */
+export type ConsentDecision = { id: string; allow: boolean; scope?: 'once' | 'session' }
 
 /**
  * Network trust. `trusted` is NOT the OS public/private flag — that is user-set and
@@ -215,6 +290,8 @@ export const CH = {
   vaultVersions: 'vault:versions',
   vaultVersionText: 'vault:version-text',
   vaultMkdir: 'vault:mkdir',
+  vaultMove: 'vault:move',
+  vaultUndoMove: 'vault:undo-move',
 
   claudeNewSession: 'claude:new-session',
   claudeSend: 'claude:send',
@@ -271,6 +348,26 @@ export type Api = {
      * a drive letter, and any name the explorer would then hide.
      */
     mkdir(path: string): Promise<void>
+    /**
+     * Re-file one note, reversibly. The primitive an agent files with.
+     *
+     * Nothing is deleted: the copy lands at `to` and the ORIGINAL is moved into
+     * `<vault>/.trash/`, which is HIDDEN, so it leaves the explorer, the
+     * database and the graph without leaving the disk. `to` already existing is
+     * refused rather than overwritten — a `MoveConflict`, which arrives as
+     * itself over the bridge, the way SaveConflict does.
+     *
+     * Keep the returned `id`. It is the whole undo, and it survives a restart
+     * because the journal is a file, not memory.
+     */
+    move(from: string, to: string): Promise<MoveRecord>
+    /**
+     * Put one move back: original returned to `from`, the copy at `to` trashed.
+     *
+     * Refused if `from` is occupied again, and refused a second time for the
+     * same id. Still nothing is deleted.
+     */
+    undoMove(id: string): Promise<void>
   }
   corner: {
     items(): Promise<CornerItem[]>

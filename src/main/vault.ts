@@ -33,7 +33,10 @@
  * and no filesystem access.
  */
 import {
+  appendFileSync,
+  constants,
   copyFileSync,
+  existsSync,
   mkdirSync,
   readFileSync,
   renameSync,
@@ -41,13 +44,17 @@ import {
   unlinkSync,
   writeFileSync,
 } from 'node:fs'
+import { randomUUID } from 'node:crypto'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type {
+  Actor,
+  MoveRecord,
   VaultGraph,
   VaultNote,
   VaultNoteBody,
   VaultTreeNode,
 } from '../shared/ipc.js'
+import { gate } from './consent.js'
 import { parseWikilinks } from '../shared/wikilink.ts'
 import { parseFrontmatter, parseList, type VaultNoteMeta } from '../shared/notemeta.ts'
 
@@ -131,12 +138,14 @@ function scrub(message: string): string {
  * One funnel rather than a scrub() at each throw site, because the rule is
  * per-BOUNDARY, not per-call: everything read() and save() raise crosses IPC,
  * and a new fs call added later would otherwise leak by default. Our own
- * `vault:` errors and SaveConflict are rethrown untouched — they name no path,
- * and SaveConflict must arrive as itself or the renderer's ConflictDialog never
- * fires.
+ * `vault:` errors, SaveConflict and MoveConflict are rethrown untouched — they
+ * name no path the caller did not already supply, and both conflict classes
+ * must arrive AS THEMSELVES or the renderer cannot tell a collision from a
+ * disk failure. Wrapping them in a plain Error, which the `vault: ` branch
+ * below would do, is exactly the bug that funnel is here to prevent.
  */
 function fsError(e: unknown): Error {
-  if (e instanceof SaveConflict) return e
+  if (e instanceof SaveConflict || e instanceof MoveConflict) return e
   const message = e instanceof Error ? e.message : String(e)
   return message.startsWith('vault: ') ? new Error(message) : new Error(scrub(message))
 }
@@ -158,13 +167,39 @@ function fsError(e: unknown): Error {
  * make every note reached that way unopenable.
  */
 function resolveInVault(rel: string): string {
-  const root = resolve(VAULT_DIR)
+  return resolveUnder(resolve(VAULT_DIR), rel, 'vault: path escapes the vault')
+}
+
+/**
+ * The same lexical containment, against `<vault>/.trash`.
+ *
+ * Needed because a move's trash destination and an undo's trash SOURCE are both
+ * paths this file constructs, and one of them — `MoveEntry.trash` — comes back
+ * off disk from a file sitting inside the user's own vault. A `..` written into
+ * that field by anything else would otherwise make `undoMove()` rename a file
+ * from anywhere on the disk into the vault. Guarding a path we appear to own is
+ * cheap; the alternative is trusting a file we do not control.
+ *
+ * The rule itself is factored out rather than restated for the third time in
+ * this codebase — versions.ts:resolveInBackups is the second copy, and its own
+ * comment asks for exactly this fold. That one is left alone here only because
+ * this task is additive to vault.ts.
+ */
+function resolveInTrash(rel: string): string {
+  return resolveUnder(
+    resolve(VAULT_DIR, TRASH),
+    rel,
+    'vault: path escapes the trash',
+  )
+}
+
+function resolveUnder(root: string, rel: string, refusal: string): string {
   const abs = resolve(root, rel)
   const inside = relative(root, abs)
   // '' is the root itself, which is a directory and not a note. A leading '..'
   // or an absolute answer both mean the path climbed out.
   if (inside === '' || inside === '..' || inside.startsWith(`..${sep}`) || isAbsolute(inside)) {
-    throw new Error('vault: path escapes the vault')
+    throw new Error(refusal)
   }
   return abs
 }
@@ -338,9 +373,13 @@ export async function save(
   path: string,
   text: string,
   mtime: number,
+  actor: Actor,
 ): Promise<VaultNote> {
   const safePath = requirePath(path)
   const safeMtime = requireMtime(mtime)
+  // Before the stat, before the backup, before the write. A denied consent is
+  // a statement about the disk — nothing below this line has run.
+  await gate(actor, 'save', [safePath])
   let written: number
   try {
     const abs = resolveInVault(safePath)
@@ -437,8 +476,9 @@ const HIDDEN = new Set(['.git', '.obsidian', '.trash', 'node_modules', '__pycach
  * nothing. Letting EEXIST through is what puts a real sentence in front of the
  * user.
  */
-export async function mkdir(path: string): Promise<void> {
+export async function mkdir(path: string, actor: Actor): Promise<void> {
   const safePath = requirePath(path)
+  await gate(actor, 'mkdir', [safePath])
   try {
     const abs = resolveInVault(safePath)
     const name = basename(abs)
@@ -449,6 +489,279 @@ export async function mkdir(path: string): Promise<void> {
   } catch (e) {
     throw fsError(e)
   }
+}
+
+/**
+ * Something is already where a file was about to go.
+ *
+ * A distinct class rather than a `vault: …` string for the same reason
+ * SaveConflict is one: the renderer has to be able to tell "there is a note
+ * there already, pick another name" apart from every other fs failure, and it
+ * cannot do that by matching on a message. Carries the path it collided on so
+ * the dialog can name it — that path came FROM the renderer, so echoing it back
+ * leaks nothing `scrub()` protects.
+ *
+ * Fields are declared and assigned explicitly, not as TS parameter properties,
+ * for the reason stated on SaveConflict: this module is imported directly by
+ * `node --test` under type stripping.
+ */
+export class MoveConflict extends Error {
+  path: string
+  constructor(path: string) {
+    super('Something is already at that path.')
+    this.name = 'MoveConflict'
+    this.path = path
+  }
+}
+
+/** `<vault>/.trash` — already in HIDDEN, so nothing under it is ever listed. */
+const TRASH = '.trash'
+
+/**
+ * The move journal: `<vault>/.trash/moves.jsonl`, append-only, one JSON object
+ * per line.
+ *
+ * It lives BESIDE THE DATA, not in Electron's userData, and the deciding
+ * argument is that a journal entry is useless without the trashed original it
+ * points at. Splitting them puts the two halves of one undo on different
+ * lifecycles: copy the vault to another machine and the notes arrive with no
+ * way to unfile them; clear app data and the trash fills with files nothing can
+ * name. Keeping both under `.trash/` means the undo travels with the thing it
+ * undoes, and a vault backup backs up its own history.
+ *
+ * The cost of that choice is that the journal sits inside the user's files.
+ * `.trash` is in HIDDEN, so `tree()` skips it and `list()`/`graph()` are built
+ * from `tree()` — the journal is invisible to the explorer, the database and
+ * the graph. It is also not `.md`, so it could not be indexed as a note even if
+ * HIDDEN changed.
+ *
+ * Append-only is what makes an undo record honest under a crash: an entry is
+ * never rewritten, so a torn write can only ever damage the LAST line, and
+ * `readJournal()` drops a line it cannot parse. Undoing appends a second record
+ * `{ undo: <id> }` rather than editing the first.
+ */
+const JOURNAL = 'moves.jsonl'
+
+/** A journal move record. `trash` is relative to `.trash/` and stays in main. */
+type MoveEntry = MoveRecord & { trash: string }
+
+/** One journal line: a move, or the tombstone that undid one. */
+type JournalLine = MoveEntry | { undo: string; at: number }
+
+function journalPath(): string {
+  return resolve(VAULT_DIR, TRASH, JOURNAL)
+}
+
+/**
+ * The journal as it stands on disk, read fresh every time.
+ *
+ * Deliberately NOT memoised: this is the state an undo is authorised against,
+ * and a stale copy would let the same move be undone twice. It is also what
+ * makes the journal survive a restart without any load step — there is no
+ * in-memory journal to lose.
+ */
+function readJournal(): { moves: Map<string, MoveEntry>; undone: Set<string> } {
+  const moves = new Map<string, MoveEntry>()
+  const undone = new Set<string>()
+
+  let text: string
+  try {
+    text = readFileSync(journalPath(), 'utf8')
+  } catch {
+    // No journal is not an error: it is a vault nothing has been moved in.
+    return { moves, undone }
+  }
+
+  for (const line of text.split('\n')) {
+    if (!line.trim()) continue
+    let rec: JournalLine
+    try {
+      rec = JSON.parse(line)
+    } catch {
+      // A half-written last line from a crash. Skipping it costs one undo;
+      // failing here would cost every undo in the file.
+      continue
+    }
+    if (!rec || typeof rec !== 'object') continue
+    if ('undo' in rec && typeof rec.undo === 'string') undone.add(rec.undo)
+    else if ('id' in rec && typeof rec.id === 'string') moves.set(rec.id, rec)
+  }
+  return { moves, undone }
+}
+
+function appendJournal(rec: JournalLine): void {
+  mkdirSync(resolve(VAULT_DIR, TRASH), { recursive: true })
+  appendFileSync(journalPath(), `${JSON.stringify(rec)}\n`, 'utf8')
+}
+
+/**
+ * Refuse a path the explorer would not show.
+ *
+ * The rule mkdir() applies to a new folder name, applied to every SEGMENT of a
+ * path instead: filing a note into `.obsidian/` or `.trash/` would make it
+ * vanish from the sidebar, the database and the graph while reporting success,
+ * which is the same defect mkdir() refuses for. Pointing a move INTO `.trash/`
+ * would additionally put a file where the journal's own bookkeeping lives.
+ *
+ * Segments come off the RESOLVED path, not the caller's string, so
+ * `Notes/../.git/x.md` is caught as `.git` rather than read as three innocent
+ * segments.
+ */
+function requireVisible(abs: string): void {
+  for (const part of relative(resolve(VAULT_DIR), abs).split(sep)) {
+    if (part.startsWith('.') || HIDDEN.has(part)) {
+      throw new Error('vault: the explorer does not show that path')
+    }
+  }
+}
+
+/** Vault-relative, forward slashes — the canonical form for the contract. */
+function relOf(abs: string): string {
+  return relative(resolve(VAULT_DIR), abs).split(sep).join('/')
+}
+
+/**
+ * Move a note, reversibly. The primitive an agent files with.
+ *
+ * The whole point is that NOTHING here deletes. The original is not unlinked at
+ * the end of a successful move, it is RENAMED into `<vault>/.trash/` with its
+ * relative path preserved and a timestamp appended — the same shape `backup()`
+ * uses for `.backups/`, for the same reason: a flat trash cannot tell
+ * `Projects/AI.md` from `Archive/AI.md`.
+ *
+ * Order is the design, and it is copy-verify-then-trash rather than rename:
+ *
+ *  1. `resolveInVault()` BOTH ends. A move writes in two places, so one guard
+ *     is half a guard. This is the only thing between the renderer and the
+ *     rest of the disk.
+ *  2. Destination occupied -> MoveConflict, nothing touched. The
+ *     no-silent-overwrite rule save() keeps, kept here. `COPYFILE_EXCL` below
+ *     enforces it a second time at the kernel, so a file that appears between
+ *     the check and the copy still cannot be clobbered.
+ *  3. Source missing -> refuse.
+ *  4. Destination directory created if needed.
+ *  5. COPY, then verify the byte length BEFORE anything happens to the
+ *     original. A short copy at this point is a thrown error over an intact
+ *     source; a short copy after a rename would be the loss this exists to
+ *     prevent.
+ *  6. Only now is the original moved aside, by rename. Never `unlink`.
+ *  7. Journal the move so it can be undone.
+ *
+ * If any step throws, the original is still exactly where it started. Steps 5
+ * and 6 can leave litter — a truncated copy at `to`, or a copy at `to` whose
+ * trash rename failed — and litter is the deliberate trade: cleaning it up
+ * means deleting a file, and this feature does not delete files.
+ *
+ * `mkdir()` above is deliberately NOT reused for step 4. Its containment check
+ * is reused (`resolveInVault`) and so is its hidden-name rule (see
+ * `requireVisible`), but its two remaining behaviours are the exact opposite of
+ * what a destination folder needs: it is non-recursive and it lets EEXIST
+ * through, both so the "+ Folder" button reports honestly. For a move, a
+ * destination folder that already exists is the NORMAL case, and what is left
+ * after removing those two behaviours is one `mkdirSync` call.
+ *
+ * ponytail: files only. A folder move is a walk, N copies and a partial-failure
+ * story that has to be journalled per file; build it when something actually
+ * asks to file a folder.
+ */
+export async function move(from: string, to: string, actor: Actor): Promise<MoveRecord> {
+  const safeFrom = requirePath(from)
+  const safeTo = requirePath(to)
+  // Both ends are named in the prompt, because "the agent wants to move a file"
+  // is not something a human can judge without knowing where it is going.
+  await gate(actor, 'move', [`${safeFrom} -> ${safeTo}`])
+  let entry: MoveEntry
+  try {
+    const fromAbs = resolveInVault(safeFrom)
+    const toAbs = resolveInVault(safeTo)
+    requireVisible(fromAbs)
+    requireVisible(toAbs)
+
+    if (existsSync(toAbs)) throw new MoveConflict(relOf(toAbs))
+    const src = statSync(fromAbs, { throwIfNoEntry: false })
+    if (!src) throw new Error('vault: there is nothing at that path to move')
+    if (!src.isFile()) throw new Error('vault: only a file can be moved')
+
+    mkdirSync(dirname(toAbs), { recursive: true })
+    // EXCL, not a plain copy: this call fails rather than overwrites, so the
+    // rule survives the gap between the check above and this line.
+    copyFileSync(fromAbs, toAbs, constants.COPYFILE_EXCL)
+    if (statSync(toAbs).size !== src.size) {
+      throw new Error('vault: the copy came out the wrong size, nothing was moved')
+    }
+
+    const id = randomUUID()
+    // The timestamp keeps repeated moves of one path apart and sorts; the id
+    // fragment is what makes that actually true, since two moves inside one
+    // millisecond would otherwise land on the same trash name and the second
+    // copy would overwrite the first — a delete by another name.
+    const trashRel = `${relOf(fromAbs)}.${stamp()}.${id.slice(0, 8)}`
+    const trashAbs = resolveInTrash(trashRel)
+    mkdirSync(dirname(trashAbs), { recursive: true })
+    renameSync(fromAbs, trashAbs)
+
+    entry = { id, from: relOf(fromAbs), to: relOf(toAbs), trash: trashRel, at: Date.now() }
+    appendJournal(entry)
+  } catch (e) {
+    throw fsError(e)
+  }
+  // A move changes which paths exist, so the memo behind list() and graph()
+  // describes a vault that is one note out of date. Same reason save() does it.
+  invalidateGraph()
+  return { id: entry.id, from: entry.from, to: entry.to, at: entry.at }
+}
+
+/**
+ * Reverse one move.
+ *
+ * Authorised entirely from the journal on disk, so it works after a restart and
+ * cannot be talked into anything that was never recorded. Refusals, in order:
+ * an id that is not in the journal, an id already undone, and an origin that
+ * something else now occupies — putting the original back over a newer file
+ * would be the silent overwrite this whole feature exists to avoid.
+ *
+ * The copy at `to` is TRASHED, not deleted. "Remove the file at `to`" is the
+ * job; `unlink` is not how it gets done, because an undo of an undo has to be
+ * possible and because nothing in this feature deletes.
+ *
+ * The original goes back FIRST. If the second half then fails the user has two
+ * copies, which is recoverable; the other order risks a moment with none.
+ */
+export async function undoMove(id: string, actor: Actor): Promise<void> {
+  const safeId = requirePath(id)
+  await gate(actor, 'undo-move', [safeId])
+  try {
+    const { moves, undone } = readJournal()
+    const entry = moves.get(safeId)
+    if (!entry) throw new Error('vault: no such move')
+    if (undone.has(safeId)) throw new Error('vault: that move has already been undone')
+
+    // The journal is a file in the vault, so its contents are re-guarded rather
+    // than trusted: an edited `trash` field would otherwise rename a file from
+    // anywhere on disk into the vault.
+    const fromAbs = resolveInVault(entry.from)
+    const toAbs = resolveInVault(entry.to)
+    const trashAbs = resolveInTrash(entry.trash)
+
+    if (existsSync(fromAbs)) throw new MoveConflict(entry.from)
+    if (!existsSync(trashAbs)) throw new Error('vault: the original is no longer in the trash')
+
+    // The folder the note came from may have been removed since.
+    mkdirSync(dirname(fromAbs), { recursive: true })
+    renameSync(trashAbs, fromAbs)
+
+    // Gone already is not a failure — the undo still had work to do and did it.
+    if (existsSync(toAbs)) {
+      const dest = resolveInTrash(`${entry.to}.${stamp()}.${safeId.slice(0, 8)}`)
+      mkdirSync(dirname(dest), { recursive: true })
+      renameSync(toAbs, dest)
+    }
+
+    appendJournal({ undo: safeId, at: Date.now() })
+  } catch (e) {
+    throw fsError(e)
+  }
+  invalidateGraph()
 }
 
 /**

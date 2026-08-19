@@ -23,7 +23,16 @@ const PANE = join(HERE, '..', 'src', 'renderer', 'panes', 'vault')
 const src = (name) => readFileSync(join(PANE, name), 'utf8')
 
 /** The seven icons that have no implementation behind them. */
-const UNBUILT = ['search', 'bookmarks', 'graph', 'canvas', 'calendar', 'terminal', 'plugins']
+/**
+ * Ribbon ids that still fall through to <SidebarPlaceholder>.
+ *
+ * `terminal`, `calendar` and `bookmarks` have left this list: each now renders
+ * its own panel from VaultPane rather than a description of itself. Shrinking
+ * this list is the point of the work, so it is expected to keep shrinking —
+ * what must not happen is an id leaving it while still having no panel, which
+ * is what the else-branch test above catches.
+ */
+const UNBUILT = ['search', 'graph', 'canvas', 'plugins']
 
 test('the sidebar has an else branch, so no ribbon icon can empty it', () => {
   const code = src('VaultPane.tsx')
@@ -58,8 +67,10 @@ test('featureForRibbon binds icons to roadmap entries, and only real ones', () =
   assert.equal(featureForRibbon('search')?.label, 'Fast search')
   assert.equal(featureForRibbon('plugins')?.label, 'API / plugin ecosystem')
   assert.equal(featureForRibbon('canvas')?.label, 'Whiteboard / canvas view')
-  // No entry is not a failure — the placeholder renders without one.
-  assert.equal(featureForRibbon('bookmarks'), undefined)
+  // Bookmarks USED to be the no-entry case and is now a built feature with its
+  // own panel, so `graph` carries that half of the contract: no entry is not a
+  // failure, because the placeholder renders without one.
+  assert.equal(featureForRibbon('graph'), undefined)
   assert.equal(featureForRibbon('nonsense'), undefined)
 })
 

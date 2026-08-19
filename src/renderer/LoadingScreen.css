@@ -14,51 +14,28 @@
   position: fixed;
   inset: 0;
   z-index: 100;
-  /**
-   * The field is deliberately WIDER AND TALLER than the window — see the
-   * `ceil(...) + 1` in LoadingScreen.tsx — so there is a partial cell at every
-   * edge and this clips it.
-   *
-   * That clipping is the point. A board that stopped neatly inside the window
-   * would read as a panel sitting on the screen; one that runs off all four
-   * sides reads as the screen itself being the board.
-   */
+  /* The field overshoots the window by a cell on every side so there is a
+     partial cell at each edge to clip. A field that ended flush would read as a
+     panel sitting on the screen rather than as the screen itself. */
   overflow: hidden;
   background: var(--bg-app);
 
   /* ------------------------------------------------------- cell geometry
    * UNITLESS on purpose. These three numbers are multiplied by 1em below,
-   * and LoadingScreen.tsx reads them straight back off the computed style,
-   * multiplying by the RESOLVED font-size to count rows and columns.
+   * and bootBoard.ts is handed them at runtime after LoadingScreen.tsx reads
+   * them off this element's computed style and scales them by the RESOLVED
+   * font-size.
    *
    * One source of truth, because the failure mode of two is silent: a tile
-   * size duplicated in the TSX would drift the moment either side changed,
-   * and the result is a field that no longer lines up with its own letters.
+   * size duplicated in the TS would drift the moment either side changed,
+   * and the result is letters that no longer line up with their wells.
    */
   --cell-w: 0.72;
   --cell-h: 1.16;
   --cell-gap: 0.22;
 
-  /**
-   * EVERY cell is a child of ONE grid — the lettered ones and the thousand
-   * blank ones alike.
-   *
-   * That is the entire alignment strategy, and it is why there is no
-   * alignment maths anywhere in this file. The obvious cheaper build is to
-   * paint the field as a repeating background gradient behind a centred row
-   * of tiles, which costs one element instead of thousands. It was rejected:
-   * the pattern origin and the centred row are positioned by two different
-   * mechanisms, so keeping them in step needs a calc() chain against the
-   * phrase width, the gap, and the percentage-background-position formula —
-   * and every one of those drifts independently. Cells in a shared grid
-   * cannot drift, because there are not two things to align.
-   */
-  display: grid;
-  grid-template-columns: repeat(var(--cols, 1), calc(var(--cell-w) * 1em));
-  grid-auto-rows: calc(var(--cell-h) * 1em);
-  gap: calc(var(--cell-gap) * 1em);
-  align-content: center;
-  justify-content: center;
+  /* One cell to the next. The unit the crawl is counted in. */
+  --pitch: calc((var(--cell-h) + var(--cell-gap)) * 1em);
 
   font-family: var(--font-terminal, ui-monospace, monospace);
   font-size: clamp(1.4rem, 4.2vw, 2.6rem);
@@ -73,7 +50,84 @@
 
   /* Fades itself out of existence. The screen underneath is already painted, so
      this is a reveal rather than a load — nothing is waiting on the fade. */
-  animation: boot-out var(--duration-normal) var(--ease-out) 2.65s both;
+  animation: boot-out var(--duration-normal) var(--ease-out) 3.65s both;
+}
+
+/**
+ * TWO GRIDS, NOT ONE, AND THIS IS THE INTERESTING PART.
+ *
+ * The wells hold still and only the letters crawl. That rules out the single
+ * grid this used to be — moving the letters within it would move their cells,
+ * which is the thing being avoided.
+ *
+ * So the field is one grid of blank wells and the letters are another, and they
+ * are kept in register WITHOUT any shared coordinates: both are
+ * `position: absolute; inset: 0` and both centre their own tracks in the same
+ * box, with the same cell size and the same gap. The letters therefore sit
+ * `((cols - blockWidth) * pitch) / 2` from the field's edge, which lands on a
+ * cell boundary exactly when `cols - blockWidth` is even. bootBoard.ts forces
+ * that parity, and `test/boot-board.test.mjs` checks it across a few thousand
+ * window sizes. There is no alignment maths anywhere else, because there is
+ * nothing else to align.
+ */
+.boot-field,
+.boot-letters {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  grid-auto-rows: calc(var(--cell-h) * 1em);
+  gap: calc(var(--cell-gap) * 1em);
+  align-content: center;
+  justify-content: center;
+}
+
+/* Every cell the window can show, and nothing else. Static: it is the ground. */
+.boot-field {
+  grid-template-columns: repeat(var(--cols, 1), calc(var(--cell-w) * 1em));
+}
+
+/**
+ * Only the phrase block — 18 x 3 cells, not the thousand the field has. It is
+ * centred rather than positioned, so it needs no surrounding blanks at all.
+ *
+ * THE CRAWL starts only AFTER the scramble has landed. During the scramble the
+ * flipping cells paint their own well colour to make the flap read, and a
+ * painted cell sliding over a stationary one is exactly the moving box this is
+ * meant to avoid. By the time it moves, every cell here is a bare glyph on a
+ * transparent ground.
+ *
+ * Counted in CELLS rather than pixels so it holds at every font size: the board
+ * is `clamp(1.4rem, 4.2vw, 2.6rem)`, so a pixel figure that read as a slow
+ * drift on a wide window would be a third of the screen on a narrow one.
+ *
+ * `linear`, deliberately. Credits do not ease — an eased crawl reads as the
+ * board settling, which is the opposite of the intent.
+ */
+.boot-letters {
+  grid-template-columns: repeat(var(--block-w, 1), calc(var(--cell-w) * 1em));
+  animation: boot-crawl 2.6s linear 1.4s both;
+}
+
+/**
+ * A WHOLE NUMBER OF CELLS, and that is not a detail.
+ *
+ * `--pitch` is one cell plus one gap, so the crawl lands the letters back on
+ * wells only at integer multiples of it. This was 2.5, which meant the board
+ * came to rest — `both` holds the end frame — with every glyph sitting exactly
+ * half a cell down, straddling the gap between two wells. The letters read as
+ * floating ON the board rather than sitting IN it, which is the one thing the
+ * well modelling exists to convey.
+ *
+ * Measured before the fix: 0px off at 1.2s, 6.8px at 2.6s, 20.7px at 3.9s,
+ * heading for a full half-pitch (~28px) at rest.
+ *
+ * Three, not two, because DRIFT_ROWS carries exactly three cells of cover at
+ * each end of the field, and because three is what the suite already said this
+ * animation was for.
+ */
+@keyframes boot-crawl {
+  from { transform: translateY(0); }
+  to   { transform: translateY(calc(var(--pitch) * 3)); }
 }
 
 @keyframes boot-out {
@@ -154,6 +208,21 @@
 .flap-half--bottom,
 .flap-leaf--back { bottom: 0; }
 
+/**
+ * A LANDED letter: the glyph and nothing else.
+ *
+ * No background and no `overflow: hidden`, which is what lets it crawl. The
+ * well underneath belongs to the field and stays put; if this cell painted one
+ * too, the crawl would drag a rectangle down the screen. And a clipping box
+ * would cut the glyph in half as it crossed the gap between two wells.
+ */
+.flap-glyph {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: var(--accent);
+}
+
 .flap-char {
   position: absolute;
   left: 0;
@@ -205,9 +274,16 @@
 /* The tumble is the one thing here that is purely vestibular, so it goes. The
    board still changes phrase — the component swaps the glyphs directly — and
    the screen still fades out, because opacity aids comprehension. */
+/* The tumble and the crawl are both purely vestibular, so both go. The board
+   still changes phrase — the component swaps the glyphs directly — and the
+   screen still fades out, because opacity aids comprehension. */
+/* The tumble and the crawl are both purely vestibular, so both go. The board
+   still shows its phrase — the component swaps the glyphs directly — and the
+   screen still fades out, because opacity aids comprehension. */
 @media (prefers-reduced-motion: reduce) {
   .flap-leaf { animation: none; }
   .boot { animation-duration: 1ms; }
+  .boot-letters { animation: none; }
 }
 
 @media (prefers-reduced-transparency: reduce) {
@@ -222,5 +298,6 @@
  */
 @media (prefers-contrast: more) {
   .flap-tile { box-shadow: inset 0 0 0 1px var(--separator-opaque); }
-  .flap-char { color: var(--label); }
+  .flap-char,
+  .flap-glyph { color: var(--label); }
 }

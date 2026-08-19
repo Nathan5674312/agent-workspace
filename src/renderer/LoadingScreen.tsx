@@ -1,4 +1,12 @@
 import { memo, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
+import {
+  MAX_LINE,
+  boardSize,
+  fieldSize,
+  layout,
+  noiseLike,
+  sampleChar,
+} from './bootBoard.js'
 import './LoadingScreen.css'
 
 /**
@@ -23,55 +31,36 @@ import './LoadingScreen.css'
  * padTo and className were props with exactly one caller. They are constants or
  * CSS now. What remains is the flap engine, which is the part worth having.
  *
- * The board is now FULL SCREEN. The phrase occupies a run of cells in the middle
- * row of a field of identical blank wells that runs off all four edges, which is
- * how a real departure board looks when most of it is idle. See `useField`.
+ * The board is FULL SCREEN and MULTI-LINE, and ONLY THE CELLS THAT LAND ON A
+ * LETTER EVER MOVE. All the geometry behind that lives in `bootBoard.ts`, which
+ * is plain .ts so it can actually be run by a test; this file is the engine and
+ * the copy.
  */
 
-const CHARSET = 'ABCDEFGHIJKLMNOPQRSTUVWXYZ'
 /**
- * Intermediate glyphs every tile tumbles through before it lands.
+ * Intermediate glyphs a tile tumbles through before it lands.
  *
- * The whole board scrambles and then lands AT ONCE, so this number is the only
- * thing setting how long the scramble reads for: 18 x 70ms = ~1.26s. At the
- * original 6 x 110ms it was over before you could focus on it.
+ * The board scrambles and then lands AT ONCE, so this number is the only thing
+ * setting how long the scramble reads for: 18 x 70ms = ~1.26s. At the original
+ * 6 x 110ms it was over before you could focus on it.
  */
 const FLIPS_PER_CHAR = 18
 /** Seconds per flap. Must match the flap-front/flap-back durations in the CSS. */
 const FLIP_DURATION = 0.07
-/** Milliseconds a landed phrase is held before the board scrambles again. */
-const HOLD_MS = 1500
 /**
  * Minimum time the boot screen stays up.
  *
- * Sized to the animation, not guessed: the opening scramble is
- * (FLIPS_PER_CHAR + 1) x FLIP_DURATION = ~1.33s, and the phrase then needs to
- * be READABLE once it lands, which the first version never allowed for -- it
- * resolved and vanished inside a blink. Opening + a beat to read it + the fade.
- * Kept in sync with the boot-out delay in LoadingScreen.css.
- */
-const BOOT_MIN_MS = 3000
-
-const sampleChar = () => CHARSET.charAt(Math.floor(Math.random() * CHARSET.length))
-
-const randomPhrase = (width: number) =>
-  Array.from({ length: width }, sampleChar).join('')
-
-/**
- * Centre the phrase in a fixed-width board.
+ * Sized to the animation, not guessed, and it is now the SUM OF THREE THINGS
+ * that all live in LoadingScreen.css and must be changed together:
  *
- * Was `padEnd`, which is two bugs. The obvious one: every phrase shorter than
- * the board carried its blank tiles on the right, so the text sat visibly left
- * of centre — 'VAULT ONLINE' in 13 tiles was off by half a tile.
+ *   scramble   (FLIPS_PER_CHAR + 1) x FLIP_DURATION   ~1.33s
+ *   crawl      `boot-crawl` 2.6s, delayed 1.4s        ends 4.00s
+ *   fade       `boot-out` --duration-normal @ 3.65s   ends 4.00s
  *
- * The quiet one: the width was a hardcoded 13 and the `.slice()` that enforced
- * it silently truncated 'AGENT WORKSPACE' to 'AGENT WORKSPA'. The width is now
- * derived from the longest phrase, so the slice can never cut a word again.
+ * Cut this and the crawl is truncated mid-move, which reads as the splash being
+ * yanked away rather than finishing.
  */
-const padCentre = (phrase: string, width: number) => {
-  const left = Math.floor((width - phrase.length) / 2)
-  return phrase.padStart(phrase.length + Math.max(0, left), ' ').padEnd(width, ' ')
-}
+const BOOT_MIN_MS = 4000
 
 type Tile = { current: string; next: string; flipping: boolean; tick: number }
 
@@ -91,13 +80,13 @@ function usePrefersReducedMotion(): boolean {
 }
 
 /**
- * The blank cells surrounding the phrase.
+ * A run of blank cells.
  *
  * `memo` is load-bearing, not tidiness. There are up to a few thousand of these
  * and the tile state above updates on nearly every animation frame; without the
  * bailout, every frame of the scramble would reconcile the entire field to
- * produce fifteen changed glyphs. Count is the only input, and it changes only
- * when the window is resized.
+ * produce a few dozen changed glyphs. Count is the only input, and it changes
+ * only when the window is resized.
  */
 const Blanks = memo(function Blanks({ count }: { count: number }) {
   return (
@@ -110,7 +99,8 @@ const Blanks = memo(function Blanks({ count }: { count: number }) {
 })
 
 /**
- * How many cells cover the window.
+ * How many cells cover the window. The arithmetic is in `fieldSize`; this hook
+ * is only the measuring and the plumbing.
  *
  * Geometry is read off the element's own computed style rather than duplicated
  * here — LoadingScreen.css owns `--cell-w/h/gap` as unitless numbers, and the
@@ -123,12 +113,13 @@ const Blanks = memo(function Blanks({ count }: { count: number }) {
  */
 function useField(
   ref: React.RefObject<HTMLDivElement | null>,
-  boardWidth: number,
+  width: number,
+  blockRows: number,
 ): { cols: number; rows: number } {
   const [field, setField] = useState({ cols: 0, rows: 0 })
 
   // Layout, not effect: this measures and fills before paint, so the board is
-  // never briefly a bare row of letters on an empty screen.
+  // never briefly a bare block of letters on an empty screen.
   useLayoutEffect(() => {
     const el = ref.current
     if (!el) return
@@ -136,42 +127,24 @@ function useField(
     const measure = () => {
       const cs = getComputedStyle(el)
       const em = parseFloat(cs.fontSize)
-      const w = parseFloat(cs.getPropertyValue('--cell-w')) * em
-      const h = parseFloat(cs.getPropertyValue('--cell-h')) * em
-      const gap = parseFloat(cs.getPropertyValue('--cell-gap')) * em
-      if (!(w > 0) || !(h > 0)) return
+      const cell = {
+        w: parseFloat(cs.getPropertyValue('--cell-w')) * em,
+        h: parseFloat(cs.getPropertyValue('--cell-h')) * em,
+        gap: parseFloat(cs.getPropertyValue('--cell-gap')) * em,
+      }
+      if (!(cell.w > 0) || !(cell.h > 0)) return
 
-      /**
-       * `ceil` covers the window; the `+ 1` overshoots it by a whole cell so
-       * there is a PARTIAL cell at every edge for `.boot`'s overflow to clip.
-       * A field that ended flush would read as a panel, not as the screen.
-       */
-      let cols = Math.ceil((el.clientWidth + gap) / (w + gap)) + 1
-      let rows = Math.ceil((el.clientHeight + gap) / (h + gap)) + 1
-
-      // Never narrower than the phrase, or it wraps onto a second row.
-      cols = Math.max(cols, boardWidth)
-
-      /**
-       * Parity, so the phrase lands DEAD centre rather than half a cell off.
-       * The side padding is `(cols - boardWidth) / 2`, which only divides
-       * evenly when the two share a parity; and a true middle row exists only
-       * when the row count is odd. Half a cell is ~15px at this size — small,
-       * but on a grid this regular it is the kind of thing you see without
-       * being able to say what is wrong.
-       */
-      if ((cols - boardWidth) % 2 !== 0) cols += 1
-      if (rows % 2 === 0) rows += 1
-
-      el.style.setProperty('--cols', String(cols))
-      setField((p) => (p.cols === cols && p.rows === rows ? p : { cols, rows }))
+      const next = fieldSize(el.clientWidth, el.clientHeight, cell, width, blockRows)
+      el.style.setProperty('--cols', String(next.cols))
+      el.style.setProperty('--block-w', String(width))
+      setField((p) => (p.cols === next.cols && p.rows === next.rows ? p : next))
     }
 
     measure()
     const ro = new ResizeObserver(measure)
     ro.observe(el)
     return () => ro.disconnect()
-  }, [ref, boardWidth])
+  }, [ref, width, blockRows])
 
   return field
 }
@@ -179,32 +152,33 @@ function useField(
 function SplitFlapText({ phrases }: { phrases: string[] }) {
   const reduced = usePrefersReducedMotion()
   const raf = useRef<number | null>(null)
-  const timer = useRef<number | null>(null)
   const currentText = useRef('')
   const board = useRef<HTMLDivElement>(null)
 
-  /** Wide enough for the longest phrase, so nothing is ever cut. */
-  const width = useMemo(
-    () => phrases.reduce((m, p) => Math.max(m, p.length), 1),
-    [phrases],
-  )
+  /** Wide enough for the longest LINE and tall enough for the most lines. */
+  const { width, rows } = useMemo(() => boardSize(phrases, MAX_LINE), [phrases])
   const padded = useMemo(
-    () => phrases.map((p) => padCentre(p, width)),
-    [phrases, width],
+    () => phrases.map((p) => layout(p, MAX_LINE, width, rows)),
+    [phrases, width, rows],
   )
-  // Opens on nonsense, deliberately. The board is a mechanism; watching it
-  // resolve out of noise is the whole effect, and starting on the finished
-  // phrase threw that away on the one appearance that matters most.
-  const [tiles, setTiles] = useState<Tile[]>(() => createTiles(randomPhrase(width)))
+  /**
+   * Opens BLANK, for one frame, and then on masked noise.
+   *
+   * It used to open on a full rectangle of random glyphs, because the phrase was
+   * not chosen until the effect below ran. Now the effect paints the noise for
+   * the phrase it picked, so the cells that will stay empty never carry a glyph
+   * at any point.
+   */
+  const [tiles, setTiles] = useState<Tile[]>(() =>
+    createTiles(' '.repeat(width * rows)),
+  )
 
-  const field = useField(board, width)
+  const field = useField(board, width, rows)
 
   useEffect(() => {
     const stop = () => {
       if (raf.current) cancelAnimationFrame(raf.current)
-      if (timer.current) clearTimeout(timer.current)
       raf.current = null
-      timer.current = null
     }
     stop()
 
@@ -230,26 +204,64 @@ function SplitFlapText({ phrases }: { phrases: string[] }) {
         return 0
       }
 
-      const from = padCentre(currentText.current.trim(), width)
+      // The laid-out block, used as-is. It used to be re-derived with
+      // `padCentre(currentText.current.trim(), width)`, which cannot survive
+      // multiple lines — trimming a block collapses the row structure.
+      const from = currentText.current
+
       /**
-       * EVERY tile tumbles, and they all start and land on the same frame.
+       * A CELL THAT LANDS ON A SPACE IS NEVER PLANNED.
        *
-       * The original skipped tiles whose letter was not changing and staggered
-       * the rest left-to-right, which is what a real departure board does when
-       * one flight changes. It is the wrong read for a boot screen: the board
-       * dribbled into place a letter at a time and half the tiles never moved.
-       * Scrambling the whole board and snapping it shut in one beat is the
-       * effect worth having — noise, then a word.
+       * Every tile used to tumble, spaces included, so the board opened as a
+       * solid rectangle of static that resolved into a sentence — and on a
+       * three-row block that is 54 cells of noise for a phrase that might be
+       * ten letters. Planning only the letters means the SHAPE of the phrase is
+       * there from the first frame, the empty cells stay indistinguishable from
+       * the field behind them, and the work per frame drops to the cells that
+       * are actually doing something.
        */
-      const plans = target.split('').map((ch, i) => ({
-        i,
-        from: from[i] ?? ' ',
-        target: ch,
-        seq: Array.from({ length: FLIPS_PER_CHAR }, sampleChar).concat(ch),
-        step: -1,
-        done: false,
-        start: 0,
-      }))
+      type Plan = {
+        i: number
+        from: string
+        target: string
+        seq: string[]
+        step: number
+        done: boolean
+        start: number
+      }
+      const plans: Plan[] = []
+      const blanks: number[] = []
+      const chars = target.split('')
+      for (let i = 0; i < chars.length; i++) {
+        const ch = chars[i] as string
+        if (ch === ' ') {
+          blanks.push(i)
+          continue
+        }
+        plans.push({
+          i,
+          from: from[i] ?? ' ',
+          target: ch,
+          seq: Array.from({ length: FLIPS_PER_CHAR }, sampleChar).concat(ch),
+          step: -1,
+          done: false,
+          start: 0,
+        })
+      }
+
+      // Straight to blank, with no flip. There is nothing to animate to an
+      // empty cell, and a tile turning over to reveal nothing reads as a fault.
+      setTiles((prev) => {
+        if (!blanks.some((i) => prev[i] && (prev[i].current !== ' ' || prev[i].flipping))) {
+          return prev
+        }
+        const next = [...prev]
+        for (const i of blanks) {
+          const t = next[i]
+          if (t) next[i] = { current: ' ', next: ' ', flipping: false, tick: t.tick }
+        }
+        return next
+      })
 
       const total = plans.reduce((m, p) => Math.max(m, p.start + p.seq.length * flipMs), 0)
       const startedAt = performance.now()
@@ -273,8 +285,8 @@ function SplitFlapText({ phrases }: { phrases: string[] }) {
               p.step = step
               updates.push({
                 i: p.i,
-                current: step === 0 ? p.from : p.seq[step - 1],
-                next: p.seq[step],
+                current: step === 0 ? p.from : (p.seq[step - 1] as string),
+                next: p.seq[step] as string,
                 done: false,
               })
             }
@@ -307,60 +319,81 @@ function SplitFlapText({ phrases }: { phrases: string[] }) {
       return total
     }
 
-    const schedule = (delay: number) => {
-      timer.current = window.setTimeout(() => {
-        if (cancelled) return
-        index = (index + 1) % padded.length
-        schedule(HOLD_MS + animateTo(padded[index]))
-      }, delay)
-    }
-
-    // The opening scramble runs IMMEDIATELY rather than after a delay: the
-    // board is already showing noise, and the first thing it should do is
-    // resolve. Everything after that is on the hold cycle.
-    currentText.current = randomPhrase(width)
-    const opening = animateTo(padded[index] ?? '')
-    if (padded.length > 1) schedule(HOLD_MS + opening)
+    /**
+     * ONE PHRASE PER BOOT, and now that is enforced rather than incidental.
+     *
+     * It used to schedule the next phrase HOLD_MS after the last one landed —
+     * ~2.76s — which never fired in practice because the screen was gone by
+     * then. It would fire now that the boot runs to 4s, and it would be wrong:
+     * a scramble repaints well backgrounds onto the letter cells, and those
+     * cells are mid-crawl, so the board would grow a set of sliding rectangles
+     * for the length of the second scramble. The two layers exist precisely to
+     * prevent that.
+     *
+     * The scramble runs IMMEDIATELY rather than after a delay: the board should
+     * be resolving from the first frame it is on screen. The noise is MASKED to
+     * the phrase, so only cells that will hold a letter ever show a glyph.
+     */
+    const first = padded[index] ?? ''
+    currentText.current = noiseLike(first)
+    setTiles(createTiles(currentText.current))
+    animateTo(first)
 
     return () => {
       cancelled = true
       stop()
     }
-  }, [padded, width, reduced])
-
-  const settled = tiles.map((t) => t.current).join('').trimEnd()
+  }, [padded, width, rows, reduced])
 
   /**
-   * Where the phrase sits in the field, in plain cell counts.
-   *
-   * Grid auto-placement does the positioning, so this is just "how many blanks
-   * come first" and "how many come after" — no coordinates, no `grid-column`,
-   * nothing that could disagree with where the browser actually put a cell.
+   * The announced text. Row-major, so the rows have to be split apart and
+   * rejoined with spaces — otherwise 'HOW MANY FACES' and 'WILL BE IN YOUR'
+   * run together as 'HOW MANY FACESWILL BE IN YOUR'.
    */
-  const total = field.cols * field.rows
-  const lead =
-    total > 0
-      ? Math.floor((field.rows - 1) / 2) * field.cols +
-        Math.floor((field.cols - tiles.length) / 2)
-      : 0
-  const trail = Math.max(0, total - lead - tiles.length)
+  const settled = Array.from({ length: rows }, (_, r) =>
+    tiles
+      .slice(r * width, (r + 1) * width)
+      .map((t) => t.current)
+      .join('')
+      .trim(),
+  )
+    .filter(Boolean)
+    .join(' ')
 
   return (
     <div className="boot" role="status" ref={board}>
       {/* The tiles are decoration; three halves per glyph would be read out as
           gibberish. The phrase is announced once, politely, from here. */}
       <span className="flap-live" aria-live="polite">{settled}</span>
-      <Blanks count={lead} />
-      {tiles.map((tile, i) => (
-        <span className="flap-tile" aria-hidden="true" key={i}>
-          <span className="flap-half flap-half--top">
-            <span className="flap-char">{tile.current}</span>
-          </span>
-          <span className="flap-half flap-half--bottom">
-            <span className="flap-char">{tile.flipping ? tile.next : tile.current}</span>
-          </span>
-          {tile.flipping && (
-            <>
+
+      {/* The ground. Every cell the window can show, and it never moves. */}
+      <div className="boot-field" aria-hidden="true">
+        <Blanks count={field.cols * field.rows} />
+      </div>
+
+      {/* The phrase, and only the phrase. Centred rather than positioned, which
+          is why there are no blanks around it — see the note in the CSS on how
+          the two grids stay in register without sharing a coordinate. */}
+      <div className="boot-letters" aria-hidden="true">
+        {tiles.map((tile, i) =>
+          /**
+           * A LANDED cell is a bare glyph — no well, no halves, nothing that
+           * paints. The well under it belongs to the field, so the crawl moves
+           * a letter across a stationary board instead of dragging its box
+           * along with it. An empty cell renders nothing at all.
+           */
+          !tile.flipping ? (
+            <span className="flap-glyph" key={i}>
+              {tile.current === ' ' ? '' : tile.current}
+            </span>
+          ) : (
+            <span className="flap-tile" key={i}>
+              <span className="flap-half flap-half--top">
+                <span className="flap-char">{tile.current}</span>
+              </span>
+              <span className="flap-half flap-half--bottom">
+                <span className="flap-char">{tile.next}</span>
+              </span>
               {/* Keyed on `tick` so each flap is a NEW element and its CSS
                   animation restarts. Reusing the node would leave the animation
                   in its finished state and the tile would jump instead of turn. */}
@@ -370,21 +403,21 @@ function SplitFlapText({ phrases }: { phrases: string[] }) {
               <span className="flap-leaf flap-leaf--back" key={`b${tile.tick}`}>
                 <span className="flap-char">{tile.next}</span>
               </span>
-            </>
-          )}
-        </span>
-      ))}
-      <Blanks count={trail} />
+            </span>
+          ),
+        )}
+      </div>
     </div>
   )
 }
 
 /**
- * The board's copy. First one is what you actually read — the others only
- * appear if the vault is slow enough to still be loading.
+ * The board's copy. One is picked at random per boot — see the comment on
+ * `index` above for why a boot shows exactly one.
  *
- * Kept to A–Z and spaces: CHARSET is the alphabet, so a digit or punctuation
- * would land on a tile that never tumbled to it and break the illusion.
+ * Kept to CHARSET and spaces: a glyph the tiles cannot tumble to would land
+ * from nowhere. That means no apostrophes, which is why the contractions below
+ * are spelled bare.
  */
 const PHRASES = [
   // The board is a mechanism and the fun is not knowing which one you get, so
@@ -406,6 +439,28 @@ const PHRASES = [
   'LOADED',
   'READY',
   'DONE',
+
+  // Nathan's, and a different register on purpose: the machine ones say the app
+  // is up, these ask you something. A boot screen is the one surface nobody is
+  // trying to get work done on, so it is the one place a question is not an
+  // interruption. They are also the reason the board wraps — several are
+  // sentences, and a sentence does not fit on one row of a departure board.
+  'HOWS THE PROJECTS?',
+  'IS THE SUN OUT?',
+  'GOOD TO SEE YOU',
+  'ANYTHING NEW?',
+  'WHENS THE LAST TIME YOU SAID I LOVE YOU',
+  'IS IT TIME TO WORK',
+  'CONTEXT > PROMPTING',
+  'HOW MUCH COULD A WOOD CHUCK COULD CHUCK WOOD?',
+  'TIME TO LOCK TF IN',
+  'HOW MANY MOONS UNTIL YOU MAKE IT',
+  'DONT GIVE UP',
+  'HOW MANY FACES WILL BE IN YOUR LIFE',
+  'SHOOT FOR THE MOON',
+  'IF YOU MISS THE MOON YOULL LAND IN THE STARS',
+  'MY FAVORITE MOVIE IS THE NOTEBOOK',
+  'COUNT THE TIME IN DAYS NOT HOURS ANYMORE',
 ]
 
 /**

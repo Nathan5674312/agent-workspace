@@ -119,6 +119,22 @@
   --font-mono: ui-monospace, "SF Mono", "Cascadia Mono", "Segoe UI Mono",
     Consolas, monospace;
 
+  /* A TERMINAL face, distinct from --font-mono.
+     --font-mono is for code shown inside the app, where matching the system is
+     the point. This is for the one surface that should feel like a console
+     rather than like a document: the boot screen.
+     Cascadia Code leads because it IS Windows Terminal's font, so on the machine
+     this was built for it is not an impression of a terminal, it is the thing
+     itself. It also ships with Visual Studio, so a large share of Windows users
+     already have it. The rest of the stack degrades toward whatever that
+     platform's console actually uses, ending at Lucida Console — the original
+     Windows console face — before the generic fallback.
+     No webfont: the renderer's CSP is `default-src 'none'`, so a downloaded face
+     could not load even if one were bundled. Installed faces only. */
+  --font-terminal: "Cascadia Code", "Cascadia Mono", "JetBrains Mono",
+    "SF Mono", Menlo, Consolas, "DejaVu Sans Mono", "Lucida Console",
+    ui-monospace, monospace;
+
   --text-xs: 0.6875rem;
   --text-sm: 0.75rem;
   --text-base: 0.8125rem;

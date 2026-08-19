@@ -48,7 +48,7 @@
   display: inline-flex;
   align-items: center;
   gap: 0.22em;
-  font-family: var(--font-mono, ui-monospace, monospace);
+  font-family: var(--font-terminal, ui-monospace, monospace);
   font-size: clamp(1.4rem, 4.2vw, 2.6rem);
   /* Tracking is size-specific and this is large type, so it tightens rather
      than opening up (apple-design 15). The original ran +0.035em at every size. */
@@ -95,21 +95,10 @@
   pointer-events: none;
 }
 
-/* The seam, kept faint. It has to be legible enough to say "this splits" and
-   quiet enough not to become the loudest line on screen — at full strength,
-   fifteen of them across a dark ground is a barcode. */
-.flap-tile::before {
-  content: '';
-  position: absolute;
-  top: calc(50% - 0.5px);
-  left: 0;
-  z-index: 9;
-  width: 100%;
-  height: 1px;
-  background: var(--bg-sunken);
-  opacity: 0.75;
-  pointer-events: none;
-}
+/* NO SEAM. A split-flap board has one because it is a physical object made of
+   two halves; this is pretending to be a console, and a console has no hinge
+   across the middle of its characters. Removed along with the tonal step below,
+   which drew the same line a second time in a fainter ink. */
 
 .flap-half,
 .flap-leaf {
@@ -127,12 +116,14 @@
 .flap-half--top,
 .flap-leaf--front { top: 0; }
 
-/* The lower half sits in its own shadow — the only shading kept, because it is
-   the part that makes a flap look like a flap. */
+/* Same ground as the top half. The shading here used to be "the part that makes
+   a flap look like a flap" — which is exactly the impression being dropped. Two
+   different grounds meeting at 50% IS a midline, whether or not a seam is drawn
+   over it. */
 .flap-half--bottom,
 .flap-leaf--back {
   bottom: 0;
-  background: color-mix(in srgb, var(--bg-app) 82%, var(--bg-sunken));
+  background: var(--bg-app);
 }
 
 .flap-char {

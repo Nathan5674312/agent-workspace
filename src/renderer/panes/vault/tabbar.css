@@ -1,0 +1,74 @@
+/**
+ * Tab strip additions. Imported by TabBar.tsx.
+ *
+ * Only the close affordance lives here. `.vault-tab` and `.vault-tab--active`
+ * stay in app.css, which owns this pane's layout — this sheet adds the slot
+ * around them rather than restyling them, so there is one owner per rule and no
+ * two files fighting over the same selector.
+ *
+ * Values come from tokens.css only.
+ */
+
+/* Keeps a tab and its close button on one line and moving together. The strip
+   itself is laid out by `.vault-tab-bar` in app.css; this only groups a pair. */
+.vault-tabs {
+  display: flex;
+  align-items: center;
+  gap: var(--space-1);
+  min-width: 0;
+}
+
+.vault-tab-slot {
+  display: inline-flex;
+  align-items: center;
+  min-width: 0;
+}
+
+/* The tab's own label truncates, the close button never does — a long note
+   title must not push the way to close it off the end of the strip. */
+.vault-tab-slot .vault-tab {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* Pulled back under the tab's own right padding so the × reads as part of the
+   tab rather than as a separate control sitting beside it. */
+.vault-tab-close {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  margin-inline-start: calc(-1 * var(--space-3));
+  padding: var(--space-1);
+  background: transparent;
+  border: none;
+  border-radius: var(--radius-sm);
+  color: var(--label-tertiary);
+  cursor: default;
+}
+
+.vault-tab-close:hover:not(:disabled) {
+  background: var(--fill-hover);
+  color: var(--label);
+}
+
+.vault-tab-close:active:not(:disabled) {
+  background: var(--fill-active);
+}
+
+/* One tab left: closing it is refused, and the control says so with a title
+   rather than vanishing. A button that disappears and reappears as the tab
+   count crosses one is harder to trust than one that greys out.
+   Quaternary is the decorative step in tokens.css §3, correct here because a
+   disabled glyph is something to see is unavailable, not something to read. */
+.vault-tab-close:disabled {
+  color: var(--label-quaternary);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .vault-tab-close:hover:not(:disabled) {
+    background: transparent;
+    outline: 1px solid var(--separator-opaque);
+  }
+}

@@ -1085,6 +1085,47 @@ test('menu rows close their own popover, not via popovertargetaction', () => {
   assert.ok(hideAt > 0 && actAt > hideAt, 'the action runs before the menu closes')
 })
 
+/**
+ * A closed popover must stay hidden, so no ungated rule may set its `display`.
+ *
+ * The browser hides a closed popover with
+ * `[popover]:not(:popover-open) { display: none }` — a USER-AGENT rule, which
+ * ANY author rule outranks. `menu.css` set `display: flex` on `.pane-menu`
+ * unconditionally, so both menus were painted from boot with nothing clicked,
+ * and light-dismiss had nothing to dismiss because `:popover-open` was false
+ * the whole time.
+ *
+ * This is the test that was missing when that shipped. The suite asserted
+ * popover STATE and the probe asserted `:popover-open`; both passed while the
+ * app was visibly wrong, because neither asked what was actually painted.
+ * `settings.css` documents the same trap for <dialog>, which gates on `[open]`;
+ * a popover has no `open` attribute and `:popover-open` is its equivalent.
+ */
+test('no ungated rule sets display on the popover panel', () => {
+  const css = readFileSync(join(PANE, 'menu.css'), 'utf8').replace(/\/\*[\s\S]*?\*\//g, '')
+  const rules = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
+  assert.ok(rules.length > 0, 'menu.css parsed to nothing — this test is checking nothing')
+
+  let gated = false
+  for (const [, selector, body] of rules) {
+    const sel = selector.trim()
+    // The PANEL only. `.pane-menu-item` is a row inside it and is not a
+    // popover, so a plain substring match flags it and this test cries wolf.
+    if (!/\.pane-menu(?![\w-])/.test(sel)) continue
+    const setsDisplay = /(^|[;{\s])display\s*:/.test(body)
+    if (!setsDisplay) continue
+    if (sel.includes(':popover-open')) {
+      gated = true
+      continue
+    }
+    assert.fail(
+      `"${sel}" sets display on a popover without :popover-open — ` +
+        'it beats the UA rule that hides the closed panel, so the menu paints permanently',
+    )
+  }
+  assert.ok(gated, 'nothing ever gives the open panel a display; the menu would never show')
+})
+
 test('every PaneMenu has an anchor pair in menu.css', () => {
   const css = readFileSync(join(PANE, 'menu.css'), 'utf8')
   const ids = new Set()

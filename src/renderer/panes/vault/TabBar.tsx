@@ -12,8 +12,9 @@
  * different and much larger design; the point of a tab here is which note is on
  * screen, not a private copy of it.
  */
-import { ChevronDown, Columns2, EllipsisVertical } from 'lucide-react'
+import { ChevronDown, Columns2, EllipsisVertical, X } from 'lucide-react'
 import { PaneMenu, PaneMenuItem } from './PaneMenu.js'
+import './tabbar.css'
 
 import type { MainView } from './MainCanvas.js'
 
@@ -60,15 +61,33 @@ export function TabBar({
   return (
     <div className="vault-tab-bar">
       <div className="vault-tabs">
+        {/* Each tab is a SLOT holding two controls, because closing a tab must
+            not mean opening it first. The close button is a sibling of the tab
+            rather than a child: a <button> inside a <button> is invalid HTML,
+            and the nesting browsers actually produce from it puts the close
+            target outside the element you think you clicked. */}
         {tabs.map((tab) => (
-          <button
-            key={tab.id}
-            className={`vault-tab ${activeTabId === tab.id ? 'vault-tab--active' : ''}`}
-            onClick={() => onTabChange(tab.id)}
-            title={tab.path ?? 'No note selected'}
-          >
-            {tab.name}
-          </button>
+          <span key={tab.id} className="vault-tab-slot">
+            <button
+              className={`vault-tab ${activeTabId === tab.id ? 'vault-tab--active' : ''}`}
+              onClick={() => onTabChange(tab.id)}
+              title={tab.path ?? 'No note selected'}
+            >
+              {tab.name}
+            </button>
+            {/* Named for the tab, not "Close" — a screen reader reading four
+                buttons all called "Close" cannot tell them apart, and the tabs
+                that most need closing are the ones that all say "New tab". */}
+            <button
+              className="vault-tab-close"
+              onClick={() => onCloseTab(tab.id)}
+              disabled={lastTab}
+              aria-label={`Close ${tab.name}`}
+              title={lastTab ? 'The last tab stays open' : `Close ${tab.name}`}
+            >
+              <X size={12} aria-hidden="true" />
+            </button>
+          </span>
         ))}
       </div>
       <button className="vault-new-tab" onClick={onNewTab} title="New tab">

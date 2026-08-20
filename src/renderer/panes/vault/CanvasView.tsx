@@ -176,7 +176,6 @@ export interface CanvasViewProps {
 
 export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
   const [doc, setDoc] = useState<CanvasDoc | null>(null)
-  const [mtime, setMtime] = useState(0)
   const [error, setError] = useState<string | null>(null)
   const [saving, setSaving] = useState(false)
   /** Bumped to force a repaint after a mutation that React cannot see, because
@@ -197,6 +196,24 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
    * would put this app's transient state into a document Obsidian also writes.
    */
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
+
+  /**
+   * The save path's own state, in refs, because a save is asynchronous and
+   * React state cannot be read back by a closure created in an earlier render.
+   *
+   * `mtimeRef` is the lost-update token for the board currently open. It has to
+   * be a ref: two saves queued from the same render both read the same
+   * closure-captured `mtime`, so the second one expects a value the first one
+   * has already replaced and the write is refused as a conflict the user never
+   * caused.
+   *
+   * `saveChain` serialises writes so two can never be in flight against one
+   * file. `pathRef` lets a queued save tell whether the board it belongs to is
+   * still the open one.
+   */
+  const mtimeRef = useRef(0)
+  const pathRef = useRef<string | null>(path)
+  const saveChain = useRef<Promise<void>>(Promise.resolve())
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const worldRef = useRef<HTMLDivElement>(null)
@@ -294,8 +311,9 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
      * open editor carried across either matches nothing or, worse, collides
      * with an id on the new board.
      */
+    pathRef.current = path
     setDoc(null)
-    setMtime(0)
+    mtimeRef.current = 0
     setEditing(null)
     setSelected(new Set())
     // A pending endpoint is the sharpest case: picked on the old board, it
@@ -315,7 +333,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
         if (cancelled) return
         const parsed = parseCanvas(body.text)
         setDoc(parsed)
-        setMtime(body.mtime)
+        mtimeRef.current = body.mtime
         // Framing happens in the layout effect below, once the surface is
         // actually mounted. See `framed`.
       } catch (e) {
@@ -381,21 +399,42 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
    * free. `.canvas` needed no new channel: `read`/`save` were never markdown,
    * they were always text plus an mtime.
    */
-  const persist = async (d: CanvasDoc) => {
+  const persist = (d: CanvasDoc) => {
     if (!path) return
-    try {
-      setSaving(true)
-      const saved = await window.api.vault.save(path, serializeCanvas(d), mtime)
-      setMtime(saved.mtime)
-      setError(null)
-    } catch (e) {
-      // A SaveConflict here means the file changed under us, most likely
-      // Obsidian. Surfaced rather than swallowed, because the alternative is a
-      // board that silently stops persisting and looks like it is working.
-      setError(e instanceof Error ? e.message : String(e))
-    } finally {
-      setSaving(false)
-    }
+    const target = path
+    // The token this board had when the write was queued. Used only if the
+    // board has moved on by the time it runs — see below.
+    const queuedWith = mtimeRef.current
+
+    saveChain.current = saveChain.current.then(async () => {
+      /**
+       * Still current => read the LIVE token, which the previous save in this
+       * chain has already advanced. Moved on => the live token belongs to some
+       * other board, so fall back to the one captured at queue time, which is
+       * the right token for `target`.
+       *
+       * The write itself always goes to `target`. Dropping it because the user
+       * changed board first would lose an edit they already made.
+       */
+      const expected = pathRef.current === target ? mtimeRef.current : queuedWith
+      try {
+        setSaving(true)
+        const saved = await window.api.vault.save(target, serializeCanvas(d), expected)
+        // Only write back if this is still the open board. Otherwise this would
+        // stamp one board's mtime onto another and make its next save fail.
+        if (pathRef.current === target) {
+          mtimeRef.current = saved.mtime
+          setError(null)
+        }
+      } catch (e) {
+        // A SaveConflict here means the file changed under us, most likely
+        // Obsidian. Surfaced rather than swallowed, because the alternative is a
+        // board that silently stops persisting and looks like it is working.
+        if (pathRef.current === target) setError(e instanceof Error ? e.message : String(e))
+      } finally {
+        setSaving(false)
+      }
+    })
   }
 
   // ── interaction ────────────────────────────────────────────────

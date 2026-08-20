@@ -53,7 +53,8 @@ test('a board change drops the previous board before reading the new one', () =>
   // one real board to another — does not take that arm at all.
   const before = teardown()
   assert.match(before, /setDoc\(null\)/, 'the previous board survives a change of path')
-  assert.match(before, /setMtime\(0\)/, "the previous board's mtime survives a change of path")
+  // The lost-update token itself, which is the value a stray save would send.
+  assert.match(before, /mtimeRef\.current = 0/, "the previous board's mtime survives a change")
 })
 
 test('an in-progress text edit does not survive a board change', () => {

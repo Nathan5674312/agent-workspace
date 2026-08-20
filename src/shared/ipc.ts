@@ -40,7 +40,17 @@ export type VaultNoteBody = VaultNote & { text: string }
 export type VaultTreeNode = {
   name: string
   path: string
-  kind: 'folder' | 'note'
+  /**
+   * `canvas` is a SEPARATE kind from `note`, not a note with a different
+   * extension, and the distinction is load-bearing in two places.
+   *
+   * `buildIndex` collects `kind === 'note'` to decide what to read, parse for
+   * frontmatter and resolve wikilinks in. A `.canvas` file is JSON: indexed as
+   * a note it would contribute a garbage row to the database view and its
+   * quoted text could resolve as links. Giving it its own kind means both
+   * skip it by construction rather than by a second extension check.
+   */
+  kind: 'folder' | 'note' | 'canvas'
   children?: VaultTreeNode[]
 }
 
@@ -135,14 +145,20 @@ export type VaultGraph = { nodes: string[]; links: VaultLink[] }
  * Appearance overrides.
  *
  * Every field's `'system'` means NO override: the renderer sets no attribute at
- * all, so the `@media (prefers-contrast: more)` / `(prefers-reduced-*)` blocks
- * already in app.css keep running untouched. That is the whole design — the OS
- * preference is the default and this is an escape hatch on top of it, never a
- * replacement for it.
+ * all, so the `@media (prefers-reduced-transparency: reduce)` /
+ * `(prefers-reduced-motion: reduce)` blocks already in app.css keep running
+ * untouched. That is the whole design — the OS preference is the default and
+ * this is an escape hatch on top of it, never a replacement for it.
+ *
+ * CONTRAST HAS NO FIELD HERE, and its absence is the design rather than an
+ * omission. `@media (prefers-contrast: more)` in app.css is untouched and still
+ * does the whole job for anyone whose OS asks for it — appearance.test.mjs
+ * asserts that media query is still present. What was removed is the in-app
+ * duplicate of it, which was a second copy of the same hex values maintained by
+ * hand in appearance.css and free to drift from the ratios docs/ACCESSIBILITY.md
+ * commits to.
  */
 export type Appearance = {
-  /** `'more'` mirrors `@media (prefers-contrast: more)`. */
-  contrast: 'system' | 'more'
   /** `'reduced'` mirrors `@media (prefers-reduced-transparency: reduce)`. */
   transparency: 'system' | 'reduced'
   /** `'reduced'` mirrors `@media (prefers-reduced-motion: reduce)`. */
@@ -164,12 +180,32 @@ export const ARTWORK_OPACITY_MAX = 0.2
 
 /** Matches tokens.css: artwork on at `--canvas-art-opacity: 0.16`. */
 export const DEFAULT_APPEARANCE: Appearance = {
-  contrast: 'system',
   transparency: 'system',
   motion: 'system',
   artwork: true,
   artworkOpacity: 0.16,
 }
+
+/**
+ * The approvals policy, as it crosses the bridge.
+ *
+ * The REASONING for this shape — why there is no 'off', why an expired prompt is
+ * a refusal and never an approval — lives with the gate that enforces it, in the
+ * docblock above `ApprovalsPolicy` in src/main/consent.ts. Read that before
+ * changing this. What matters here is only that nothing arriving over this
+ * boundary is trusted: `setApprovalsPolicy()` normalises both fields, so an
+ * unrecognised mode becomes 'manual' (still gated) rather than something that
+ * asks less, and this type is a description of the wire, not a guarantee about it.
+ */
+export type Approvals = {
+  /** 'strict' never grants or spends a session allowance — every op is asked. */
+  mode: 'manual' | 'strict'
+  /** How long an unanswered prompt may sit before it is DENIED. Undefined: forever. */
+  timeoutMs?: number
+}
+
+/** What an install that has configured nothing gets: today's behaviour, exactly. */
+export const DEFAULT_APPROVALS: Approvals = { mode: 'manual' }
 
 /**
  * App settings: the vault folder, plus the appearance overrides.
@@ -196,6 +232,12 @@ export type AppSettings = {
   rootMismatch: string | null
   /** Always present and always complete — main fills every field from defaults. */
   appearance: Appearance
+  /**
+   * Always present. Read back from the GATE, not from the settings file, so what
+   * is shown is what is actually in force after normalisation — a hand-edited
+   * `mode: "off"` reads back as 'manual', which is what it will behave as.
+   */
+  approvals: Approvals
 }
 
 // ------------------------------------------------------------- claude (pane 1)
@@ -349,7 +391,9 @@ export const CH = {
 
   settingsGet: 'settings:get',
   settingsPickVaultDir: 'settings:pick-vault-dir',
+  settingsApplyVaultDir: 'settings:apply-vault-dir',
   settingsSetAppearance: 'settings:set-appearance',
+  settingsSetApprovals: 'settings:set-approvals',
 
   terminalProcesses: 'terminal:processes',
   terminalExits: 'terminal:exits',
@@ -458,10 +502,36 @@ export type Api = {
      */
     pickVaultDir(): Promise<AppSettings>
     /**
+     * Switch to the pending vault folder NOW, and reload the window.
+     *
+     * Takes no argument for the same reason `pickVaultDir()` does not: the
+     * renderer may never name a directory. This applies whatever was already
+     * persisted by the picker, or does nothing if there is no pending change.
+     *
+     * The window reload is the point, not a side effect. A live swap would have
+     * to invalidate the graph memo, the folder tree, the open edit buffer and
+     * every path in the nav trail in one atomic step; throwing the whole
+     * renderer away IS that step, and it cannot half-succeed.
+     *
+     * DESTROYS UNSAVED TEXT. The caller must check for a dirty buffer first —
+     * <SettingsDialog> does, and this is the only reason that dialog now needs
+     * to know about the buffer at all.
+     */
+    applyVaultDir(): Promise<AppSettings>
+    /**
      * Persists the appearance overrides and returns the settings as they now
      * stand. Main validates and clamps, so what comes back may not equal what
      * went in — render the result, not the argument.
      */
     setAppearance(a: Appearance): Promise<AppSettings>
+    /**
+     * Persists the approvals policy and installs it in the gate immediately —
+     * unlike the vault folder, there is nothing to rebuild and nothing unsaved to
+     * lose. Main normalises, so the same rule applies as above: render the result.
+     *
+     * This tightens or loosens how often a human is asked. It can never remove
+     * the gate; see src/main/consent.ts.
+     */
+    setApprovals(a: Approvals): Promise<AppSettings>
   }
 }

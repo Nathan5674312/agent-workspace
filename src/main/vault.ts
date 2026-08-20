@@ -295,17 +295,77 @@ export async function checkRoots(): Promise<string | null> {
     )
   }
 
+  /**
+   * THERE IS NO "ROOT IS ABOVE A VAULT" WARNING HERE ANY MORE, deliberately.
+   *
+   * One stood here and named the child vault, because pointing one level too
+   * high used to be quietly catastrophic: every exclusion in this file was a
+   * PATH PREFIX relative to VAULT_DIR, so `System/Skills/gstack/` stopped
+   * matching the moment the real path became `Universal Vault/System/Skills/
+   * gstack/`, and `ignoreFilters()` looked for `<root>/.obsidian/app.json` and
+   * found a different vault's file or none. Measured with `vaultDir` on
+   * Desktop: 379 deliberately-excluded files came back, notes went 281 -> 1420,
+   * and because 633 of them are named `SKILL.md` the LINK count FELL, 657 ->
+   * 567, with 1344 of 1420 flagged orphan. The graph was dust.
+   *
+   * The warning was the wrong repair for that, and was rejected as such: it
+   * told the user not to do the thing instead of making the thing work. Both
+   * halves are now fixed at the source — `tree()` picks up each vault's own
+   * `.obsidian/app.json` and re-anchors its filters to that vault's folder, and
+   * `isSkipped()` matches SKIP at any segment boundary rather than only at the
+   * root. A folder one level above a vault now indexes that vault exactly as
+   * opening it directly would, so there is nothing left to warn about.
+   *
+   * What remains below is about the folder being UNUSABLE — empty, or with no
+   * link structure at all — which is true regardless of where the root sits.
+   */
+
   // Non-empty is the real signal, and it costs one scan that the first view to
   // load would have paid for anyway — the memo makes this free rather than
   // duplicated work.
   const notes = await list().catch((): VaultNoteMeta[] => [])
-  if (notes.length > 0) return null
 
-  return (
-    `vault: no notes found under ${VAULT_DIR}. ` +
-    `The directory exists but contains no indexable .md files, so the database ` +
-    `and graph will render empty. Check the vault path in settings.`
-  )
+  // Reported BEFORE the note count, because a truncated walk makes every number
+  // below it a floor rather than a total, and saying "1 234 notes" about a
+  // partial index is the more confident lie.
+  const truncated = getTreeTruncation()
+  if (truncated) return `vault: ${truncated}`
+  if (notes.length === 0) {
+    return (
+      `vault: no notes found under ${VAULT_DIR}. ` +
+      `The directory exists but contains no indexable .md files, so the database ` +
+      `and graph will render empty. Check the vault path in settings.`
+    )
+  }
+
+  // Reachability measured from nothing is reachability measured wrong. This is
+  // survivable — `reachRoot` falls back to the best-connected note — but the
+  // number the Orphans filter reports is only as good as the root it counted
+  // from, so the root gets said out loud either way.
+  const root = notes[0]?.reachRoot ?? null
+  if (root === null) {
+    return (
+      `vault: no note in ${VAULT_DIR} is linked to by any other, so there is no ` +
+      `root to measure reachability from. Every note will report as an orphan.`
+    )
+  }
+  /**
+   * `endsWith`, not `=== ROOT_NOTE`.
+   *
+   * A `Home.md` one directory down is a pinned root, not a missing one —
+   * `pickRoot` looks for the shallowest one anywhere now. The strict compare
+   * fired on every vault opened from its parent and reported the correct root
+   * as a misconfiguration, which is exactly the noise that made the real
+   * warnings easy to ignore.
+   */
+  if (!root.endsWith(ROOT_NOTE)) {
+    return (
+      `vault: no ${ROOT_NOTE} anywhere under ${VAULT_DIR}, so reachability ` +
+      `and the Orphans filter are measured from ${root} instead — the ` +
+      `best-connected note. Add a ${ROOT_NOTE} to pin it.`
+    )
+  }
+  return null
 }
 
 /**
@@ -450,6 +510,67 @@ function stamp(): string {
  * excluded for being NOT-CONTENT — never to hide a folder the user owns.
  */
 const HIDDEN = new Set(['.git', '.obsidian', '.trash', 'node_modules', '__pycache__'])
+
+/**
+ * A vault's OWN exclusions, from Obsidian's `.obsidian/app.json`
+ * (`userIgnoreFilters`, the "Files and links → Excluded files" setting).
+ *
+ * Read rather than duplicated because the user maintains that list in Obsidian
+ * and expects one answer to "is this note hidden".
+ *
+ * TAKES THE VAULT'S DIRECTORY, and that argument is the whole fix.
+ *
+ * It used to read `<VAULT_DIR>/.obsidian/app.json` and nothing else, which
+ * quietly made the app work in exactly one configuration: the root you opened
+ * had to BE the vault. Point it one level up and the vault's own exclusion list
+ * is not merely mis-anchored, it is never found — `Desktop/.obsidian/app.json`
+ * is a different file that says nothing about `Universal Vault/`, so all 379
+ * deliberately-excluded files came back and the graph filled with skill
+ * bundles. The old answer to that was a warning telling the user not to do it.
+ * The right answer is that exclusions belong to the vault that DECLARES them,
+ * so `tree()` picks them up wherever it finds a vault and re-anchors them to
+ * that vault's folder.
+ *
+ * A DIFFERENT matching rule from HIDDEN, and the two must not be folded
+ * together: HIDDEN matches a BASENAME anywhere in the tree, these are
+ * PATH PREFIXES relative to their own vault. `System/Skills/gstack` hides
+ * exactly that folder, not every folder named `gstack`. The prefix must land on
+ * a segment boundary or `System/Skill Sources` would also swallow
+ * `System/Skill Sources Extra`.
+ *
+ * app.json is a user-writable file, so it is untrusted input: missing,
+ * unreadable, corrupt, or the wrong shape all mean ZERO extra exclusions and no
+ * throw — the same posture settings.ts:load() and network.ts's trust store take
+ * on their own JSON. Failing here would empty the explorer over a stray comma.
+ *
+ * Read per call rather than memoised: it is one small file per vault against a
+ * walk of the whole tree, and a memo would need invalidating when
+ * `setVaultDir()` points this somewhere else.
+ *
+ * ponytail: prefixes only. Obsidian also accepts a `/regex/` entry in this
+ * field; those are dropped rather than honoured (and never crash), so a
+ * regex-filtered folder still shows. Implement it when someone writes one.
+ * Matching is case-SENSITIVE where Obsidian's is not — same upgrade point.
+ */
+function ignoreFilters(dir: string): string[] {
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(readFileSync(resolve(dir, '.obsidian', 'app.json'), 'utf8'))
+  } catch {
+    return []
+  }
+  const raw = (parsed as { userIgnoreFilters?: unknown } | null)?.userIgnoreFilters
+  if (!Array.isArray(raw)) return []
+  return raw
+    .filter((f): f is string => typeof f === 'string' && !f.startsWith('/'))
+    .map((f) => f.replace(/\/+$/, ''))
+    .filter(Boolean)
+}
+
+/** Vault-relative path -> is it under one of the filters, on a segment boundary. */
+function isIgnored(rel: string, filters: string[]): boolean {
+  return filters.some((f) => rel === f || rel.startsWith(`${f}/`))
+}
 
 /**
  * Create one folder in the vault.
@@ -777,10 +898,52 @@ export async function undoMove(id: string, actor: Actor): Promise<void> {
  * behind the Python server: that was about atomic writes, backups and the
  * lost-update guard, and a directory listing has none of those hazards. The
  * writes have since come over too, with all three of those kept — see save().
+ *
+ * This is also where Obsidian's `userIgnoreFilters` are applied, and applying
+ * them HERE is the whole point: `list()` and `graph()` are both built from this
+ * walk (see `scan()`), so one filter list cannot disagree with itself. Filtering
+ * in scan() instead would hide a note from the database while the explorer still
+ * showed it, and leave graph edges pointing at nodes the tree cannot draw.
  */
+/**
+ * Ceilings on one tree walk, and why they have to exist.
+ *
+ * The folder picker will accept any directory on the machine, and `tree()` had
+ * no bound of any kind — it walked until it ran out of filesystem. Measured by
+ * pointing the vault at ten real locations:
+ *
+ *   C:\Users\Nathan        killed at 30s, never finished
+ *   C:\                    27.5s, 44 560 folders, 252 MB
+ *   …\AppData\Local\Temp   10.2s, 16 398 folders, 402 levels deep, 880 MB
+ *
+ * All three are one bad click away in a picker that opens inside the user's own
+ * vault, and all three freeze the main process — so the explorer, the database
+ * and the graph hang together, with no progress and no way to cancel.
+ *
+ * The numbers are generous against a real vault and hostile to a wrong one.
+ * The Universal Vault is 121 folders at depth 8, so a notes vault would have to
+ * be eighty times larger before it noticed these. A truncated walk is REPORTED
+ * rather than quietly served — a partial explorer that looks complete is the
+ * failure mode this whole file keeps having.
+ */
+const MAX_TREE_DIRS = 10_000
+const MAX_TREE_DEPTH = 16
+
+/** Why the last walk stopped early, or null if it completed. */
+let treeTruncated: string | null = null
+
+/** Read by `checkRoots()`. Describes the LAST completed `tree()` call. */
+export function getTreeTruncation(): string | null {
+  return treeTruncated
+}
+
 export async function tree(): Promise<VaultTreeNode> {
   const { readdir, realpath, stat } = await import('node:fs/promises')
   const { join } = await import('node:path')
+
+  let dirsWalked = 0
+  let hitDepth = false
+  treeTruncated = null
 
   /**
    * Real paths of directories already walked, so a link that points at an
@@ -790,10 +953,34 @@ export async function tree(): Promise<VaultTreeNode> {
    */
   const visited = new Set<string>()
 
-  async function walk(abs: string, rel: string): Promise<VaultTreeNode[]> {
+  /**
+   * `filters` is INHERITED and ADDED TO on the way down, never recomputed from
+   * the root.
+   *
+   * Each entry is a path relative to THIS walk's root, so a nested vault's
+   * `System/Skill Sources` arrives here as `Universal Vault/System/Skill
+   * Sources` and matches. That re-anchoring is the reason the same vault
+   * excludes the same folders whether you open it directly or from its parent,
+   * which is the whole of "point it anywhere and it works".
+   */
+  async function walk(
+    abs: string,
+    rel: string,
+    depth: number,
+    filters: string[],
+  ): Promise<VaultTreeNode[]> {
     const real = await realpath(abs).catch(() => abs)
     if (visited.has(real)) return [] // cycle
     visited.add(real)
+
+    // Checked on ENTRY, so the caps bound the work done rather than the work
+    // already done. Both stop descending and neither throws: a vault that is
+    // 90% listed is far more useful than an error, provided it says so.
+    if (++dirsWalked > MAX_TREE_DIRS) return []
+    if (depth >= MAX_TREE_DEPTH) {
+      hitDepth = true
+      return []
+    }
 
     let entries
     try {
@@ -801,10 +988,27 @@ export async function tree(): Promise<VaultTreeNode> {
     } catch {
       return [] // unreadable directory: show nothing rather than fail the tree
     }
+
+    /**
+     * A directory carrying `.obsidian/` IS a vault, so adopt its exclusions.
+     *
+     * Detected from `entries` rather than with a stat of its own: the readdir
+     * has already happened, so recognising a vault costs nothing on the 99% of
+     * directories that are not one, and the one file read only happens where
+     * there is something to read. At the root this reproduces exactly what the
+     * old `ignoreFilters()` did, which is why opening a vault directly is
+     * unchanged.
+     */
+    if (entries.some((e) => e.name === '.obsidian')) {
+      const mine = ignoreFilters(abs)
+      if (mine.length) filters = [...filters, ...mine.map((f) => (rel ? `${rel}/${f}` : f))]
+    }
+
     const out: VaultTreeNode[] = []
     for (const e of entries) {
       if (e.name.startsWith('.') || HIDDEN.has(e.name)) continue
       const childRel = rel ? `${rel}/${e.name}` : e.name
+      if (isIgnored(childRel, filters)) continue
       const childAbs = join(abs, e.name)
 
       /**
@@ -832,21 +1036,56 @@ export async function tree(): Promise<VaultTreeNode> {
           name: e.name,
           path: childRel,
           kind: 'folder',
-          children: await walk(childAbs, childRel),
+          children: await walk(childAbs, childRel, depth + 1, filters),
         })
       } else if (isFile && e.name.toLowerCase().endsWith('.md')) {
         out.push({ name: e.name, path: childRel, kind: 'note' })
+      } else if (isFile && e.name.toLowerCase().endsWith('.canvas')) {
+        // The Canvas view's boards. Kept in the tree so the vault stays the one
+        // source of "what is in here" — the canvas list reads this rather than
+        // walking the disk a second time — and given their own kind so
+        // `buildIndex` cannot mistake JSON for a note. See VaultTreeNode.
+        out.push({ name: e.name, path: childRel, kind: 'canvas' })
       }
     }
     return out
   }
 
   const root: VaultTreeNode = {
-    name: 'Universal Vault',
+    /**
+     * The FOLDER's name, not a literal.
+     *
+     * This was the string `'Universal Vault'`, which meant the app called the
+     * vault that no matter which directory it was reading. Point it at
+     * Downloads and the explorer root, the first tab and the switcher in the
+     * corner all still said Universal Vault — so the single most visible answer
+     * to "which vault am I looking at" was hardcoded to one machine's setup and
+     * could never be wrong out loud. It is most of why changing the folder
+     * looked like it did nothing.
+     *
+     * A drive root has no basename (`basename('C:\\')` is `''`), so the full
+     * path stands in rather than an empty label.
+     */
+    name: basename(VAULT_DIR) || VAULT_DIR,
     path: '',
     kind: 'folder',
-    children: await walk(VAULT_DIR, ''),
+    children: await walk(VAULT_DIR, '', 0, []),
   }
+
+  // Recorded AFTER the walk, so the message reports what actually happened
+  // rather than what was configured. Read by checkRoots().
+  if (dirsWalked > MAX_TREE_DIRS) {
+    treeTruncated =
+      `${VAULT_DIR} holds more than ${MAX_TREE_DIRS.toLocaleString()} folders, so only ` +
+      `the first ${MAX_TREE_DIRS.toLocaleString()} were indexed. This is almost always a ` +
+      `sign the vault folder is pointed at a whole drive or a home directory ` +
+      `rather than at a notes folder.`
+  } else if (hitDepth) {
+    treeTruncated =
+      `${VAULT_DIR} nests deeper than ${MAX_TREE_DEPTH} levels; anything below that was ` +
+      `not indexed. Notes vaults do not usually nest that far — check the vault folder.`
+  }
+
   sort(root)
   return root
 }
@@ -891,8 +1130,97 @@ const SKIP = [
   'Inbox/',
 ]
 
-/** Where reachability is measured from. `depth` is hops from here. */
+/**
+ * Does this path sit under one of the SKIP prefixes — at the root, or under ANY
+ * folder in the tree.
+ *
+ * `p.startsWith(s)` alone was the second half of the same bug `ignoreFilters()`
+ * had: these prefixes were written against one vault opened at its own root, so
+ * the moment the real path became `Universal Vault/System/Skills/gstack/…` not
+ * one of them matched and 168 gstack skills, 190 skill sources and 12 inbox
+ * captures poured into the index. 633 of the files that came back are named
+ * `SKILL.md`, which is what made the LINK count fall while the note count rose
+ * fivefold — every `[[Skill]]` in the vault suddenly had 633 candidates.
+ *
+ * Matching mid-path fixes it without the caller having to know where any vault
+ * begins. It is deliberately broader than "only at a vault boundary": these
+ * names describe what a folder IS — a generated index, a template shelf, an
+ * unfiled capture queue — and that does not stop being true one directory
+ * further down. `/` on both sides keeps it on a segment boundary, so
+ * `Templates/` still cannot swallow `TemplatesExtra/`.
+ */
+function isSkipped(p: string): boolean {
+  return SKIP.some((s) => p.startsWith(s) || p.includes(`/${s}`))
+}
+
+/**
+ * The PREFERRED place reachability is measured from. `depth` is hops from
+ * whichever root is actually chosen — see `pickRoot`.
+ *
+ * This used to be the only answer, and its absence was silent and total. A
+ * vault whose root note is called anything else, or which sits one directory
+ * below the configured root, has no `Home.md` at the top level — so the BFS
+ * started from a node that is not in the graph, visited nothing, and left
+ * every single note with `depth: null` and `orphan: true`. Measured here with
+ * `vaultDir` set one level too high: 0 of 1419 notes had a depth and 1419 of
+ * 1419 were flagged orphan. The Orphans filter was selecting the whole vault
+ * and reporting it as a finding.
+ */
 const ROOT_NOTE = 'Home.md'
+
+/**
+ * Where reachability is measured from, in order of preference:
+ *
+ *   1. `Home.md` at the vault root — the pinned answer, and still the one the
+ *      vault is designed around.
+ *   2. the SHALLOWEST `Home.md` anywhere below it. A vault opened from its
+ *      parent still has its index note; it is just one directory down now, and
+ *      refusing to see it there is how "reachability" became "every note is an
+ *      orphan" the moment the root moved up a level.
+ *   3. the note with the most inbound links — the empirical hub. A folder
+ *      without a declared index still has a note everything points at, and
+ *      measuring from it gives a far more useful answer than measuring from
+ *      nowhere.
+ *   4. null, only when NOTHING links to anything.
+ *
+ * Ties break on path so the choice is stable between runs; a root that moved
+ * every rescan would make `depth` flicker for no visible reason.
+ *
+ * Exported for the test, which pins the ordering rather than the outcome.
+ */
+export function pickRoot(
+  notes: { path: string }[],
+  inbound: Map<string, number>,
+): string | null {
+  if (notes.some((n) => n.path === ROOT_NOTE)) return ROOT_NOTE
+
+  // Shallowest first, then lexicographic — the same stability rule as the
+  // inbound-count fallback below, and for the same reason. Two vaults side by
+  // side under one root each have a Home.md; picking by depth means the one
+  // nearer the top wins rather than whichever the walk happened to reach first.
+  let home: string | null = null
+  let homeDepth = Infinity
+  for (const n of notes) {
+    if (!n.path.endsWith(`/${ROOT_NOTE}`)) continue
+    const d = n.path.split('/').length
+    if (d < homeDepth || (d === homeDepth && n.path < home!)) {
+      home = n.path
+      homeDepth = d
+    }
+  }
+  if (home !== null) return home
+
+  let best: string | null = null
+  let bestCount = 0
+  for (const n of notes) {
+    const c = inbound.get(n.path) ?? 0
+    if (c > bestCount || (c === bestCount && c > 0 && n.path < best!)) {
+      best = n.path
+      bestCount = c
+    }
+  }
+  return bestCount > 0 ? best : null
+}
 
 /**
  * Memoised index: one disk scan behind both `list()` and `graph()`.
@@ -947,7 +1275,23 @@ export async function graph(): Promise<VaultGraph> {
  * directories, so linked folders vanish) and the link cycles that follow from
  * supporting them.
  */
-async function scan(): Promise<{ note: VaultNoteMeta; text: string }[]> {
+/**
+ * Returns each note's WIKILINK NAMES, not its text, and that is a memory fix
+ * rather than a tidy-up.
+ *
+ * Every note's full text used to be held simultaneously, for the whole of
+ * `buildIndex`, because the link pass ran later. The only thing that pass ever
+ * did with the text was `parseWikilinks(text)`, so the entire corpus was
+ * resident to produce a handful of short strings per file. Pointing the vault
+ * at `AppData\Local\Temp` — 12 000 markdown files — peaked at 856 MB in the
+ * MAIN process, which on a 6 GB-VRAM, 32 GB machine running Electron plus a
+ * model is not a theoretical cost.
+ *
+ * Extracting at read time and dropping the text keeps peak memory proportional
+ * to the LINKS in a vault rather than to its bytes. Nothing downstream wanted
+ * the text: `parseFrontmatter` already ran here too.
+ */
+async function scan(): Promise<{ note: VaultNoteMeta; names: string[] }[]> {
   const { readFile } = await import('node:fs/promises')
   const { join } = await import('node:path')
 
@@ -957,9 +1301,9 @@ async function scan(): Promise<{ note: VaultNoteMeta; text: string }[]> {
     n.children?.forEach(collect)
   }
   collect(await tree())
-  const keep = paths.filter((p) => !SKIP.some((s) => p.startsWith(s)))
+  const keep = paths.filter((p) => !isSkipped(p))
 
-  const out: { note: VaultNoteMeta; text: string }[] = []
+  const out: { note: VaultNoteMeta; names: string[] }[] = []
   // Bounded rather than `Promise.all` over every path: a vault in the low
   // thousands opens that many file handles at once and takes EMFILE, which
   // fails the whole index instead of one note. Same worker-pool shape the HTTP
@@ -980,7 +1324,9 @@ async function scan(): Promise<{ note: VaultNoteMeta; text: string }[]> {
       const fm = parseFrontmatter(text)
       const cut = path.lastIndexOf('/')
       out.push({
-        text,
+        // Parsed HERE so `text` becomes garbage at the end of this iteration
+        // instead of living until the index is finished. See the header.
+        names: parseWikilinks(text),
         note: {
           path,
           // Filename first, frontmatter second — the same precedence the link
@@ -994,6 +1340,9 @@ async function scan(): Promise<{ note: VaultNoteMeta; text: string }[]> {
           tags: parseList(fm.tags ?? ''),
           depth: null, // filled by the BFS in buildIndex
           orphan: false,
+          reachRoot: null, // chosen once per index, by pickRoot
+          links: 0, // both filled by buildIndex, once the edges are resolved
+          backlinks: 0,
           mtime: 0, // see the TRAP note on list()
         },
       })
@@ -1036,18 +1385,88 @@ async function buildIndex(): Promise<VaultIndex> {
   const norm = (s: string) =>
     s.trim().toLowerCase().replace(/\\/g, '/').replace(/\.md$/i, '')
 
-  const byName = new Map<string, string>()
-  const add = (key: string, path: string) => {
+  /**
+   * TWO tiers, and every candidate kept rather than the first one to arrive.
+   *
+   * This was one flat `Map<string, string>` with a first-wins `add()`, which
+   * silently made link resolution depend on scan order. It is fine while names
+   * are unique and it falls apart the moment they are not: on this machine 34
+   * filename stems are claimed by more than one note and `skill` is claimed by
+   * **633** of them, so `[[Skill]]` resolved to whichever `SKILL.md` happened
+   * to sort first and every other reference to it was simply wrong. That is
+   * why the link count could FALL while the note count rose fivefold.
+   *
+   * Keeping the candidates lets `resolve()` below pick the way Obsidian does —
+   * by proximity to the note doing the linking — instead of by accident. The
+   * two tiers preserve the existing rule that a real FILENAME always beats
+   * somebody else's frontmatter title.
+   */
+  const byFile = new Map<string, string[]>()
+  const byAlias = new Map<string, string[]>()
+  const add = (into: Map<string, string[]>, key: string, path: string) => {
     const k = norm(key)
-    if (k && !byName.has(k)) byName.set(k, path)
+    if (!k) return
+    const list = into.get(k)
+    if (!list) into.set(k, [path])
+    else if (!list.includes(path)) list.push(path)
   }
   for (const n of notes) {
-    add(titleOf(n.path), n.path) // "_START HERE"      — the common form
-    add(n.path, n.path) // "Business/…/_START HERE.md" — full path
+    add(byFile, titleOf(n.path), n.path) // "_START HERE"   — the common form
+    add(byFile, n.path, n.path) // "Business/…/_START HERE.md" — full path
   }
   // Second pass: frontmatter titles are aliases, and must never shadow a real
-  // filename that another note owns.
-  for (const n of notes) add(n.title, n.path)
+  // filename that another note owns — hence a separate tier, not a later
+  // insert into the same one.
+  for (const n of notes) add(byAlias, n.title, n.path)
+
+  /** The folder a note lives in, `''` at the vault root. */
+  const dirOf = (p: string) => p.slice(0, p.lastIndexOf('/') + 1)
+
+  /**
+   * Which of several same-named notes a link means.
+   *
+   * Obsidian's rule, and the only one that is not arbitrary: the nearest note
+   * wins. A `[[Skill]]` inside `System/Skills/ponytail/` means the one in that
+   * folder, not one of the other 632.
+   *
+   *   1. same folder as the linking note
+   *   2. nearest ANCESTOR folder — a link from deep in a tree to a sibling
+   *      index resolves upward before it jumps across the vault
+   *   3. shallowest path, then lexicographic, so an unrelatable collision is at
+   *      least STABLE. A resolution that reshuffles between rescans would make
+   *      the graph rewire itself for no visible reason.
+   */
+  const choose = (cands: string[], from: string): string => {
+    if (cands.length === 1) return cands[0]
+    const home = dirOf(from)
+    const same = cands.filter((c) => dirOf(c) === home)
+    if (same.length) return same.sort()[0]
+    // Longest shared prefix that ends on a folder boundary is the nearest
+    // common ancestor, so the deepest such match is the closest note.
+    let best: string | null = null
+    let bestDepth = -1
+    for (const c of cands) {
+      const d = dirOf(c)
+      if (!home.startsWith(d)) continue
+      const depth = d.split('/').length
+      if (depth > bestDepth || (depth === bestDepth && c < best!)) {
+        best = c
+        bestDepth = depth
+      }
+    }
+    if (best) return best
+    return [...cands].sort(
+      (a, b) => a.split('/').length - b.split('/').length || (a < b ? -1 : 1),
+    )[0]
+  }
+
+  const resolve = (name: string, from: string): string | undefined => {
+    const k = norm(name)
+    const file = byFile.get(k)
+    if (file) return choose(file, from)
+    const alias = byAlias.get(k)
+    return alias ? choose(alias, from) : undefined
+  }
 
   const links: VaultGraph['links'] = []
   // A note that mentions [[Home]] twelve times is ONE relationship. Without
@@ -1063,9 +1482,11 @@ async function buildIndex(): Promise<VaultIndex> {
   // serialised every one of them on a module-wide lock, and it ran on every
   // note the user opened. Reading the directory once costs a fraction of it.
   const out = new Map<string, string[]>()
-  for (const { note: n, text } of scanned) {
-    for (const name of parseWikilinks(text)) {
-      const target = byName.get(norm(name))
+  for (const { note: n, names } of scanned) {
+    for (const name of names) {
+      // Resolved RELATIVE TO THE LINKING NOTE, so a duplicate filename means
+      // the nearest one rather than the first one scanned.
+      const target = resolve(name, n.path)
       if (!target || target === n.path) continue
       // `parseWikilinks` already dedups by NAME within a note; this dedups by
       // resolved TARGET, because [[Home]] and [[Home.md]] name one note.
@@ -1084,27 +1505,60 @@ async function buildIndex(): Promise<VaultIndex> {
   }
 
   /**
-   * R6 reachability: hops from [[Home]], following links outward.
+   * Inbound edge count. `out` is the outbound half and already exists for the
+   * BFS; this is the only thing the relation columns need that is not already
+   * built, and it is one pass over `links` rather than a second index.
+   *
+   * Counts RELATIONSHIPS, not mentions: `links` is deduped by resolved
+   * (from, target) pair above, so a note that says [[Home]] twelve times
+   * contributes 1 here — the same edge the graph draws.
+   *
+   * Built BEFORE the BFS now, because `pickRoot` needs it to find the hub when
+   * there is no Home.md to start from.
+   */
+  const inbound = new Map<string, number>()
+  for (const l of links) inbound.set(l.to, (inbound.get(l.to) ?? 0) + 1)
+
+  /**
+   * R6 reachability: hops from the root, following links outward.
    *
    * Obsidian links are directional but browsing is not — if A links to B a
    * person can get from A to B — so only outbound edges are walked, matching
    * the server's `links.reach()`. `orphan` is the invariant the vault is
-   * actually graded on: not reachable from Home within 2 hops.
+   * actually graded on: not reachable from the root within 2 hops.
+   *
+   * The root is CHOSEN rather than assumed — see `pickRoot`. A null root means
+   * nothing links to anything, and then every note genuinely is unreachable;
+   * that is the one case where flagging them all is the truth rather than a
+   * bug, and `checkRoots()` says so at boot.
    */
-  const depth = new Map<string, number>([[ROOT_NOTE, 0]])
-  const queue = [ROOT_NOTE]
-  for (let i = 0; i < queue.length; i++) {
-    const cur = queue[i]
-    for (const next of out.get(cur) ?? []) {
-      if (depth.has(next)) continue
-      depth.set(next, depth.get(cur)! + 1)
-      queue.push(next)
+  const reachRoot = pickRoot(notes, inbound)
+  const depth = new Map<string, number>()
+  if (reachRoot !== null) {
+    depth.set(reachRoot, 0)
+    const queue = [reachRoot]
+    for (let i = 0; i < queue.length; i++) {
+      const cur = queue[i]
+      for (const next of out.get(cur) ?? []) {
+        if (depth.has(next)) continue
+        depth.set(next, depth.get(cur)! + 1)
+        queue.push(next)
+      }
     }
   }
+
   for (const n of notes) {
     const d = depth.get(n.path)
     n.depth = d ?? null
     n.orphan = d === undefined || d > 2
+    n.links = out.get(n.path)?.length ?? 0
+    n.backlinks = inbound.get(n.path) ?? 0
+    // Carried on every row rather than as a separate call. It is one short
+    // string on a payload that already exists, and it is what lets the Orphans
+    // control name what it measured from instead of implying a root that may
+    // not be there — the same "the wire format did not change, only what we
+    // admit is on it" move `folder` and `orphan` already made.
+    n.reachRoot = reachRoot
   }
 
   const value: VaultIndex = { notes, graph: { nodes: notes.map((n) => n.path), links } }

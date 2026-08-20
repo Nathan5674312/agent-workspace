@@ -26,13 +26,13 @@ const src = (name) => readFileSync(join(PANE, name), 'utf8')
 /**
  * Ribbon ids that still fall through to <SidebarPlaceholder>.
  *
- * `terminal`, `calendar` and `bookmarks` have left this list: each now renders
- * its own panel from VaultPane rather than a description of itself. Shrinking
- * this list is the point of the work, so it is expected to keep shrinking —
- * what must not happen is an id leaving it while still having no panel, which
- * is what the else-branch test above catches.
+ * `terminal`, `calendar`, `bookmarks` and now `canvas` have left this list:
+ * each renders its own panel from VaultPane rather than a description of
+ * itself. Shrinking this list is the point of the work, so it is expected to
+ * keep shrinking — what must not happen is an id leaving it while still having
+ * no panel, which is what the else-branch test above catches.
  */
-const UNBUILT = ['search', 'graph', 'canvas', 'plugins']
+const UNBUILT = ['search', 'graph', 'plugins']
 
 test('the sidebar has an else branch, so no ribbon icon can empty it', () => {
   const code = src('VaultPane.tsx')

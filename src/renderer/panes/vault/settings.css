@@ -49,7 +49,10 @@
 }
 
 .settings-dialog {
-  width: min(560px, 100%);
+  /* 640, not the 560 this was before the nav: the nav eats ~9rem of the content
+     box, and at 560 the appearance rows had their label and their control
+     fighting over what was left. */
+  width: min(640px, 100%);
   max-height: 100%;
   overflow-y: auto;
   display: flex;
@@ -71,6 +74,60 @@
   font-weight: var(--weight-semibold);
   letter-spacing: var(--tracking-title);
   line-height: var(--leading-title);
+}
+
+/* ── sections ─────────────────────────────────────────────────
+   Nav on the left, one panel on the right. `align-items: stretch` (the flex
+   default, left implicit) is what gives the nav its full-height divider without
+   a fixed height anywhere. */
+
+.settings-body {
+  display: flex;
+  gap: var(--space-5);
+  min-height: 0;
+}
+
+.settings-nav {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-1);
+  /* Fixed rather than content-sized: the panel must not shift sideways when the
+     section changes, and a longer label arriving later must not move it either. */
+  flex: none;
+  width: 8rem;
+  padding-right: var(--space-4);
+  border-right: 1px solid var(--separator);
+}
+
+/* Left-aligned and full-width, because the click target for a nav row is the
+   row. Everything else — hover, press, focus ring, the high-contrast border —
+   is inherited from app.css's bare `button`, which is the point of leaving it a
+   button. */
+.settings-nav-item {
+  text-align: left;
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-md);
+}
+
+/* Fill plus full-strength ink: the selected row has to read as selected without
+   a hue, since the palette is monochrome (tokens.css §4b). */
+.settings-nav-item--active {
+  background: var(--fill-selected);
+  color: var(--label);
+}
+
+.settings-panel {
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-5);
+  flex: 1;
+  min-width: 0;
+}
+
+/* The display above would otherwise beat the UA sheet's `[hidden]`, and the
+   inactive panel would render on top of the active one. */
+.settings-panel[hidden] {
+  display: none;
 }
 
 .settings-field {
@@ -131,8 +188,41 @@
 
 /* Pending is a live consequence of something the user just did, so it carries
    full-strength ink where the standing hint does not. */
+/* Now a container, not a paragraph: it holds the explanation, the Switch now
+   button and the reason that button is unavailable. */
 .settings-pending {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: var(--space-3);
   color: var(--label);
+}
+.settings-pending p {
+  margin: 0;
+}
+
+/* The affirmative action in this panel, so it carries the accent — everything
+   else here is a chooser or a read-only line. */
+.settings-switch-now {
+  padding: var(--space-2) var(--space-4);
+  border-radius: var(--radius-sm);
+  background: var(--accent);
+  color: var(--label-on-accent);
+  font: inherit;
+  font-size: var(--text-sm);
+  font-weight: var(--weight-medium);
+}
+.settings-switch-now:hover:not(:disabled) {
+  background: var(--accent-pressed);
+}
+.settings-switch-now:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+/* Dimmed rather than hidden while the buffer is dirty. The sentence beside it
+   says why, so the state is explained rather than merely felt. */
+.settings-switch-now:disabled {
+  opacity: 0.45;
 }
 
 .settings-mismatch,

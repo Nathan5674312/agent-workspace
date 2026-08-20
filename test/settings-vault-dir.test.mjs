@@ -93,9 +93,9 @@ test('a missing settings.json is not an error — it is the first run', () => {
 test('save() writes through a temp file and leaves nothing behind', () => {
   rmSync(SETTINGS_FILE, { force: true })
   settings.applySettings()
-  set({ ...DEFAULT_APPEARANCE, contrast: 'more' })
+  set({ ...DEFAULT_APPEARANCE, transparency: 'reduced' })
 
-  assert.equal(onDisk().appearance.contrast, 'more')
+  assert.equal(onDisk().appearance.transparency, 'reduced')
   assert.ok(!existsSync(TMP_FILE), 'the temp file must be renamed, not copied and left')
 })
 
@@ -112,14 +112,14 @@ test('save() writes through a temp file and leaves nothing behind', () => {
 test('a crash mid-write cannot truncate settings.json', () => {
   rmSync(SETTINGS_FILE, { force: true })
   settings.applySettings()
-  set({ ...DEFAULT_APPEARANCE, contrast: 'more' })
+  set({ ...DEFAULT_APPEARANCE, transparency: 'reduced' })
   const good = readFileSync(SETTINGS_FILE, 'utf8')
 
-  writeFileSync(TMP_FILE, '{"appearance": {"cont', 'utf8')
+  writeFileSync(TMP_FILE, '{"appearance": {"trans', 'utf8')
 
   assert.equal(readFileSync(SETTINGS_FILE, 'utf8'), good, 'the destination was touched')
   settings.applySettings()
-  assert.equal(get().appearance.contrast, 'more', 'the last good save did not survive')
+  assert.equal(get().appearance.transparency, 'reduced', 'the last good save did not survive')
 
   rmSync(TMP_FILE, { force: true })
 })

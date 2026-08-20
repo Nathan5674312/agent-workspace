@@ -71,34 +71,12 @@
   -webkit-backdrop-filter: none;
 }
 
-/* ── contrast ─────────────────────────────────────────────────
-   Copied from app.css `@media (prefers-contrast: more)`, hex for hex.
-   Each label moves one step UP the tokens.css ramp toward the light end, so
-   every value stays solid, stays in the palette, and keeps the measured ratio
-   quoted in docs/ACCESSIBILITY.md. Deliberately NOT opacity: GraphView reads
-   --label-secondary for its node fill, and a translucent label makes node discs
-   see-through. */
-
-:root[data-contrast='more'] {
-  --label-secondary: #d8b493; /* Sand  — 10.0:1, up from Tan  at 7.4:1 */
-  --label-tertiary: #ba9b7d; /* Tan   —  7.4:1, up from Clay at 5.0:1 */
-  --label-quaternary: #987d65; /* Clay  —  5.0:1, up from Taupe at 3.7:1 */
-  /* A solid hairline instead of an 8% film. Taupe is decorative-only by the
-     palette's rules, which is exactly what a separator is. */
-  --separator: #806854;
-}
-
-:root[data-contrast='more'] button,
-:root[data-contrast='more'] input,
-:root[data-contrast='more'] textarea,
-:root[data-contrast='more'] select {
-  border: 1px solid var(--separator);
-}
-
-:root[data-contrast='more'] .vault-tab--active,
-:root[data-contrast='more'] .vault-ribbon-icon--active {
-  outline: 1px solid var(--label-secondary);
-}
+/* ── contrast: REMOVED ────────────────────────────────────────
+   There was a `[data-contrast='more']` block here duplicating app.css's
+   `@media (prefers-contrast: more)` hex for hex. The media query is still
+   there and still does the job; this copy was the liability, because two
+   hand-maintained sets of the same values are free to drift and only one of
+   them is the one docs/ACCESSIBILITY.md measures. */
 
 /* ── background artwork ───────────────────────────────────────
    The only control here with no OS preference behind it, so it has no @media

@@ -45,8 +45,20 @@ import { SelectMenu } from './SelectMenu.js'
  *   4. Many views, same rows -> group by any column, no duplication
  *
  * Deliberately NOT built: sharing, permissions, comments, mobile, forms,
- * relations, rollups, formulas. Every one needs a backend this app does not
- * have, or is a second way to say what [[wikilinks]] and the graph already say.
+ * rollups, formulas. Every one needs a backend this app does not have.
+ *
+ * RELATIONS ARE BUILT, and this comment used to say they never would be —
+ * "a second way to say what [[wikilinks]] and the graph already say". That
+ * argument was right about the mechanism and wrong about the conclusion. The
+ * wikilink IS the relation, so the Links and Backlinks columns do not add a
+ * second way to say it; they show the one that already exists in a place you
+ * can sort and group on. Nothing new is stored and nothing is written.
+ *
+ * The Notion-style typed relation — a frontmatter property whose value points
+ * at another note — stays unbuilt, and now for a measured reason rather than
+ * an assumed one: a scan of the vault on 2026-08-19 found a [[link]] inside a
+ * frontmatter VALUE in 1 note of 280, against 653 resolved body edges. There
+ * is no data for that feature to display.
  *
  * Status is read-only here on purpose. Making a cell editable means writing
  * frontmatter back into the file, and the save path owns a lost-update guard
@@ -75,8 +87,9 @@ const VIEW_MODES: { key: ViewMode; label: string; Icon: LucideIcon; built: boole
   { key: 'calendar', label: 'Calendar', Icon: Calendar, built: true },
 ]
 
-type SortKey = 'title' | 'area' | 'type' | 'status' | 'updated'
-type GroupKey = 'area' | 'family' | 'type' | 'status' | 'tag' | 'folder' | 'month' | 'none'
+type SortKey = 'title' | 'area' | 'type' | 'status' | 'updated' | 'links' | 'backlinks'
+type GroupKey =
+  | 'area' | 'family' | 'type' | 'status' | 'tag' | 'folder' | 'month' | 'linked' | 'none'
 
 const GROUPS: { key: GroupKey; label: string }[] = [
   { key: 'area', label: 'Area' },
@@ -86,8 +99,37 @@ const GROUPS: { key: GroupKey; label: string }[] = [
   { key: 'tag', label: 'Tag' },
   { key: 'folder', label: 'Folder' },
   { key: 'month', label: 'Month' },
+  { key: 'linked', label: 'How linked' },
   { key: 'none', label: 'Nothing' },
 ]
+
+/**
+ * Backlink count → a bucket.
+ *
+ * Grouping on the raw number would make 30-odd sections of one row each, which
+ * is a sorted table with headings, not a grouping. Buckets are what turn it
+ * into an axis.
+ *
+ * This is the Orphans toggle's missing middle, though NOT in the way it first
+ * appears. Zero backlinks implies orphan by construction — nothing links to a
+ * note, so nothing can reach it — and measuring the vault confirms the two sets
+ * are identical: 64 unreferenced, 64 of them orphans, 0 reachable-but-
+ * unreferenced. So this grouping does not find a hidden class of orphan.
+ *
+ * What it finds is the 150 notes of 280 sitting on exactly 1–2 backlinks. The
+ * boolean toggle calls all of them "fine" alongside a hub with 25, which is the
+ * distinction that actually matters when deciding what to link up next.
+ *
+ * The labels lead with digits so `localeCompare(numeric: true)` in the group
+ * sort orders them 1–2, 3–5, 6–10, 11+ and drops "Unreferenced" last.
+ */
+function linkBucket(backlinks: number): string {
+  if (backlinks === 0) return 'Unreferenced'
+  if (backlinks <= 2) return '1–2 backlinks'
+  if (backlinks <= 5) return '3–5 backlinks'
+  if (backlinks <= 10) return '6–10 backlinks'
+  return '11+ backlinks'
+}
 
 /**
  * `sort: false` is Tags only, and it is not an oversight. Sorting a
@@ -101,6 +143,12 @@ const COLUMNS: { key: SortKey | 'tags'; label: string; className: string; sort: 
   { key: 'type', label: 'Type', className: 'db-col-type', sort: true },
   { key: 'status', label: 'Status', className: 'db-col-status', sort: true },
   { key: 'tags', label: 'Tags', className: 'db-col-tags', sort: false },
+  // The relation pair. Two columns rather than one signed number because the
+  // two directions answer different questions — "what does this note draw on"
+  // and "what depends on it" — and a hub is interesting for having a large
+  // value in either.
+  { key: 'links', label: 'Links', className: 'db-col-num', sort: true },
+  { key: 'backlinks', label: 'Backlinks', className: 'db-col-num', sort: true },
   { key: 'updated', label: 'Updated', className: 'db-col-updated', sort: true },
 ]
 
@@ -121,7 +169,12 @@ const FAMILIES: Record<Exclude<TypeFamily, 'none'>, { label: string; Icon: Lucid
 function field(n: VaultNoteMeta, key: SortKey): string {
   if (key === 'area') return areaOf(n)
   if (key === 'title') return n.title
-  return n[key]
+  const v = n[key]
+  // The counts sort correctly as strings BECAUSE the comparator below passes
+  // `numeric: true` — that collation reads "42" as forty-two, so 9 sorts before
+  // 42 rather than after it. Returning a number here instead would need a
+  // second comparator for two columns.
+  return typeof v === 'number' ? String(v) : v
 }
 
 /**
@@ -145,6 +198,7 @@ function groupValues(n: VaultNoteMeta, key: GroupKey): string[] {
     case 'tag': return n.tags.length ? n.tags : ['']
     case 'folder': return [n.folder]
     case 'month': return [monthOf(n.updated)]
+    case 'linked': return [linkBucket(n.backlinks)]
     default: return ['']
   }
 }
@@ -640,13 +694,22 @@ export function DatabaseView({
         </span>
 
         {/* Reachability is the one column Notion has no answer for, so it gets
-            a control rather than being buried as a column you have to sort. */}
+            a control rather than being buried as a column you have to sort.
+
+            The tooltip names the root it actually measured from rather than
+            asserting "Home". That claim was hardcoded, and when there was no
+            Home.md at the vault root it was both wrong AND hiding that every
+            note in the vault had just been flagged. */}
         <button
           type="button"
           className={`db-chip ${orphansOnly ? 'active' : ''}`}
           onClick={() => setOrphansOnly((v) => !v)}
           aria-pressed={orphansOnly}
-          title="Notes not reachable from Home within 2 hops"
+          title={
+            notes[0]?.reachRoot
+              ? `Notes not reachable from ${notes[0].reachRoot} within 2 hops`
+              : 'Nothing in this vault links to anything, so there is no root to measure from — every note counts as an orphan'
+          }
         >
           <Unlink size={12} aria-hidden="true" />
           Orphans
@@ -804,6 +867,16 @@ export function DatabaseView({
                       </td>
                       <td className="db-col-tags">
                         <TagList tags={n.tags} />
+                      </td>
+                      {/* Zero renders as the em-dash every other empty cell
+                          uses, not as "0". A note with no links has no
+                          relations to show, which is the same statement the
+                          blank Type and Status cells make. */}
+                      <td className="db-col-num">
+                        {n.links || <span className="db-blank">{NONE}</span>}
+                      </td>
+                      <td className="db-col-num">
+                        {n.backlinks || <span className="db-blank">{NONE}</span>}
                       </td>
                       <td className="db-col-updated">
                         {n.updated || <span className="db-blank">{NONE}</span>}

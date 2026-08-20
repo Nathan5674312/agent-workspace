@@ -57,9 +57,18 @@ const api: Api = {
     // No argument on purpose: the picker runs in main, so the renderer cannot
     // nominate a directory for the app to read from.
     pickVaultDir: () => ipcRenderer.invoke(CH.settingsPickVaultDir),
+    // Also no argument: it applies the folder the picker already persisted, so
+    // the renderer still never names a directory. It reloads the window, which
+    // is why the dialog gates it on there being no unsaved text.
+    applyVaultDir: () => ipcRenderer.invoke(CH.settingsApplyVaultDir),
     // Takes an argument where pickVaultDir cannot: nothing in Appearance can
     // name a file, so it is not a way to point the app's reads anywhere.
     setAppearance: (a) => ipcRenderer.invoke(CH.settingsSetAppearance, a),
+    // Same reasoning as setAppearance: it names no file. It also cannot weaken
+    // the gate past 'manual' — main normalises, and there is no mode that turns
+    // it off — so the worst a compromised renderer achieves here is asking the
+    // human MORE often.
+    setApprovals: (a) => ipcRenderer.invoke(CH.settingsSetApprovals, a),
   },
 }
 

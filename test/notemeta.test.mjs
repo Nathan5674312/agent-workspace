@@ -51,6 +51,11 @@ test('toMeta survives a note server it does not control', async (t) => {
     updated: '2026-08-15',
     depth: 2,
     orphan: false,
+    // Real values rather than the 0 defaults, so the deepEqual below proves the
+    // relation counts pass THROUGH rather than proving they fall back.
+    links: 4,
+    backlinks: 7,
+    reachRoot: 'Home.md',
   }
 
   await t.test('a complete row passes through intact', () => {
@@ -68,6 +73,16 @@ test('toMeta survives a note server it does not control', async (t) => {
     assert.equal(m.status, '')
     assert.equal(m.updated, '')
     assert.equal(typeof m.status, 'string', 'sorting calls localeCompare on this')
+  })
+
+  await t.test('a server that sends no relation counts yields 0, not undefined', () => {
+    // Same defence, one field set later than the rest: the relation columns
+    // render `n.links || —`, and `undefined` there would print the em-dash
+    // correctly but sort as a blank rather than as a zero.
+    const { links, backlinks, ...old } = full
+    const m = toMeta(old)
+    assert.equal(m.links, 0)
+    assert.equal(m.backlinks, 0)
   })
 
   await t.test('a missing title falls back to the filename stem', () => {

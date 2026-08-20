@@ -36,10 +36,37 @@ export type VaultNoteMeta = VaultNote & {
    * belongs in three buckets, exactly as a Notion multi-select does.
    */
   tags: string[]
-  /** Hops from Home. `null` means unreachable. */
+  /** Hops from `reachRoot`. `null` means unreachable. */
   depth: number | null
-  /** R6: not reachable from Home within 2 hops. Notion has no equivalent. */
+  /** R6: not reachable from `reachRoot` within 2 hops. Notion has no equivalent. */
   orphan: boolean
+  /**
+   * The note `depth` and `orphan` were measured FROM, or null when nothing in
+   * the vault links to anything.
+   *
+   * Carried per row because it is what stops the Orphans control lying. It used
+   * to be the constant `Home.md`, and when no such note existed at the vault
+   * root the BFS visited nothing and marked the entire vault orphaned — 1419 of
+   * 1419 on this machine — while the UI still said "not reachable from Home",
+   * naming a note that was not there. A count is only meaningful next to what
+   * it counted from.
+   */
+  reachRoot: string | null
+  /**
+   * Outbound [[wikilinks]] that resolve to a note in the vault.
+   *
+   * This IS the relation column, and it is the only shape of one this vault
+   * has data for: a scan found a [[link]] inside a frontmatter VALUE — the
+   * Notion-style typed relation — in exactly 1 note of 280, against 653
+   * resolved body edges. So the relation is the wikilink, and `buildIndex`
+   * already resolved every one of them for the graph.
+   *
+   * Deduped by resolved target, so this is the endpoint count the graph draws
+   * from, not a mention count.
+   */
+  links: number
+  /** Inbound resolved [[wikilinks]]. The other half of the same edge set. */
+  backlinks: number
 }
 
 /** Sentinel for "this note has no value for the field being grouped on". */
@@ -301,5 +328,13 @@ export function toMeta(raw: unknown): VaultNoteMeta | null {
       : parseList(str(o.tags)),
     depth: typeof o.depth === 'number' ? o.depth : null,
     orphan: o.orphan === true,
+    // A server too old to send these is not a broken row — it is a row with no
+    // relations to show, which renders as the same em-dash an unlinked note
+    // gets. Same posture as `status` and `updated` above.
+    links: typeof o.links === 'number' ? o.links : 0,
+    backlinks: typeof o.backlinks === 'number' ? o.backlinks : 0,
+    // Absent is null, not a guessed 'Home.md'. Inventing a root here would put
+    // the exact wrong claim back into the UI that this field exists to remove.
+    reachRoot: typeof o.reachRoot === 'string' && o.reachRoot ? o.reachRoot : null,
   }
 }

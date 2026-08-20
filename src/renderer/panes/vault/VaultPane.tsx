@@ -27,8 +27,10 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVault } from './useVault.js'
 import { LeftRibbon, ribbonLabel } from './LeftRibbon.js'
 import { SidebarPlaceholder } from './SidebarPlaceholder.js'
+import { CanvasList } from './CanvasView.js'
 import { SidebarResizer } from './SidebarResizer.js'
 import { TerminalView } from './TerminalView.js'
+import { BookmarksView } from './BookmarksView.js'
 import { DailyNotesView } from './DailyNotesView.js'
 import { ExplorerHeader } from './ExplorerHeader.js'
 import { FolderTree } from './FolderTree.js'
@@ -52,6 +54,7 @@ const VIEW_LABEL: Record<MainView, string> = {
   database: 'Database',
   inbox: 'Inbox',
   roadmap: 'Roadmap',
+  canvas: 'Canvas',
 }
 import { ConflictDialog } from './ConflictDialog.js'
 import { SettingsDialog } from './SettingsDialog.js'
@@ -87,7 +90,10 @@ export function VaultPane(): React.ReactElement {
   const [buffer, setBuffer] = useState('')
   const [backlinks, setBacklinks] = useState<string[]>([])
   const [tabs, setTabs] = useState<VaultTab[]>([
-    { id: 'default', name: 'Universal Vault', path: null, view: 'editor' },
+    // Placeholder only. Renamed to the real folder name by the effect below,
+    // as soon as the first tree arrives — it used to be a literal that outlived
+    // every vault change.
+    { id: 'default', name: 'Vault', path: null, view: 'editor' },
   ])
   const [activeTabId, setActiveTabId] = useState('default')
   /**
@@ -97,6 +103,45 @@ export function VaultPane(): React.ReactElement {
    * tab's and travels with it.
    */
   const [splitView, setSplitView] = useState<MainView>('graph')
+
+  /**
+   * The open canvas board. Pane state rather than tab state, deliberately: a
+   * board is a document, but tabs carry a NOTE path that the editor buffer and
+   * the whole save path are built around, and threading a second kind of
+   * document through them is a bigger change than one board at a time is worth.
+   * Multiple canvas tabs is the upgrade, not the omission.
+   */
+  const [canvasPath, setCanvasPath] = useState<string | null>(null)
+
+  /**
+   * The open vault's name, from the tree root — the folder's own basename.
+   *
+   * Derived, never stored, so it cannot go stale against the folder actually
+   * being read. Empty until the first tree lands; the switcher renders the
+   * placeholder for that one frame rather than a name that might be wrong.
+   */
+  const vaultName = vault.tree?.name ?? 'Vault'
+
+  /**
+   * Rename the seeded first tab once the vault's real name is known.
+   *
+   * That tab is created before any tree has loaded, so it has to be seeded with
+   * something — and it was seeded with the literal "Universal Vault", which
+   * then never changed no matter which folder was opened. Scoped as tightly as
+   * possible: only the original tab, only while it still holds no note and is
+   * still on the editor view, so nothing a user has since done to it is
+   * overwritten.
+   */
+  useEffect(() => {
+    if (vaultName === 'Vault') return
+    setTabs((ts) =>
+      ts.map((t) =>
+        t.id === 'default' && t.path === null && t.view === 'editor' && t.name !== vaultName
+          ? { ...t, name: vaultName }
+          : t,
+      ),
+    )
+  }, [vaultName])
 
   /**
    * The primary canvas's view IS the active tab's view. Derived, not mirrored:
@@ -126,6 +171,40 @@ export function VaultPane(): React.ReactElement {
    * is not worth growing that contract for.
    */
   const [sort, setSort] = useState<TreeSort>('folders-asc')
+  /**
+   * The boot vault-root warning, shown IN THE PANE rather than only in the
+   * settings modal.
+   *
+   * `checkRoots()` has been producing a good sentence for a while and nobody
+   * has ever read it: `state()` carries it over IPC, and the only thing that
+   * rendered it was <SettingsDialog>, three clicks away behind a gear icon.
+   * So the failure it describes — a root above a vault, which turns 281 notes
+   * and 657 links into 1 420 notes, 567 links and 1 344 orphans — presented as
+   * a graph full of unconnected dust with no text anywhere on screen. The user
+   * would have had to already suspect the vault path to go find the sentence
+   * explaining that the vault path is wrong.
+   *
+   * The graph and the database are where the damage is visible, so the
+   * explanation belongs next to them. Dismissible, because it is a diagnosis
+   * and not a modal: someone deliberately indexing a tree that contains a vault
+   * should be told once and then left alone.
+   */
+  const [rootWarning, setRootWarning] = useState<string | null>(null)
+  useEffect(() => {
+    let live = true
+    // Failure here is not worth surfacing: this is the DIAGNOSTIC channel, and
+    // a diagnostic that raises its own error banner is just noise on top of
+    // whatever the real problem was.
+    void window.api.settings
+      .get()
+      .then((s) => {
+        if (live) setRootWarning(s.rootMismatch)
+      })
+      .catch(() => {})
+    return () => {
+      live = false
+    }
+  }, [])
   const [conflictOpen, setConflictOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -279,6 +358,24 @@ export function VaultPane(): React.ReactElement {
    * regardless yanks the user somewhere they just said no to.
    */
   const openNote = async (path: string, tabId?: string): Promise<boolean> => {
+    /**
+     * A `.canvas` is not a note, and this is the ONE place that has to know.
+     *
+     * The guard lives here rather than in the explorer because `openNote` is
+     * the single entry point every caller already routes through — the tree,
+     * bookmarks, wikilinks, the nav trail, the database and the graph. Branching
+     * in FolderTree would have fixed the explorer and left every other path
+     * still loading JSON into the markdown buffer.
+     *
+     * It returns BEFORE the nav trail push on purpose: back and forward call
+     * `loadNote` directly, so a board in the trail would be read as a note the
+     * moment someone pressed Back.
+     */
+    if (path.toLowerCase().endsWith('.canvas')) {
+      setCanvasPath(path)
+      handleViewChange('canvas')
+      return true
+    }
     if (!(await loadNote(path, tabId))) return false
     // Browser semantics: opening from the tree truncates any forward history.
     // Trail and cursor move together, both read from the same `n`.
@@ -666,6 +763,7 @@ export function VaultPane(): React.ReactElement {
       getGraph={vault.getGraph}
       getNotes={vault.getNotes}
       getInbox={vault.getInbox}
+      canvasPath={canvasPath}
       backlinks={backlinks}
       onBack={goBack}
       onForward={goForward}
@@ -702,12 +800,26 @@ export function VaultPane(): React.ReactElement {
                 onToggle={handleToggleFolder}
               />
             </>
+          ) : activeRibbon === 'bookmarks' ? (
+            /* Reads and writes Obsidian's own .obsidian/bookmarks.json, so this
+               is the same list Obsidian shows rather than a second one. */
+            <BookmarksView onOpenNote={(path) => void openNote(path)} />
           ) : activeRibbon === 'calendar' ? (
             /* Daily notes. The tree is the source for which days exist, so this
                reads the same data the explorer draws rather than asking again. */
             <DailyNotesView
               tree={vault.tree}
               onOpenNote={(path) => void openNote(path)}
+              onCreated={vault.reload}
+            />
+          ) : activeRibbon === 'canvas' ? (
+            /* Reads the boards out of the same tree the explorer draws, so
+               there is one answer to what is in the vault. Opening one goes
+               through `openNote`, which routes .canvas to the Canvas view. */
+            <CanvasList
+              tree={vault.tree}
+              current={canvasPath}
+              onOpen={(path) => void openNote(path)}
               onCreated={vault.reload}
             />
           ) : activeRibbon === 'terminal' ? (
@@ -723,6 +835,7 @@ export function VaultPane(): React.ReactElement {
           )}
 
           <VaultSwitcher
+            name={vaultName}
             onSettings={() => setSettingsOpen(true)}
             onHelp={() => setHelpOpen(true)}
           />
@@ -748,6 +861,21 @@ export function VaultPane(): React.ReactElement {
             <div className="vault-open-error" role="alert">
               {openError}
               <button onClick={() => setOpenError(null)} aria-label="Dismiss">
+                ×
+              </button>
+            </div>
+          )}
+
+          {/* Same slot and the same class as the open error above, deliberately:
+              this is the other thing that can be wrong with what the pane is
+              showing, and a second banner style would be a second thing to keep
+              in sync for no gain. `status` rather than `alert` because it is
+              already true when the pane mounts — an assertive live region would
+              interrupt a screen reader on every launch. */}
+          {rootWarning && (
+            <div className="vault-open-error" role="status">
+              {rootWarning}
+              <button onClick={() => setRootWarning(null)} aria-label="Dismiss">
                 ×
               </button>
             </div>
@@ -780,7 +908,15 @@ export function VaultPane(): React.ReactElement {
       {/* Same level as the conflict dialog, and unmounted when closed so its
           "read settings on open" effect runs on every open. Nothing here can
           discard the edit buffer, so it needs no dirty guard. */}
-      <SettingsDialog isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      {/* `isDirty` is new here, and it is what keeps the comment below true.
+          Settings can now switch the vault folder, which reloads the window and
+          takes the buffer with it, so the dialog needs the one fact that makes
+          that safe to offer. */}
+      <SettingsDialog
+        isOpen={settingsOpen}
+        onClose={() => setSettingsOpen(false)}
+        isDirty={isDirty}
+      />
 
       {/* Same treatment as Settings, and for the same reason it is safe: Help
           is read-only text and cannot reach the buffer, so it needs no dirty

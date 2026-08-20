@@ -25,7 +25,8 @@ function attr(name: string, value: string | null): void {
 export function applyAppearance(a: Appearance): void {
   // The union members ARE the attribute values, so there is no mapping table to
   // fall out of sync with appearance.css — only the 'system' case to drop.
-  attr('data-contrast', a.contrast === 'system' ? null : a.contrast)
+  // No data-contrast: the in-app contrast override was removed, and
+  // `@media (prefers-contrast: more)` in app.css covers it from the OS.
   attr('data-transparency', a.transparency === 'system' ? null : a.transparency)
   attr('data-motion', a.motion === 'system' ? null : a.motion)
   attr('data-artwork', a.artwork ? null : 'off')

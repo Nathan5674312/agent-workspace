@@ -833,6 +833,10 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
    is a flex container so text-align alone would not move it. */
 .db-table thead th.db-col-updated { text-align: right; }
 .db-table thead th.db-col-updated button { justify-content: flex-end; }
+/* The relation counts are right-aligned data, so their headers need the exact
+   same treatment for the exact same reason — see the note above. */
+.db-table thead th.db-col-num { text-align: right; }
+.db-table thead th.db-col-num button { justify-content: flex-end; }
 
 /* Group headers sit BELOW the column header when both are stuck, hence
    var(--db-head-h) and the lower z-index. Same material treatment: they are
@@ -863,14 +867,20 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
 
 /* Fixed proportions, so switching group-by does not reflow every column width
    and make the table appear to jump. */
-.db-col-title { width: 30%; }
+.db-col-title { width: 26%; }
 .db-col-area { width: 10%; }
-.db-col-type { width: 13%; }
-.db-col-status { width: 15%; }
+.db-col-type { width: 12%; }
+.db-col-status { width: 14%; }
 /* Tags is the widest of the property columns because it is the only one
    carrying more than one value per row. At 14% all three chips ellipsised to
    "syst…" and the column stopped meaning anything. */
-.db-col-tags { width: 20%; }
+.db-col-tags { width: 16%; }
+/* The two relation columns. Narrow because they hold at most three digits, and
+   tabular-nums so the counts form a column edge the eye can scan for hubs —
+   the whole reason to show a number rather than a chip. Right-aligned for the
+   same reason Updated is. */
+.db-col-num { width: 6%; text-align: right; color: var(--label-tertiary);
+  font-variant-numeric: tabular-nums; white-space: nowrap; }
 /* Dates form a column edge only if they are aligned to one. */
 .db-col-updated { width: 10%; text-align: right; color: var(--label-quaternary);
   font-variant-numeric: tabular-nums; white-space: nowrap; }

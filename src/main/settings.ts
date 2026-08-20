@@ -12,15 +12,18 @@
  */
 import { app, dialog, BrowserWindow } from 'electron'
 import { readFileSync, writeFileSync, renameSync, statSync } from 'node:fs'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import {
   CH,
   ARTWORK_OPACITY_MAX,
   DEFAULT_APPEARANCE,
+  DEFAULT_APPROVALS,
   type Appearance,
+  type Approvals,
   type AppSettings,
 } from '../shared/ipc.js'
-import { getVaultDir, setVaultDir } from './vault.js'
+import { checkRoots, getVaultDir, setVaultDir } from './vault.js'
+import { getApprovalsPolicy, setApprovalsPolicy } from './consent.js'
 import type { Handle } from './ipc.js'
 
 const settingsPath = join(app.getPath('userData'), 'settings.json')
@@ -29,6 +32,7 @@ const settingsPath = join(app.getPath('userData'), 'settings.json')
 interface Stored {
   vaultDir?: string
   appearance?: Appearance
+  approvals?: Approvals
 }
 
 /** The last thing loaded from or written to disk. */
@@ -80,6 +84,14 @@ function load(): Stored {
     // Absent stays absent, so state() falls through to DEFAULT_APPEARANCE and
     // an untouched settings.json keeps no appearance key at all.
     if (raw.appearance !== undefined) out.appearance = sanitize(raw.appearance)
+    // Deliberately NOT validated here. There is exactly one normaliser for this
+    // value and it lives in consent.ts, because the gate is what has to be right
+    // about it — a second copy here could drift, and the drift would be a policy
+    // that reads one way and enforces another. Anything object-shaped is handed
+    // over and comes back normalised; anything else never reaches the gate.
+    if (typeof raw.approvals === 'object' && raw.approvals !== null) {
+      out.approvals = raw.approvals as Approvals
+    }
     return out
   } catch {
     // Missing file on first run, or corrupt. Both mean "no persisted setting".
@@ -102,7 +114,6 @@ function sanitize(v: unknown): Appearance {
     allowed.includes(value as T) ? (value as T) : fallback
   const opacity = o.artworkOpacity
   return {
-    contrast: pick(o.contrast, ['system', 'more'] as const, DEFAULT_APPEARANCE.contrast),
     transparency: pick(
       o.transparency,
       ['system', 'reduced'] as const,
@@ -142,6 +153,15 @@ function save(s: Stored): void {
 export function applySettings(): void {
   current = load()
   vaultDirRefused = null
+
+  // Before the vault work below, and unconditionally: this must run even on the
+  // early return, or an install with a persisted policy and no persisted
+  // vaultDir boots with the policy on disk and 'manual' in the gate. Passing the
+  // default explicitly rather than skipping the call also makes a REMOVED
+  // approvals key reset the gate, which matters because this function is the
+  // only thing that ever installs one.
+  setApprovalsPolicy(current.approvals ?? DEFAULT_APPROVALS)
+
   const dir = current.vaultDir
   if (!dir) return
 
@@ -150,6 +170,18 @@ export function applySettings(): void {
   // drive it was on since the last run, and that is far likelier than the
   // corrupt JSON this file already defends against. Applying it anyway boots
   // the app pointed at nothing, with no visible reason.
+  // Refused for the same reason the picker now refuses it, and checked here as
+  // well because a value written before that guard existed is already on disk.
+  // Left in settings.json rather than rewritten — same posture as a missing
+  // folder: the app uses the default for this run and says why.
+  if (basename(dir).startsWith('.')) {
+    vaultDirRefused =
+      `Saved vault folder ${dir} is a dot-folder, which holds app data and is ` +
+      `hidden by the explorer — no note in it can ever be shown. Using the ` +
+      `default instead. Choose the folder that CONTAINS your notes.`
+    return
+  }
+
   if (isDirectory(dir)) {
     setVaultDir(dir)
     return
@@ -184,6 +216,10 @@ function state(): AppSettings {
       stored !== null && stored !== active && vaultDirRefused === null ? stored : null,
     rootMismatch: vaultDirRefused ?? rootMismatch,
     appearance: current.appearance ?? DEFAULT_APPEARANCE,
+    // From the GATE, not from `current` — see the note in load(). What the user
+    // is shown is what is actually being enforced, including when the file said
+    // something the gate refused to honour.
+    approvals: getApprovalsPolicy(),
   }
 }
 
@@ -194,6 +230,22 @@ function state(): AppSettings {
  */
 function setAppearance(a: Appearance): AppSettings {
   current = { ...current, appearance: sanitize(a) }
+  save(current)
+  return state()
+}
+
+/**
+ * Install the approvals policy and persist it. Applies LIVE, like appearance and
+ * unlike the vault folder: the gate reads the policy at each decision, so there
+ * is nothing to rebuild and no unsaved state to lose.
+ *
+ * Order is install-then-read-then-save, not save-then-install. What goes to disk
+ * is what the gate NORMALISED, so a junk duration or an unknown mode is repaired
+ * on the way in and never round-trips back out as the thing the user asked for.
+ */
+function setApprovals(a: Approvals): AppSettings {
+  setApprovalsPolicy(a)
+  current = { ...current, approvals: getApprovalsPolicy() }
   save(current)
   return state()
 }
@@ -215,6 +267,29 @@ async function pickVaultDir(): Promise<AppSettings> {
   const chosen = result.filePaths[0]
   if (result.canceled || !chosen) return state()
 
+  /**
+   * A dot-folder can never be a usable vault root, so it is refused at the
+   * point of choice rather than accepted and puzzled over later.
+   *
+   * This is not hypothetical. The picker opens at the CURRENT vault folder, so
+   * a user changing vaults starts one level inside their existing one and it is
+   * easy to step into `.obsidian` and click Use this folder — which is exactly
+   * what happened here, leaving `vaultDir` at `…\Desktop\.obsidian`, an empty
+   * explorer and an empty graph with nothing obviously wrong.
+   *
+   * `HIDDEN` in vault.ts skips `.git`, `.obsidian` and `.trash` wherever they
+   * appear in the tree, so rooting the vault AT one of them means every file in
+   * it is hidden by the app's own rules. There is no configuration under which
+   * this is what someone meant.
+   */
+  if (basename(chosen).startsWith('.')) {
+    vaultDirRefused =
+      `${chosen} cannot be a vault folder: names beginning with a dot are ` +
+      `app data, and this one's contents are hidden by the explorer. Pick the ` +
+      `folder that CONTAINS your notes.`
+    return state()
+  }
+
   current = { ...current, vaultDir: chosen }
   // The picker only returns a folder that exists, so this IS the re-pick the
   // refusal message asks for. Clearing it here is what lets pendingVaultDir
@@ -225,8 +300,51 @@ async function pickVaultDir(): Promise<AppSettings> {
   return state()
 }
 
+/**
+ * Switch to the pending folder now, instead of at the next launch.
+ *
+ * The file header says vaultDir is applied at BOOT only, and the reason given
+ * is sound: a live swap has to invalidate the graph memo, the folder tree, the
+ * open edit buffer and every path in the nav trail together, and a partial one
+ * loses unsaved text. What that reasoning missed is that "restart to apply" is
+ * only honest if something in the app can actually restart. Nothing could — so
+ * picking a folder changed the small print under the path and left the path
+ * itself alone, which reads as the setting being broken.
+ *
+ * A window RELOAD is the atomic step the header wanted. The renderer is
+ * destroyed and rebuilt, so the tree, the buffer and the trail are not
+ * invalidated one by one; they cease to exist. Main only has to drop the index
+ * memo, which `setVaultDir` already does.
+ *
+ * The unsaved-text risk is real and is handled where the knowledge is: the
+ * dialog refuses to offer this while the buffer is dirty. Main does not know
+ * about the buffer and should not learn.
+ */
+async function applyVaultDir(): Promise<AppSettings> {
+  const stored = current.vaultDir
+  if (!stored || stored === getVaultDir() || vaultDirRefused !== null) return state()
+  if (!isDirectory(stored)) {
+    // Deleted between the pick and the click. Same message and same posture as
+    // the boot path, rather than switching to a folder that is not there.
+    vaultDirRefused = `Saved vault folder is missing: ${stored} — using the default instead. Choose the folder again to switch back.`
+    return state()
+  }
+
+  setVaultDir(stored) // also drops the index memo — see vault.ts
+  // The old boot warning describes the old root, so it must not outlive it.
+  // Recomputed here rather than left stale, which would leave "point at X
+  // instead" advice sitting under the folder it was telling you to pick.
+  rootMismatch = await checkRoots().catch(() => null)
+
+  const win = BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0]
+  win?.webContents.reload()
+  return state()
+}
+
 export function register(handle: Handle): void {
   handle(CH.settingsGet, () => state())
   handle(CH.settingsPickVaultDir, () => pickVaultDir())
+  handle(CH.settingsApplyVaultDir, () => applyVaultDir())
   handle(CH.settingsSetAppearance, (a: Appearance) => setAppearance(a))
+  handle(CH.settingsSetApprovals, (a: Approvals) => setApprovals(a))
 }

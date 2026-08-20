@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import type { VaultNoteBody, VaultGraph } from '../../../shared/ipc.js'
 import { Editor } from './Editor.js'
 import { GraphView } from './GraphView.js'
+import { CanvasView } from './CanvasView.js'
 import { DatabaseView } from './DatabaseView.js'
 import { InboxView } from './InboxView.js'
 import { RoadmapView } from './RoadmapView.js'
@@ -22,7 +23,14 @@ import { ArrowLeft, ArrowRight, Ellipsis } from 'lucide-react'
  * Which view the canvas is showing. Exported because a TAB owns one: a tab that
  * cannot remember it was on the database is a label, not a tab.
  */
-export type MainView = 'editor' | 'versions' | 'graph' | 'database' | 'inbox' | 'roadmap'
+export type MainView =
+  | 'editor'
+  | 'versions'
+  | 'graph'
+  | 'database'
+  | 'inbox'
+  | 'roadmap'
+  | 'canvas'
 
 export interface MainCanvasProps {
   note: VaultNoteBody | null
@@ -36,6 +44,12 @@ export interface MainCanvasProps {
   getGraph: () => Promise<VaultGraph>
   getNotes: () => Promise<VaultNoteMeta[]>
   getInbox: () => Promise<InboxItem[]>
+  /**
+   * The open board's path. Pane state in <VaultPane>, not tab state, for the
+   * same reason `splitView` is: one board at a time is the v1 scope, and a
+   * canvas is not a note so it cannot ride on a tab's `path`.
+   */
+  canvasPath: string | null
   backlinks: string[]
   /** Resolves false when the open was refused — a conflict dialog, a declined
    *  discard, or a failed read. Callers must not commit a view change until
@@ -67,6 +81,7 @@ export function MainCanvas({
   getGraph,
   getNotes,
   getInbox,
+  canvasPath,
   backlinks,
   onOpenNote,
   onOpenWikilink,
@@ -212,7 +227,11 @@ export function MainCanvas({
         <span className="vault-note-title">
           {view === 'graph'
             ? 'Graph view'
-            : view === 'database'
+            : view === 'canvas'
+              ? // The board's own name, because a canvas IS a document — unlike
+                // the graph and the database, which are lenses over all of them.
+                (canvasPath?.split('/').pop()?.replace(/\.canvas$/i, '') ?? 'Canvas')
+              : view === 'database'
               ? 'Database view'
               : view === 'inbox'
                 ? 'Inbox'
@@ -319,6 +338,17 @@ export function MainCanvas({
       <div className="vault-view-content">
         {view === 'roadmap' ? (
           <RoadmapView />
+        ) : view === 'canvas' ? (
+          <CanvasView
+            path={canvasPath}
+            onOpenNote={(path) => {
+              // Same contract as the table and the graph: a file card that
+              // opens a note behind the board reads as a dead click.
+              void onOpenNote(path).then((opened) => {
+                if (opened) onViewChange('editor')
+              })
+            }}
+          />
         ) : view === 'versions' ? (
           <VersionsView note={note} onRestore={onRestore} />
         ) : view === 'inbox' ? (

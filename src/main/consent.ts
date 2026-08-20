@@ -88,6 +88,58 @@ export class ConsentDenied extends Error {
  */
 const allowances = new Map<string, { remaining: number }>()
 
+/**
+ * HOW approvals behave. Two modes, and deliberately only two.
+ *
+ *   manual  what shipped, unchanged. Agent-originated operations are gated,
+ *           and a human may widen that to a batch or to the session.
+ *   strict  allowances are neither granted nor spent. Every agent-originated
+ *           operation is put in front of a human on its own, however many
+ *           times the same agent asks for the same kind.
+ *
+ * There is NO 'off'. An off mode would not be a setting, it would be the
+ * deletion of the property this whole module exists to hold — and it would
+ * delete it invisibly, from a config file, which is the same failure the
+ * missing-actor check refuses to allow. A 'smart' mode is absent for a duller
+ * reason: nothing here can currently tell a safe operation from a dangerous
+ * one, so it would mean nothing.
+ *
+ * `timeoutMs` is how long an unanswered prompt may sit before it is treated as
+ * a REFUSAL. Undefined — the default — means it waits forever, so an install
+ * that configures nothing behaves bit-for-bit as it did before this existed.
+ * Expiry is never an approval: an unwatched prompt is exactly the moment when
+ * assuming yes would be worst.
+ */
+export type ApprovalsPolicy = {
+  mode: 'manual' | 'strict'
+  timeoutMs?: number
+}
+
+let policy: ApprovalsPolicy = { mode: 'manual' }
+
+/**
+ * Install a policy. Whole-object, not a patch, so what is in force is always
+ * what was last handed over rather than a merge nobody can read back.
+ *
+ * Both fields are normalised rather than trusted, for the same reason the actor
+ * is: this is fed from a settings file a human can edit and that older or newer
+ * builds can disagree about. An unrecognised mode falls back to 'manual' —
+ * still gated — never to something that asks LESS than what was written. That
+ * is what makes a stray `mode: "off"` inert rather than catastrophic.
+ */
+export function setApprovalsPolicy(next: ApprovalsPolicy): void {
+  const ms = next?.timeoutMs
+  policy = {
+    mode: next?.mode === 'strict' ? 'strict' : 'manual',
+    timeoutMs: typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms : undefined,
+  }
+}
+
+/** The policy in force. A copy, so a caller cannot mutate it in place. */
+export function getApprovalsPolicy(): ApprovalsPolicy {
+  return { ...policy }
+}
+
 function keyOf(sessionId: string, kind: OpKind): string {
   return `${sessionId}\u0000${kind}`
 }
@@ -163,25 +215,32 @@ async function ask(
   what: readonly string[],
   count: number,
 ): Promise<boolean> {
-  const outcome = await requestConsentOutcome({
-    title:
-      count === 1
-        ? `Agent wants to ${LABEL[kind]} a file in your vault`
-        : `Agent wants to ${LABEL[kind]} ${count} files in your vault`,
-    // Every clause earns its place: what is about to happen, the agent's own
-    // stated reason, the exact paths, and which session is asking.
-    detail:
-      `An agent wants to ${LABEL[kind]} ${count === 1 ? 'this' : `these ${count}`}: ` +
-      `${summarise(what)}. Its reason: "${actor.reason.trim()}". ` +
-      `Session ${actor.sessionId}. Nothing is deleted — the original goes to the ` +
-      `vault's trash and can be put back.`,
-    // 'warn', not 'info': an autonomous process is changing the user's files,
-    // which is the case the corner's warn styling exists for.
-    severity: 'warn',
-  })
+  const outcome = await requestConsentOutcome(
+    {
+      title:
+        count === 1
+          ? `Agent wants to ${LABEL[kind]} a file in your vault`
+          : `Agent wants to ${LABEL[kind]} ${count} files in your vault`,
+      // Every clause earns its place: what is about to happen, the agent's own
+      // stated reason, the exact paths, and which session is asking.
+      detail:
+        `An agent wants to ${LABEL[kind]} ${count === 1 ? 'this' : `these ${count}`}: ` +
+        `${summarise(what)}. Its reason: "${actor.reason.trim()}". ` +
+        `Session ${actor.sessionId}. Nothing is deleted — the original goes to the ` +
+        `vault's trash and can be put back.`,
+      // 'warn', not 'info': an autonomous process is changing the user's files,
+      // which is the case the corner's warn styling exists for.
+      severity: 'warn',
+    },
+    // Undefined under the default policy, which is what keeps "waits for a
+    // human, indefinitely" the shipped behaviour.
+    policy.timeoutMs,
+  )
 
   if (outcome === 'deny') return false
-  if (outcome === 'session') {
+  // Under 'strict' the answer still authorises THIS operation — the human said
+  // yes to it — but it buys nothing for the next one.
+  if (outcome === 'session' && policy.mode !== 'strict') {
     allowances.set(keyOf(actor.sessionId, kind), { remaining: Infinity })
   }
   return true
@@ -197,7 +256,10 @@ export async function gate(actor: Actor, kind: OpKind, what: readonly string[]):
   requireActor(actor)
   if (actor.kind === 'user') return
 
-  if (consume(keyOf(actor.sessionId, kind))) return
+  // 'strict' spends nothing, so a standing grant of either lifetime is simply
+  // not consulted — and, being unspent, it is still there if the policy is put
+  // back to 'manual'.
+  if (policy.mode !== 'strict' && consume(keyOf(actor.sessionId, kind))) return
   if (!(await ask(actor, kind, what, 1))) throw new ConsentDenied(kind)
 }
 
@@ -230,13 +292,17 @@ export async function withBatchConsent<T>(
 
   const key = keyOf(actor.sessionId, kind)
 
-  // Already trusted for the session: there is nothing left to ask.
-  if (allowances.get(key)?.remaining === Infinity) return run()
+  // Already trusted for the session: there is nothing left to ask. Skipped
+  // under 'strict', where no standing grant is honoured.
+  if (policy.mode !== 'strict' && allowances.get(key)?.remaining === Infinity) return run()
 
   if (!(await ask(actor, kind, operations, operations.length))) throw new ConsentDenied(kind)
 
+  // Under 'strict' no batch credit is issued, so the gate() calls inside `run`
+  // each ask for themselves. The batch prompt is still raised first and can
+  // still refuse the whole run: strict may only ever ask MORE than manual.
   // 'session' already installed an unbounded allowance; do not narrow it.
-  if (allowances.get(key)?.remaining !== Infinity) {
+  if (policy.mode !== 'strict' && allowances.get(key)?.remaining !== Infinity) {
     allowances.set(key, { remaining: operations.length })
   }
 
@@ -248,9 +314,13 @@ export async function withBatchConsent<T>(
 }
 
 /**
- * Drop every allowance. For tests, which must not inherit each other's grants —
- * the same reason vault.ts exposes `_setVaultDirForTest`.
+ * Drop every allowance AND restore the default policy. For tests, which must
+ * not inherit each other's grants — the same reason vault.ts exposes
+ * `_setVaultDirForTest`. The policy is reset here rather than through a second
+ * hook because a test that leaves 'strict' standing silently rewrites what
+ * every later test in the file is measuring.
  */
 export function _resetAllowancesForTest(): void {
   allowances.clear()
+  policy = { mode: 'manual' }
 }

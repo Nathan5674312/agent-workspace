@@ -155,7 +155,12 @@ export const ROADMAP: FeatureGroup[] = [
       { label: 'API / plugin ecosystem', status: 'planned', surface: 'ribbon:plugins' },
       { label: 'Web clipper', status: 'planned' },
       { label: 'Version history', status: 'partial', surface: 'Versions tab', note: 'The Versions tab lists every pre-edit copy in .backups/ for the open note, newest first, previews one, and restores it THROUGH save() so the lost-update guard and the backup-before-overwrite still apply. Both on-disk layouts are listed — the new mirrored one and the retired note server\'s flat one. The gap is that it has not been watched running yet: verified by test/versions.test.mjs against the real data layer, not by a human opening the tab. No pruning either — the history is still unbounded.' },
-      { label: 'Whiteboard / canvas view', status: 'planned', surface: 'ribbon:canvas' },
+      {
+        label: 'Whiteboard / canvas view',
+        status: 'partial',
+        surface: 'ribbon:canvas',
+        note: 'Boards are stored as JSON Canvas (jsoncanvas.org), the same `.canvas` format Obsidian reads and writes, so a board made here opens there and back. Built: create and open boards from the ribbon, pan, zoom to cursor, drag cards to rearrange, open a note from its card, and edges rendered as the file describes them. Saves through the same guarded write the editor uses. Not built: making cards or drawing edges inside the app, so today a board is arranged here and authored in Obsidian. Fields this view does not render — groups, colours, edge labels — are preserved on save rather than dropped.',
+      },
       { label: 'Server / client homelab setup', status: 'planned' },
       {
         label: 'Open source or at least open format',

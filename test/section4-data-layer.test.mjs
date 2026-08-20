@@ -11,7 +11,7 @@ import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { mkdtemp, mkdir, readFile, writeFile, stat } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
-import { join } from 'node:path'
+import { basename, join } from 'node:path'
 import * as vault from '../src/main/vault.ts'
 
 /**
@@ -165,7 +165,12 @@ test('vault data layer', async (t) => {
 
   await t.test('tree() builds nested structure, sorts folders before notes', async () => {
     const root = await vault.tree()
-    assert.equal(root.name, 'Universal Vault')
+    // Was `assert.equal(root.name, 'Universal Vault')`, which passed against a
+    // scratch directory called something else entirely — it was pinning a
+    // hardcoded literal as if it were behaviour. The root must be named after
+    // the folder actually being read, or the whole UI keeps calling every vault
+    // by one machine's folder name.
+    assert.equal(root.name, basename(dir))
     assert.equal(root.kind, 'folder')
     assert.ok(root.children)
 

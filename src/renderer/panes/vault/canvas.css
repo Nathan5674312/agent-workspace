@@ -1,0 +1,294 @@
+/* Canvas view — a spatial board of cards under one CSS transform.
+   Every colour here is a token. See tokens.css: this palette is monochrome by
+   decision, so a card is separated from the board by luminance and a border,
+   never by a hue. */
+
+.canvas-view {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  min-height: 0;
+}
+
+/* The viewport. `overflow: hidden` is what makes the world infinite: the
+   transform below moves content far outside this box and nothing may scroll
+   into view or the pan would fight a scrollbar. */
+.canvas-surface {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
+  cursor: grab;
+  /* The board reads as a surface you move, so the browser must not also try to
+     pan or text-select through the gesture. */
+  touch-action: none;
+  user-select: none;
+}
+.canvas-surface:active {
+  cursor: grabbing;
+}
+
+/* The world. One transform for pan AND zoom, so the browser composites it
+   rather than re-laying-out every card. `transform-origin: 0 0` is required:
+   the default 50% would make the zoom maths in CanvasView wrong, because that
+   maths assumes scaling about the world origin. */
+.canvas-world {
+  position: absolute;
+  top: 0;
+  left: 0;
+  transform-origin: 0 0;
+  /* NO `will-change: transform`. It promotes this to a compositing layer sized
+     to its contents, and the edge layer below is deliberately far larger than
+     the viewport — past Chromium's max texture size the layer is never
+     rasterised, which is one of the two ways the edges silently vanished. A
+     transform is composited on its own anyway; will-change bought nothing and
+     cost the whole edge layer. */
+}
+
+/* The edge layer is a fixed, large box centred on the world origin, NOT a
+   zero-sized svg with `overflow: visible` — that version has a degenerate
+   viewport and Chromium never paints its children, so every edge silently
+   vanished. Its coordinates are shifted by EDGE_ORIGIN in CanvasView, which is
+   half of these dimensions. Only the on-screen part is ever rasterised, so the
+   size costs nothing. */
+.canvas-edges {
+  position: absolute;
+  left: -5000px;
+  top: -5000px;
+  width: 10000px;
+  height: 10000px;
+  pointer-events: none;
+}
+
+.canvas-edge {
+  stroke: var(--label-tertiary);
+  stroke-width: 2;
+  /* Clay at 5.0:1 rather than Taupe: an edge is structure, the same argument
+     GraphView's link colour makes. Taupe is decorative-only by the palette. */
+  opacity: 0.55;
+}
+
+/* ── cards ──────────────────────────────────────────────────── */
+
+.canvas-node {
+  position: absolute;
+  /* Above groups regardless of file order. Without this a group declared after
+     its members covers them, because paint order would be document order and
+     JSON Canvas puts no constraint on how the two are interleaved. */
+  z-index: 1;
+  box-sizing: border-box;
+  border: 1px solid var(--separator-opaque);
+  border-radius: var(--radius-md);
+  background: var(--bg-elevated);
+  color: var(--label);
+  font-size: var(--text-base);
+  overflow: hidden;
+  cursor: grab;
+}
+.canvas-node:active {
+  cursor: grabbing;
+}
+/* Lifted, not shrunk: a card is an object you pick up, the same reasoning
+   GraphView applies to a held node. */
+.canvas-node:hover {
+  border-color: var(--label-quaternary);
+}
+
+.canvas-text {
+  padding: var(--space-3) var(--space-4);
+  height: 100%;
+  overflow: hidden;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+/* A file card is a real <button> filling its own card. The alternative is a div
+   with onClick, which would drop the whole board out of the keyboard path --
+   docs/buttons/INDEX.md is explicit that this app does not ship controls that
+   only look like controls. */
+.canvas-file {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-3) var(--space-4);
+  color: var(--accent);
+  font: inherit;
+  text-align: left;
+  border-bottom: 1px solid var(--separator);
+  background: var(--material-light);
+}
+.canvas-file:hover {
+  background: var(--fill-hover);
+}
+.canvas-file:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+.canvas-file-title {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.canvas-link {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-3) var(--space-4);
+  color: var(--label-secondary);
+  overflow: hidden;
+}
+.canvas-link-url {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+/* A group is a labelled region BEHIND its members, so it is transparent and
+   sits at the back. Without the transparent ground it would cover the cards it
+   is supposed to contain. */
+.canvas-node--group {
+  z-index: 0;
+  background: transparent;
+  border-style: dashed;
+  border-color: var(--label-quaternary);
+  /* The label sits ABOVE the box, so the card's own `overflow: hidden` clipped
+     it away entirely — a group rendered as an unnamed dashed rectangle. */
+  overflow: visible;
+}
+.canvas-group-label {
+  position: absolute;
+  top: calc(var(--space-2) * -1);
+  left: var(--space-3);
+  transform: translateY(-100%);
+  color: var(--label-tertiary);
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+/* ── chrome ─────────────────────────────────────────────────── */
+
+/* Same material and placement as the graph's info strip, so the two views read
+   as the same app. */
+.canvas-info {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-top: 1px solid var(--separator);
+  background: var(--material-regular);
+  backdrop-filter: var(--blur-regular);
+  -webkit-backdrop-filter: var(--blur-regular);
+  color: var(--label-tertiary);
+  font-size: var(--text-xs);
+  font-variant-numeric: tabular-nums;
+}
+.canvas-info-sep {
+  color: var(--label-quaternary);
+}
+.canvas-info-saving {
+  margin-left: auto;
+  color: var(--label-secondary);
+}
+.canvas-info-error {
+  margin-left: auto;
+  color: var(--accent);
+}
+
+.canvas-empty {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: var(--space-3);
+  height: 100%;
+  padding: var(--space-6);
+  color: var(--label-tertiary);
+  font-size: var(--text-base);
+  text-align: center;
+}
+.canvas-empty strong {
+  color: var(--label);
+  font-weight: var(--weight-semibold);
+}
+.canvas-empty-hint {
+  color: var(--label-quaternary);
+  font-size: var(--text-sm);
+}
+
+/* ── the canvas list, in the left ribbon ────────────────────── */
+
+.canvas-list {
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  height: 100%;
+}
+.canvas-list-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-4) var(--space-3);
+}
+.canvas-list-title {
+  color: var(--label-secondary);
+  font-size: var(--text-xs);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  font-weight: var(--weight-semibold);
+}
+.canvas-list-new {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--separator-opaque);
+  border-radius: var(--radius-sm);
+  background: var(--material-light);
+  color: var(--label-secondary);
+  font: inherit;
+  font-size: var(--text-xs);
+}
+.canvas-list-new:hover:not(:disabled) {
+  background: var(--fill-hover);
+  color: var(--label);
+}
+.canvas-list-new:disabled {
+  opacity: 0.5;
+}
+.canvas-list-items {
+  overflow-y: auto;
+  min-height: 0;
+}
+.canvas-list-item {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  width: 100%;
+  padding: var(--space-2) var(--space-4);
+  color: var(--label-secondary);
+  font: inherit;
+  font-size: var(--text-base);
+  text-align: left;
+}
+.canvas-list-item:hover {
+  background: var(--fill-hover);
+  color: var(--label);
+}
+.canvas-list-item[aria-current='true'] {
+  background: var(--fill-selected);
+  color: var(--accent);
+}
+.canvas-list-item-name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.canvas-list-empty {
+  padding: var(--space-3) var(--space-4);
+  color: var(--label-tertiary);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+}

@@ -306,12 +306,30 @@ test('push() does not duplicate an item already tracked', () => {
 
 // ------------------------------------------- corner: invariants in the source
 
-test('corner.ts has no timer anywhere near the consent path', () => {
-  assert.doesNotMatch(
-    CORNER_CODE,
-    /setTimeout|setInterval|setImmediate/,
-    'a timer in the single consent surface is a consent that answers itself',
+test('the only timer in corner.ts is the one that DENIES an unanswered prompt', () => {
+  // This used to ban every timer outright. That was a proxy for the rule that
+  // actually matters — "a timer must never answer a consent" — and the proxy
+  // stopped being usable once an approvals timeout was required: an unanswered
+  // prompt has to be able to expire, or an agent tool call blocks forever with
+  // nobody at the machine. So the assertion moved onto the real rule.
+  //
+  // A timer may exist. It may do exactly ONE thing: run the same dismiss()
+  // path a human's dismissal runs, which resolves the caller FALSE. Anything
+  // else — a repeating timer, a timer that resolves, a timer that decides — is
+  // still a consent that answers itself.
+  assert.doesNotMatch(CORNER_CODE, /setInterval|setImmediate/, 'a repeating timer in the consent surface')
+
+  const timers = CORNER_CODE.match(/setTimeout\([\s\S]{0,80}?,/g) ?? []
+  assert.equal(timers.length, 1, `expected exactly one setTimeout in corner.ts, found ${timers.length}`)
+  assert.match(
+    timers[0],
+    /setTimeout\(\(\) => dismiss\(id\),/,
+    'the timer does something other than dismiss the prompt',
   )
+
+  // And it must be cleared, or a human who beats the clock leaves a timer that
+  // later dismisses an id the promise has already settled.
+  assert.match(CORNER_CODE, /clearTimeout\(/, 'a timer that is never cleared')
 })
 
 test('corner.ts never hands `true` to a resolver except from a decision', () => {

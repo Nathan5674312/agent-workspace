@@ -1,0 +1,197 @@
+/**
+ * JSON Canvas — the on-disk format for the Canvas view.
+ *
+ * This is jsoncanvas.org, the open spec Obsidian created and writes to its own
+ * `.canvas` files. It is used here rather than an invented format for the same
+ * reason the app reads Obsidian's `.obsidian/app.json` exclusions and its
+ * `bookmarks.json`: the vault is a shared directory, and a file only this app
+ * can open is a file the user does not really own.
+ *
+ * THE PRESERVATION RULE, which is the whole reason this module is careful.
+ *
+ * The spec has four node types (`text`, `file`, `link`, `group`) and this view
+ * renders two of them. It also allows `color`, edge labels, and per-node fields
+ * that future spec versions will add. A canvas authored in Obsidian and opened
+ * here must come back out with every one of those intact.
+ *
+ * So `parse` does NOT map the file into a shape of our own and `serialize` does
+ * NOT rebuild one. Parse validates and hands back the ACTUAL parsed object; the
+ * view mutates `x`/`y` on the very node objects it was given; serialize
+ * stringifies what it holds. Anything unrecognised is carried through
+ * untouched because it was never taken apart. A reconstructing round-trip
+ * would silently delete a user's groups and colours on the first drag.
+ *
+ * No DOM and no React, so `node --test` exercises this file directly.
+ */
+
+/** The four node types in the spec. Only `text` and `file` are rendered today. */
+export type CanvasNodeType = 'text' | 'file' | 'link' | 'group'
+
+/**
+ * One node.
+ *
+ * The index signature is deliberate and is the type-level half of the
+ * preservation rule: a canvas may legally carry keys this app has never heard
+ * of, and the type has to permit them or the code that copies nodes around
+ * would be tempted to drop them.
+ */
+export type CanvasNode = {
+  id: string
+  type: CanvasNodeType
+  x: number
+  y: number
+  width: number
+  height: number
+  /** `text` nodes: the markdown shown in the card. */
+  text?: string
+  /** `file` nodes: a vault-relative path. */
+  file?: string
+  /** `link` nodes: a URL. */
+  url?: string
+  /** `group` nodes: the group's name. */
+  label?: string
+  color?: string
+  [key: string]: unknown
+}
+
+export type CanvasEdge = {
+  id: string
+  fromNode: string
+  toNode: string
+  fromSide?: 'top' | 'right' | 'bottom' | 'left'
+  toSide?: 'top' | 'right' | 'bottom' | 'left'
+  label?: string
+  color?: string
+  [key: string]: unknown
+}
+
+export type CanvasDoc = {
+  nodes: CanvasNode[]
+  edges: CanvasEdge[]
+  [key: string]: unknown
+}
+
+/** A brand-new, empty board. */
+export function emptyCanvas(): CanvasDoc {
+  return { nodes: [], edges: [] }
+}
+
+/**
+ * Ids are `crypto.randomUUID()` with the dashes stripped, which is the shape
+ * Obsidian writes. Any unique string is legal per the spec; matching the
+ * neighbour's convention costs nothing and keeps a diff of a file both apps
+ * have touched readable.
+ */
+export function canvasId(): string {
+  return crypto.randomUUID().replace(/-/g, '')
+}
+
+/**
+ * Read a `.canvas` file.
+ *
+ * THROWS on anything it cannot vouch for, and that is a safety decision rather
+ * than strictness for its own sake. Everywhere else in this app an unreadable
+ * user-writable file degrades to a default — `ignoreFilters()` returns no
+ * exclusions, `settings.ts` returns defaults — because there the cost of being
+ * wrong is a missing preference. Here the view would render an empty board,
+ * the first drag would save it, and the user's canvas would be gone. An empty
+ * doc is indistinguishable from a wiped one once it is written back, so the
+ * only safe failure is a loud one that also blocks saving.
+ *
+ * An EMPTY FILE is the one exception, and it is not a corrupt canvas: it is
+ * what `save(path, '', 0)` leaves behind when a new canvas is created, so it
+ * reads as the empty board it is.
+ */
+export function parseCanvas(text: string): CanvasDoc {
+  if (text.trim() === '') return emptyCanvas()
+
+  let raw: unknown
+  try {
+    raw = JSON.parse(text)
+  } catch (e) {
+    throw new Error(`Not a valid canvas file: ${(e as Error).message}`)
+  }
+  if (typeof raw !== 'object' || raw === null || Array.isArray(raw)) {
+    throw new Error('Not a valid canvas file: the top level is not an object.')
+  }
+
+  const doc = raw as Record<string, unknown>
+  // Both keys are optional in the spec — a canvas with only nodes omits
+  // `edges` entirely — so absent is normalised to empty, but PRESENT AND WRONG
+  // is refused. The difference matters: the first is a valid file, the second
+  // means we are looking at something that is not a canvas.
+  if (doc.nodes !== undefined && !Array.isArray(doc.nodes)) {
+    throw new Error('Not a valid canvas file: `nodes` is not a list.')
+  }
+  if (doc.edges !== undefined && !Array.isArray(doc.edges)) {
+    throw new Error('Not a valid canvas file: `edges` is not a list.')
+  }
+  doc.nodes ??= []
+  doc.edges ??= []
+
+  // Geometry is what the view does arithmetic on, and NaN propagates silently
+  // through a transform until the whole board vanishes with no error anywhere.
+  // Checked here, once, at the boundary.
+  for (const n of doc.nodes as CanvasNode[]) {
+    for (const k of ['x', 'y', 'width', 'height'] as const) {
+      if (!Number.isFinite(n?.[k])) {
+        throw new Error(`Not a valid canvas file: node ${n?.id ?? '?'} has a bad ${k}.`)
+      }
+    }
+  }
+
+  return doc as CanvasDoc
+}
+
+/**
+ * Write a `.canvas` file.
+ *
+ * Two spaces and a trailing newline: Obsidian writes this file too, and a
+ * formatting-only diff every time the other app touches it is noise in the
+ * user's git history.
+ */
+export function serializeCanvas(doc: CanvasDoc): string {
+  return `${JSON.stringify(doc, null, 2)}\n`
+}
+
+/** Default size for a new text card, in canvas units. Obsidian's own default. */
+export const NEW_TEXT_SIZE = { width: 250, height: 60 }
+/** Default size for a new file card. Obsidian's own default. */
+export const NEW_FILE_SIZE = { width: 400, height: 400 }
+
+/** The title a `file` node shows: the filename, extension dropped. */
+export function fileNodeTitle(file: string): string {
+  return file.split('/').pop()!.replace(/\.md$/i, '')
+}
+
+/**
+ * Where the edge between two nodes attaches, when the file does not say.
+ *
+ * `fromSide`/`toSide` are optional in the spec, and Obsidian omits them for
+ * edges it routed automatically. Rendering those as centre-to-centre lines
+ * would run them through the middle of both cards, so the nearest-sides pair
+ * is derived from the geometry instead. Exported for the test.
+ */
+export function edgeAnchor(
+  a: { x: number; y: number; width: number; height: number },
+  b: { x: number; y: number; width: number; height: number },
+): { from: { x: number; y: number }; to: { x: number; y: number } } {
+  const ac = { x: a.x + a.width / 2, y: a.y + a.height / 2 }
+  const bc = { x: b.x + b.width / 2, y: b.y + b.height / 2 }
+  const dx = bc.x - ac.x
+  const dy = bc.y - ac.y
+
+  // Whichever axis separates them more decides which pair of sides is used.
+  // Comparing the raw deltas would pick left/right for two wide cards stacked
+  // vertically, so each is measured against the gap that axis actually has.
+  const horizontal = Math.abs(dx) * (a.height + b.height) >= Math.abs(dy) * (a.width + b.width)
+
+  if (horizontal) {
+    return dx >= 0
+      ? { from: { x: a.x + a.width, y: ac.y }, to: { x: b.x, y: bc.y } }
+      : { from: { x: a.x, y: ac.y }, to: { x: b.x + b.width, y: bc.y } }
+  }
+  return dy >= 0
+    ? { from: { x: ac.x, y: a.y + a.height }, to: { x: bc.x, y: b.y } }
+    : { from: { x: ac.x, y: a.y }, to: { x: bc.x, y: b.y + b.height } }
+}

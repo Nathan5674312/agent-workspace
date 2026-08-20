@@ -78,6 +78,16 @@ async function answerNext(allow, scope) {
   throw new Error('no consent was raised within 1s — the gate did not ask')
 }
 
+/** Wait for a consent to appear WITHOUT answering it. */
+async function nextConsent() {
+  for (let i = 0; i < 200; i++) {
+    const [c] = pendingConsents()
+    if (c) return c
+    await new Promise((r) => setTimeout(r, 5))
+  }
+  throw new Error('no consent was raised within 1s — the gate did not ask')
+}
+
 /** Settle-or-PENDING, for proving a call is genuinely blocked. */
 const PENDING = Symbol('pending')
 function settledWithin(p, ms) {
@@ -291,6 +301,205 @@ test('a missing or malformed actor is refused, not treated as a user', async () 
   await assert.rejects(vault.move('a.md', 'b.md', agent({ sessionId: '' })), /sessionId/)
 
   assert.ok(existsSync(join(dir, 'a.md')), 'a malformed actor still moved the file')
+})
+
+// ------------------------------------------------------------------ timeouts
+
+/*
+ * The timeout is injected, never waited out. Every test below configures a
+ * duration in the tens of milliseconds, so the suite proves the BEHAVIOUR —
+ * expiry denies, and denies without touching the disk — without buying it at
+ * the price of a slower run. A test that sleeps for the real production
+ * duration is a test people start skipping.
+ */
+
+test('an unanswered prompt expires as a DENIAL, and the disk is untouched', async () => {
+  const dir = scratchVault()
+  writeFileSync(join(dir, 'a.md'), 'one')
+
+  consent.setApprovalsPolicy({ mode: 'manual', timeoutMs: 30 })
+
+  // Deliberately never answered.
+  const p = vault.move('a.md', 'b.md', agent())
+  await assert.rejects(p, (e) => e.name === 'ConsentDenied' && e.kind === 'move')
+
+  // The assertion that matters, same as for a human's denial.
+  assert.ok(existsSync(join(dir, 'a.md')), 'the original moved on a timeout')
+  assert.equal(readFileSync(join(dir, 'a.md'), 'utf-8'), 'one')
+  assert.ok(!existsSync(join(dir, 'b.md')), 'the destination was written on a timeout')
+
+  // The expired prompt must also leave the corner, or it sits there offering a
+  // human a decision that has already been made against them.
+  assert.equal(pendingConsents().length, 0, 'the expired consent is still in the corner')
+})
+
+test('an expired prompt cannot be allowed after the fact', async () => {
+  const dir = scratchVault()
+  writeFileSync(join(dir, 'a.md'), 'one')
+
+  // Long enough that the prompt is observably raised before it expires.
+  consent.setApprovalsPolicy({ mode: 'manual', timeoutMs: 60 })
+
+  const p = vault.move('a.md', 'b.md', agent())
+  const raised = await nextConsent()
+
+  await assert.rejects(p, (e) => e.name === 'ConsentDenied')
+
+  // A late allow arriving on the same id must do nothing at all.
+  await decide({ id: raised.id, allow: true, scope: 'session' })
+  assert.ok(existsSync(join(dir, 'a.md')), 'a late allow resurrected an expired consent')
+  assert.equal(consent.getApprovalsPolicy().mode, 'manual')
+
+  // ...and it must not have left a session allowance behind either.
+  const next = vault.move('a.md', 'c.md', agent())
+  await assert.rejects(next, (e) => e.name === 'ConsentDenied')
+})
+
+test('a timeout beaten by a human answer does not later fire', async () => {
+  const dir = scratchVault()
+  writeFileSync(join(dir, 'a.md'), 'one')
+
+  consent.setApprovalsPolicy({ mode: 'manual', timeoutMs: 60 })
+
+  const p = vault.move('a.md', 'b.md', agent())
+  await answerNext(true)
+  await p
+  assert.ok(existsSync(join(dir, 'b.md')), 'an answered move did not happen')
+
+  // Outlive the timer that was cleared, and confirm nothing it could have
+  // dismissed comes back to bite.
+  await new Promise((r) => setTimeout(r, 90))
+  assert.equal(pendingConsents().length, 0)
+})
+
+// -------------------------------------------------------------- policy: modes
+
+test('the default policy is manual with no timeout, and manual is unchanged', async () => {
+  const dir = scratchVault()
+  for (const n of ['a', 'b']) writeFileSync(join(dir, `${n}.md`), n)
+
+  const p = consent.getApprovalsPolicy()
+  assert.equal(p.mode, 'manual')
+  assert.equal(p.timeoutMs, undefined)
+
+  // Explicitly manual with no timeout must behave exactly as the untouched
+  // gate does: block indefinitely, and honour a session allowance.
+  consent.setApprovalsPolicy({ mode: 'manual' })
+
+  const first = vault.move('a.md', 'a2.md', agent())
+  assert.equal(await settledWithin(first, 120), PENDING, 'manual stopped waiting for a human')
+  await answerNext(true, 'session')
+  await first
+
+  await vault.move('b.md', 'b2.md', agent())
+  assert.equal(pendingConsents().length, 0, 'manual stopped honouring a session allowance')
+  assert.ok(existsSync(join(dir, 'b2.md')))
+})
+
+test('an unrecognised mode falls back to manual rather than to something looser', () => {
+  consent.setApprovalsPolicy({ mode: 'off' })
+  assert.equal(consent.getApprovalsPolicy().mode, 'manual', '"off" was honoured as a mode')
+
+  // Junk durations mean "no timeout", not "expire immediately".
+  for (const bad of [0, -1, NaN, Infinity, '30', null, undefined]) {
+    consent.setApprovalsPolicy({ mode: 'manual', timeoutMs: bad })
+    assert.equal(consent.getApprovalsPolicy().timeoutMs, undefined, `timeoutMs ${String(bad)}`)
+  }
+})
+
+test('strict IGNORES a standing "allow for this session" grant', async () => {
+  const dir = scratchVault()
+  for (const n of ['a', 'b']) writeFileSync(join(dir, `${n}.md`), n)
+
+  // Earn an unbounded allowance under manual, exactly as a user would.
+  const first = vault.move('a.md', 'a2.md', agent())
+  await answerNext(true, 'session')
+  await first
+
+  consent.setApprovalsPolicy({ mode: 'strict' })
+
+  const second = vault.move('b.md', 'b2.md', agent())
+  assert.equal(await settledWithin(second, 120), PENDING, 'strict rode a session allowance')
+  assert.equal(pendingConsents().length, 1)
+  await answerNext(false)
+  await assert.rejects(second, (e) => e.name === 'ConsentDenied')
+  assert.ok(existsSync(join(dir, 'b.md')), 'strict moved the file on an old allowance')
+})
+
+test('strict does not GRANT a session allowance either', async () => {
+  const dir = scratchVault()
+  for (const n of ['a', 'b']) writeFileSync(join(dir, `${n}.md`), n)
+
+  consent.setApprovalsPolicy({ mode: 'strict' })
+
+  // The human picks the widest answer available; strict must not bank it.
+  const first = vault.move('a.md', 'a2.md', agent())
+  await answerNext(true, 'session')
+  await first
+  assert.ok(existsSync(join(dir, 'a2.md')), 'the approved move did not happen')
+
+  const second = vault.move('b.md', 'b2.md', agent())
+  assert.equal(await settledWithin(second, 120), PENDING, 'strict banked a session grant')
+  await answerNext(true)
+  await second
+})
+
+test('strict IGNORES a finite batch grant — every operation asks for itself', async () => {
+  const dir = scratchVault()
+  for (const n of ['a', 'b']) writeFileSync(join(dir, `${n}.md`), n)
+  mkdirSync(join(dir, 'x'))
+
+  consent.setApprovalsPolicy({ mode: 'strict' })
+
+  const ops = ['a.md -> x/a.md', 'b.md -> x/b.md']
+  const p = consent.withBatchConsent(agent(), 'move', ops, async () => {
+    await vault.move('a.md', 'x/a.md', agent())
+    await vault.move('b.md', 'x/b.md', agent())
+  })
+
+  // Under manual this is ONE prompt. Under strict the batch prompt buys no
+  // credit, so each of the two moves is put in front of a human on its own.
+  let prompts = 0
+  for (let i = 0; i < 3; i++) {
+    await answerNext(true)
+    prompts += 1
+  }
+  await p
+
+  assert.equal(prompts, 3, 'strict did not ask per operation')
+  assert.equal(pendingConsents().length, 0)
+  assert.ok(existsSync(join(dir, 'x', 'a.md')))
+  assert.ok(existsSync(join(dir, 'x', 'b.md')))
+})
+
+test('a batch under strict can still be refused outright, and nothing runs', async () => {
+  const dir = scratchVault()
+  writeFileSync(join(dir, 'a.md'), 'one')
+  mkdirSync(join(dir, 'x'))
+
+  consent.setApprovalsPolicy({ mode: 'strict' })
+
+  const p = consent.withBatchConsent(agent(), 'move', ['a.md -> x/a.md'], async () => {
+    await vault.move('a.md', 'x/a.md', agent())
+  })
+
+  await answerNext(false)
+  await assert.rejects(p, (e) => e.name === 'ConsentDenied' && e.kind === 'move')
+  assert.ok(existsSync(join(dir, 'a.md')), 'a refused batch moved the file anyway')
+  assert.ok(!existsSync(join(dir, 'x', 'a.md')))
+})
+
+test('a user actor is untouched by strict — the human IS the consent', async () => {
+  const dir = scratchVault()
+  writeFileSync(join(dir, 'a.md'), 'one')
+
+  consent.setApprovalsPolicy({ mode: 'strict', timeoutMs: 30 })
+
+  await vault.mkdir('Sub', USER)
+  await vault.move('a.md', 'Sub/a.md', USER)
+
+  assert.equal(pendingConsents().length, 0, 'strict started prompting the user for their own edits')
+  assert.ok(existsSync(join(dir, 'Sub', 'a.md')))
 })
 
 test.after(() => {

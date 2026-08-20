@@ -38,7 +38,6 @@ const set = (a) => H.get(CH.settingsSetAppearance)(a)
 const onDisk = () => JSON.parse(readFileSync(SETTINGS_FILE, 'utf8'))
 
 const VALID = {
-  contrast: 'more',
   transparency: 'reduced',
   motion: 'reduced',
   artwork: false,
@@ -68,14 +67,12 @@ test('opacity above the ceiling is clamped, not rejected', () => {
 
 test('a junk field falls back to its default and costs only itself', () => {
   const got = set({
-    contrast: 'ultra', // not in the union
+    motion: null, // not in the union
     transparency: 'reduced', // valid, must survive
-    motion: null,
     artwork: 'yes', // a string, not a boolean
     artworkOpacity: Number.NaN,
   }).appearance
 
-  assert.equal(got.contrast, DEFAULT_APPEARANCE.contrast)
   assert.equal(got.transparency, 'reduced', 'a valid field was dropped with an invalid one')
   assert.equal(got.motion, DEFAULT_APPEARANCE.motion)
   assert.equal(got.artwork, DEFAULT_APPEARANCE.artwork)

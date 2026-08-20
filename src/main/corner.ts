@@ -70,9 +70,10 @@ const items: CornerItem[] = []
  * Deny and dismiss both resolve false. Ignoring the prompt resolves nothing —
  * the caller waits, which is the safe direction.
  *
- * Timeouts are explicitly not implemented. There is no elapsed time after
- * which this resolves true, and no code path that resolves true without a
- * human answer.
+ * This form takes no timeout, so for these callers there is still no elapsed
+ * time after which the prompt settles at all. And no timeout anywhere resolves
+ * TRUE: expiry is a denial. There remains no code path that grants permission
+ * without a human answer.
  */
 export function requestConsent(
   item: Omit<Extract<CornerItem, { kind: 'consent' }>, 'id' | 'at' | 'kind'>,
@@ -92,15 +93,26 @@ export type ConsentOutcome = 'deny' | 'once' | 'session'
  * to record a session-scoped allowance; claude.ts does not care and uses the
  * boolean wrapper above. One code path, two views of it.
  *
- * Everything the boolean form promises still holds here: no timeout, no path
- * that settles without a human, and denial is the value every non-answer takes.
+ * Everything the boolean form promises still holds here: no path that settles
+ * without a human EXCEPT an expired `timeoutMs`, and denial is the value every
+ * non-answer takes — including that expiry.
+ *
+ * `timeoutMs` is opt-in and omitted by default, so a caller that says nothing
+ * still waits forever, exactly as before. When it is given, expiry runs the
+ * same `dismiss()` path a human's dismissal runs: the item leaves the corner,
+ * the renderer is told, and the caller is answered DENY. Never allow — an
+ * unattended prompt is the one case where assuming consent would hand an agent
+ * the vault precisely because nobody was watching. The same reasoning as
+ * network.ts: if we cannot determine the answer, treat it as untrusted.
  */
 export function requestConsentOutcome(
   item: Omit<Extract<CornerItem, { kind: 'consent' }>, 'id' | 'at' | 'kind'>,
+  timeoutMs?: number,
 ): Promise<ConsentOutcome> {
   // Seeded with 'once' so a reply that names no scope narrows rather than
   // widens, and so the field is never read before decide() has written it.
   const entry: PendingConsent = { resolver: () => {}, scope: 'once' }
+  let timer: ReturnType<typeof setTimeout> | undefined
 
   const answered = new Promise<boolean>((resolve) => {
     // Collision here means one human answer resolves a DIFFERENT tool call, so
@@ -117,9 +129,20 @@ export function requestConsentOutcome(
     pending.set(id, entry)
     items.push(consent)
     push(consent)
+
+    // Anything that is not a usable positive duration means "no timeout",
+    // rather than an immediate or a NaN-length one.
+    if (typeof timeoutMs === 'number' && Number.isFinite(timeoutMs) && timeoutMs > 0) {
+      timer = setTimeout(() => dismiss(id), timeoutMs)
+    }
   })
 
-  return answered.then((allowed) => (allowed ? entry.scope : 'deny'))
+  return answered.then((allowed) => {
+    // A human beat the clock; do not leave a timer that would later dismiss a
+    // consent this promise has already settled.
+    clearTimeout(timer)
+    return allowed ? entry.scope : 'deny'
+  })
 }
 
 /**

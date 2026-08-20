@@ -68,6 +68,23 @@ const FIT_PAD = 64
  */
 const EDGE_ORIGIN = 5000
 
+/**
+ * Whether an edge end draws an arrowhead, per JSON Canvas 1.0.
+ *
+ * THE DEFAULTS ARE THE WHOLE POINT, and they are asymmetric: `toEnd` defaults
+ * to `'arrow'` and `fromEnd` to `'none'`. Obsidian omits both for an ordinary
+ * directed edge, so treating an absent `toEnd` as "no arrow" — the obvious
+ * reading — silently strips the arrowhead from every edge anyone else authored.
+ * That was this view's behaviour until now.
+ *
+ * `unknown` in, because the shared CanvasEdge type declares neither field. They
+ * arrive through its index signature and survive a round trip regardless; this
+ * only decides what gets drawn. Anything that is neither 'arrow' nor absent is
+ * treated as no arrow rather than guessed at.
+ */
+const drawsArrow = (end: unknown, fallback: 'arrow' | 'none'): boolean =>
+  (end === undefined ? fallback : end) === 'arrow'
+
 export interface CanvasViewProps {
   /** Vault-relative `.canvas` path, or null when no board is open. */
   path: string | null
@@ -496,6 +513,30 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
               sized in CSS and coordinates are shifted by EDGE_ORIGIN — see the
               constant for why the obvious zero-sized version paints nothing. */}
           <svg className="canvas-edges" aria-hidden="true">
+            {/**
+             * ONE marker serves both ends. `orient="auto-start-reverse"` is
+             * what makes that work: used as `marker-start` it is rotated 180°,
+             * so the head points back out of the source node, which is what a
+             * `fromEnd` arrow means. Two mirrored definitions would be the
+             * obvious version and would drift apart the first time the shape
+             * changed.
+             *
+             * `markerUnits` is left at its default of `strokeWidth`, so the
+             * head scales with the line rather than needing its own zoom maths.
+             */}
+            <defs>
+              <marker
+                id="canvas-arrow"
+                viewBox="0 0 10 10"
+                refX="9"
+                refY="5"
+                markerWidth="6"
+                markerHeight="6"
+                orient="auto-start-reverse"
+              >
+                <path d="M 0 0 L 10 5 L 0 10 z" className="canvas-arrow-head" />
+              </marker>
+            </defs>
             {doc.edges.map((edge) => {
               const a = byId.get(edge.fromNode)
               const b = byId.get(edge.toNode)
@@ -511,6 +552,8 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                   x2={to.x + EDGE_ORIGIN}
                   y2={to.y + EDGE_ORIGIN}
                   className="canvas-edge"
+                  markerStart={drawsArrow(edge.fromEnd, 'none') ? 'url(#canvas-arrow)' : undefined}
+                  markerEnd={drawsArrow(edge.toEnd, 'arrow') ? 'url(#canvas-arrow)' : undefined}
                 />
               )
             })}

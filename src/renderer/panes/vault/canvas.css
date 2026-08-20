@@ -68,6 +68,14 @@
   opacity: 0.55;
 }
 
+/* `context-stroke` resolves to the stroke of the line that referenced the
+   marker, so one head follows whatever colour its edge is drawn in — including
+   a per-edge `color` from the file. A fixed token here would look right today
+   and wrong the moment edge colours land. */
+.canvas-arrow-head {
+  fill: context-stroke;
+}
+
 /* ── cards ──────────────────────────────────────────────────── */
 
 .canvas-node {

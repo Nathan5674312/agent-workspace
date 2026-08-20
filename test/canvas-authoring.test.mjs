@@ -152,15 +152,18 @@ test('connect mode does not also open a file card', () => {
   // A file card is a <button>; picking it as an endpoint fires its click too,
   // and without the guard choosing an endpoint navigates away from the board.
   //
-  // Written as an early return since selection landed, because a third
-  // condition (a modifier press) joined it and one chained `&&` was becoming
-  // unreadable. The behaviour is identical; this assertion was pinning the
-  // SHAPE of the expression rather than what it does, and had to move with it.
-  assert.match(
-    VIEW,
-    /if \(connect \|\| draggedLast\.current\) return/,
-    'connect mode or a drag still opens the note',
-  )
+  // Asserted as MEMBERSHIP inside the guard region, not as one exact
+  // expression. This assertion has now broken three times on changes that
+  // preserved its behaviour exactly — a third condition joining the guard, then
+  // a fourth, then the guard splitting into two statements so a keyboard click
+  // could bypass only the drag half. Every time it reported a regression that
+  // did not exist. What it is actually for is that both conditions are still
+  // consulted before the note opens.
+  const guard = VIEW.slice(VIEW.indexOf('onClick={(e) => {'), VIEW.indexOf('onOpenNote(n.file!)'))
+  assert.ok(guard.length > 0, 'the file card click handler no longer has the shape this test reads')
+  assert.match(guard, /\bconnect\b/, 'connect mode still opens the note')
+  assert.match(guard, /draggedLast\.current/, 'a drag still opens the note')
+  assert.match(guard, /\breturn\b/, 'the guard never returns early')
 })
 
 test('an unchanged card does not write the file when committed', () => {

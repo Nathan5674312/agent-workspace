@@ -885,7 +885,18 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                     // this, rearranging a board opens every card you touched.
                     // Connect mode is excluded for the same reason: picking a
                     // file card as an endpoint must not also leave the board.
-                    if (connect || draggedLast.current) return
+                    if (connect) return
+                    /**
+                     * The drag guard applies to POINTER clicks only.
+                     *
+                     * `draggedLast` is set in onUp and cleared only by the next
+                     * pointerup. A keyboard Enter or Space on this button fires
+                     * a click with no pointer events at all, so after any drag
+                     * the button silently did nothing — forever, until the user
+                     * happened to press and release the mouse somewhere on the
+                     * board. A keyboard-synthesised click carries `detail: 0`.
+                     */
+                    if (e.detail !== 0 && draggedLast.current) return
                     /**
                      * A modifier press did something other than open. Read off
                      * the click event rather than remembered from the
@@ -973,7 +984,10 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
         </div>
       </div>
 
-      <div className="canvas-info">
+      {/* Announced, because "Saving…" and the save error live here and are
+          otherwise silent — a failed save is invisible to anyone not watching
+          this corner of the window. */}
+      <div className="canvas-info" role="status">
         <span>{path.split('/').pop()}</span>
         <span className="canvas-info-sep">·</span>
         <span>

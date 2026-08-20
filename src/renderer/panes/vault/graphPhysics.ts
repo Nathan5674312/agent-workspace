@@ -88,6 +88,48 @@ export const VELOCITY_DECAY_NORMAL = 0.4
 
 export const radius = (n: PhysicsNode) => 3.4 + Math.sqrt(n.degree) * 1.45
 
+// ── the tunables the forces panel exposes ───────────────────────
+
+/**
+ * What a user can move at runtime.
+ *
+ * DEFAULTS ARE THE MEASURED CONSTANTS ABOVE, so an untouched panel lays out
+ * identically to no panel at all. That is also why repulsion is a MULTIPLIER
+ * rather than a raw value: charge is degree-scaled
+ * (`CHARGE_BASE + degree * CHARGE_PER_DEGREE`), so a raw slider would flatten
+ * hubs and leaves to the same push and throw away the size signal.
+ */
+export interface Forces {
+  /** `CENTRING_STRENGTH` — how hard everything is pulled toward the middle. */
+  centre: number
+  /** Multiplier on the degree-scaled charge. 1 = the tuned value. */
+  repel: number
+  /** `CHARGE_MAX_DISTANCE` in px. THE lever for visible sections. */
+  repelRange: number
+  /** Resting `LINK_STRENGTH`. Capped at LINK_MAX — see below. */
+  link: number
+}
+
+export const DEFAULT_FORCES: Forces = {
+  centre: CENTRING_STRENGTH,
+  repel: 1,
+  repelRange: CHARGE_MAX_DISTANCE,
+  link: LINK_STRENGTH,
+}
+
+/**
+ * The link slider's ceiling, and it is NOT a taste call.
+ *
+ * The sweep on `LINK_STRENGTH` above shows a cliff: 0.20 passes the orbit ring
+ * test and every value from 0.24 up lands at ~21% CV against a 25% floor. So
+ * the usable range is 0 -> 0.20 and the default sits AT the top of it. The
+ * slider only loosens links, never stiffens them, which is the honest shape of
+ * the measurement rather than a control whose upper half is known-bad.
+ *
+ * Raising this means re-running `bench/orbit.mjs` first.
+ */
+export const LINK_MAX = LINK_STRENGTH
+
 // ── the hold ────────────────────────────────────────────────────
 
 export interface HoldTuning {
@@ -254,14 +296,23 @@ export function restLength<N extends PhysicsNode>(
   return tuning.onlyLengthen ? Math.max(base, ring) : ring
 }
 
-/** Link strength for a link, softened while it touches the held node. */
+/**
+ * Link strength for a link, softened while it touches the held node.
+ *
+ * `resting` is a parameter so the forces panel can move it. It must NOT be
+ * inferred by comparing the result against LINK_STRENGTH: `HOLD.linkStrength`
+ * is currently the same 0.2, so a value comparison cannot tell a held link from
+ * a resting one and the slider silently rescaled the hold that
+ * `bench/orbit.mjs` measures. Caught by `test/graph-forces.test.mjs`.
+ */
 export function linkStrength<N extends PhysicsNode>(
   l: { source: N; target: N },
   held: N | null,
   tuning: HoldTuning,
+  resting: number = LINK_STRENGTH,
 ): number {
   if (held && (l.source.id === held.id || l.target.id === held.id)) return tuning.linkStrength
-  return LINK_STRENGTH
+  return resting
 }
 
 /**
@@ -305,11 +356,17 @@ export function buildSimulation<
   getHeld: () => N | null,
   getAdjacency: () => Map<string, N[]>,
   tuning: HoldTuning = HOLD,
+  /** Read through a getter like `getHeld`, so the physics never holds React state. */
+  getForces: () => Forces = () => DEFAULT_FORCES,
 ) {
   const neighbourCount = (n: N | null) => (n ? (getAdjacency().get(n.id)?.length ?? 0) : 0)
 
   const distance = (l: L) => restLength(l, getHeld(), neighbourCount(getHeld()), tuning)
-  const strength = (l: L) => linkStrength(l, getHeld(), tuning)
+  /**
+   * Only the RESTING strength is tunable — a link touching the held node keeps
+   * `tuning.linkStrength`, which is part of the measured hold.
+   */
+  const strength = (l: L) => linkStrength(l, getHeld(), tuning, getForces().link)
 
   const linkForce = d3
     .forceLink<N, L>(links)
@@ -348,5 +405,30 @@ export function buildSimulation<
     refresh()
   }
 
-  return { sim, linkForce, refresh, setHolding, tuning }
+  /**
+   * Push the current forces onto the RUNNING simulation.
+   *
+   * Mutating in place rather than rebuilding is the whole point: d3 keeps node
+   * positions on the node objects, so a rebuild would fling a settled layout
+   * back to its opening scatter on every pixel of slider drag.
+   *
+   * `alpha(0.3)` is a nudge, not a reset — enough energy to visibly answer the
+   * slider, not so much that the graph re-scatters.
+   */
+  const applyForces = () => {
+    const f = getForces()
+    sim.force('x', d3.forceX<N>(0).strength(f.centre))
+    sim.force('y', d3.forceY<N>(0).strength(f.centre))
+    sim.force(
+      'charge',
+      d3
+        .forceManyBody<N>()
+        .strength((d) => (CHARGE_BASE + d.degree * CHARGE_PER_DEGREE) * f.repel)
+        .distanceMax(f.repelRange),
+    )
+    refresh()
+    sim.alpha(0.3).restart()
+  }
+
+  return { sim, linkForce, refresh, setHolding, applyForces, tuning }
 }

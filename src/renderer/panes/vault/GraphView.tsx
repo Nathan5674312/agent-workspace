@@ -2,7 +2,15 @@ import { useEffect, useRef, useState } from 'react'
 import * as d3 from 'd3-force'
 import type { VaultGraph } from '../../../shared/ipc.js'
 import { resolvableLinks } from './helpers.js'
-import { buildSimulation, radius, HOLD } from './graphPhysics.js'
+import {
+  buildSimulation,
+  radius,
+  HOLD,
+  DEFAULT_FORCES,
+  LINK_MAX,
+  type Forces,
+} from './graphPhysics.js'
+import './graph.css'
 
 /**
  * Does this node say its name at this zoom?
@@ -76,6 +84,35 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
    */
   const openRef = useRef(onOpenNote)
   openRef.current = onOpenNote
+
+  /**
+   * The live forces. Two copies on purpose:
+   *   `forcesRef`  the physics reads this, every frame, without re-rendering
+   *   `forces`     React state, only so the labels can show the numbers
+   * One copy would mean either a stale simulation or a rebuild per slider pixel.
+   */
+  const forcesRef = useRef<Forces>({ ...DEFAULT_FORCES })
+  const [forces, setForces] = useState<Forces>({ ...DEFAULT_FORCES })
+  /** Set by the effect below once the simulation exists. */
+  const applySimForces = useRef<(() => void) | null>(null)
+
+  const setForce = (key: keyof Forces, value: number) => {
+    forcesRef.current = { ...forcesRef.current, [key]: value }
+    setForces(forcesRef.current)
+    applySimForces.current?.()
+  }
+
+  const resetForces = () => {
+    forcesRef.current = { ...DEFAULT_FORCES }
+    setForces(forcesRef.current)
+    applySimForces.current?.()
+  }
+
+  const atDefaults =
+    forces.centre === DEFAULT_FORCES.centre &&
+    forces.repel === DEFAULT_FORCES.repel &&
+    forces.repelRange === DEFAULT_FORCES.repelRange &&
+    forces.link === DEFAULT_FORCES.link
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -211,12 +248,18 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
      * `dragging` and `adjacency` are read through getters so the physics never
      * learns what a pointer is, and this file stays the only place that knows.
      */
-    const { sim, setHolding } = buildSimulation(
+    const { sim, setHolding, applyForces } = buildSimulation(
       nodes,
       links,
       () => dragging,
       () => adjacency,
+      HOLD,
+      // Read through the ref, never through React state: the effect is keyed on
+      // `graph`, so closing over state would need it in the deps and every
+      // slider pixel would rebuild the simulation and re-scatter the layout.
+      () => forcesRef.current,
     )
+    applySimForces.current = applyForces
 
 
     // View transform. Pan/zoom is hand-rolled rather than pulling in d3-zoom
@@ -1040,6 +1083,113 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       <div className="vault-graph-info">
         {hoverLabel ?? `${graph.nodes.length} notes, ${graph.links.length} links`}
       </div>
+
+      {/* Native Popover, same idiom as PaneMenu: the button opens and
+          light-dismisses the panel with no JS and no open state to keep. */}
+      <button
+        type="button"
+        className="graph-forces-toggle"
+        popoverTarget="graph-forces"
+        aria-label="Forces"
+      >
+        Forces
+      </button>
+
+      <div id="graph-forces" popover="auto" className="graph-forces">
+        <div className="graph-forces-head">
+          <h2 className="graph-forces-title">Forces</h2>
+          <button
+            type="button"
+            className="graph-forces-reset"
+            onClick={resetForces}
+            disabled={atDefaults}
+            title={atDefaults ? 'Already at the tuned defaults' : 'Back to the tuned defaults'}
+          >
+            Reset
+          </button>
+        </div>
+
+        <Slider
+          label="Center force"
+          value={forces.centre}
+          min={0}
+          max={0.06}
+          step={0.002}
+          decimals={3}
+          onChange={(v) => setForce('centre', v)}
+        />
+        <Slider
+          label="Repel force"
+          value={forces.repel}
+          min={0}
+          max={3}
+          step={0.05}
+          decimals={2}
+          onChange={(v) => setForce('repel', v)}
+        />
+        <Slider
+          label="Repel range"
+          value={forces.repelRange}
+          min={60}
+          max={600}
+          step={10}
+          decimals={0}
+          onChange={(v) => setForce('repelRange', v)}
+        />
+        <Slider
+          label="Link force"
+          value={forces.link}
+          min={0}
+          max={LINK_MAX}
+          step={0.005}
+          decimals={3}
+          onChange={(v) => setForce('link', v)}
+        />
+        <p className="graph-force-note">
+          Link force stops at {LINK_MAX}. Above it the orbit ring measures uneven, so the
+          slider only loosens.
+        </p>
+      </div>
     </div>
+  )
+}
+
+/**
+ * One labelled range input. Local because it has exactly one caller and four
+ * uses — a shared control would be a second file to keep in sync with this
+ * panel's only stylesheet.
+ */
+function Slider({
+  label,
+  value,
+  min,
+  max,
+  step,
+  decimals,
+  onChange,
+}: {
+  label: string
+  value: number
+  min: number
+  max: number
+  step: number
+  decimals: number
+  onChange: (v: number) => void
+}) {
+  return (
+    <label className="graph-force">
+      <span className="graph-force-label">
+        {label}
+        <span className="graph-force-value">{value.toFixed(decimals)}</span>
+      </span>
+      <input
+        type="range"
+        min={min}
+        max={max}
+        step={step}
+        value={value}
+        onChange={(e) => onChange(Number(e.currentTarget.value))}
+      />
+    </label>
   )
 }

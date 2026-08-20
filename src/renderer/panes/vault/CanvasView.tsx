@@ -191,6 +191,12 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
   const [linkFrom, setLinkFrom] = useState<string | null>(null)
   /** The text card currently open for editing, by id. */
   const [editing, setEditing] = useState<string | null>(null)
+  /**
+   * The selected cards, by id. PURE UI — nothing here is ever written to the
+   * file. JSON Canvas has no concept of selection, and inventing a key for it
+   * would put this app's transient state into a document Obsidian also writes.
+   */
+  const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const worldRef = useRef<HTMLDivElement>(null)
@@ -266,6 +272,9 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
   // ── load ───────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
+    // A different board is a different set of ids, so a selection held across
+    // the switch would highlight nothing and still report a count.
+    setSelected(new Set())
     if (!path) {
       setDoc(null)
       setError(null)
@@ -427,6 +436,28 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     void persist(doc)
   }
 
+  /**
+   * Select a card, or add and remove one from a multi-selection.
+   *
+   * `additive` is shift or ctrl/cmd. Toggling rather than only adding is what
+   * lets a mis-click be undone without starting the whole selection again.
+   *
+   * A NEW Set every time, never a mutated one: React compares by identity, and
+   * mutating the held Set would change the selection without re-rendering it,
+   * so the highlight would lag one click behind the truth.
+   */
+  const selectNode = (id: string, additive: boolean) => {
+    setSelected((prev) => {
+      if (!additive) return new Set([id])
+      const next = new Set(prev)
+      // Set membership only. This removes nothing from the document — no card
+      // and no edge — and there is a test pinning that.
+      if (next.has(id)) next.delete(id)
+      else next.add(id)
+      return next
+    })
+  }
+
   const commitText = (node: CanvasNode, value: string) => {
     setEditing(null)
     // A card opened and closed without a change must not write the file: save()
@@ -442,6 +473,9 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     // Only a press on the board itself pans. A press that started on a card is
     // that card's drag, and it stops propagation below.
     if (e.button !== 0) return
+    // A press on empty board clears the selection, which is the one gesture
+    // everyone already expects to mean "never mind".
+    setSelected(new Set())
     pan.current = { x: e.clientX, y: e.clientY, tx: view.current.tx, ty: view.current.ty }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   }
@@ -501,6 +535,11 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
             return copy
           })()
         : node
+
+    // Selection follows the press, so a card is selected before any drag of it
+    // begins. The duplicate becomes the selection when there is one — you are
+    // now working on the copy, not the card you copied.
+    selectNode(target.id, e.shiftKey || e.ctrlKey || e.metaKey)
 
     // The grab offset is kept so the card does not jump its centre to the
     // cursor on the first move — the same correction GraphView documents.
@@ -747,18 +786,27 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
               }}
               onPointerDown={(e) => onNodeDown(e, n)}
               data-linking={linkFrom === n.id || undefined}
+              data-selected={selected.has(n.id) || undefined}
             >
               {n.type === 'file' && n.file ? (
                 <button
                   type="button"
                   className="canvas-file"
                   title={n.file}
-                  onClick={() => {
+                  onClick={(e) => {
                     // A drag that ends on the card also fires a click. Without
                     // this, rearranging a board opens every card you touched.
                     // Connect mode is excluded for the same reason: picking a
                     // file card as an endpoint must not also leave the board.
-                    if (!connect && !draggedLast.current) onOpenNote(n.file!)
+                    if (connect || draggedLast.current) return
+                    // A modifier press was a selection, not an open. Read off
+                    // the click event rather than remembered from the
+                    // pointerdown, because the browser already carries it and a
+                    // second ref would be a second thing to keep in sync.
+                    // Without this a file card could never join a
+                    // multi-selection without navigating away from the board.
+                    if (e.shiftKey || e.ctrlKey || e.metaKey) return
+                    onOpenNote(n.file!)
                   }}
                 >
                   <FileText size={13} aria-hidden="true" />
@@ -837,6 +885,12 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
           <>
             <span className="canvas-info-sep">·</span>
             <span>{doc.edges.length} connections</span>
+          </>
+        )}
+        {selected.size > 0 && (
+          <>
+            <span className="canvas-info-sep">·</span>
+            <span>{selected.size} selected</span>
           </>
         )}
         <span className="canvas-info-sep">·</span>

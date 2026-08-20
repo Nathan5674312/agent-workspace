@@ -282,6 +282,15 @@
   border-color: var(--accent);
 }
 
+/* Selection is an OUTLINE, not a border colour. A card's border may already be
+   carrying its own `color` from the file, and overwriting it would make
+   selecting a red card look like recolouring it. An outline also costs no
+   layout, so nothing shifts as the selection moves. */
+.canvas-node[data-selected] {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+
 /* The editor for a text card. Fills its card exactly so the text does not
    reflow at the moment editing starts or ends. */
 .canvas-text-edit {

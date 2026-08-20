@@ -151,7 +151,16 @@ test('only text nodes are editable', () => {
 test('connect mode does not also open a file card', () => {
   // A file card is a <button>; picking it as an endpoint fires its click too,
   // and without the guard choosing an endpoint navigates away from the board.
-  assert.match(VIEW, /!connect && !draggedLast\.current/, 'connect mode still opens the note')
+  //
+  // Written as an early return since selection landed, because a third
+  // condition (a modifier press) joined it and one chained `&&` was becoming
+  // unreadable. The behaviour is identical; this assertion was pinning the
+  // SHAPE of the expression rather than what it does, and had to move with it.
+  assert.match(
+    VIEW,
+    /if \(connect \|\| draggedLast\.current\) return/,
+    'connect mode or a drag still opens the note',
+  )
 })
 
 test('an unchanged card does not write the file when committed', () => {

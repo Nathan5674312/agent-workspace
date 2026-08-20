@@ -875,7 +875,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
               data-linking={linkFrom === n.id || undefined}
               data-selected={selected.has(n.id) || undefined}
             >
-              {n.type === 'file' && n.file ? (
+              {n.type === 'file' && typeof n.file === 'string' ? (
                 <button
                   type="button"
                   className="canvas-file"
@@ -930,7 +930,9 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                   <span className="canvas-link-url">{String(n.url)}</span>
                 </div>
               ) : n.type === 'group' ? (
-                <span className="canvas-group-label">{n.label ?? ''}</span>
+                <span className="canvas-group-label">
+                  {typeof n.label === 'string' ? n.label : ''}
+                </span>
               ) : editing === n.id ? (
                 /**
                  * Editing is a plain <textarea>, the same control the note
@@ -947,7 +949,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                  */
                 <textarea
                   className="canvas-text-edit"
-                  defaultValue={n.text ?? ''}
+                  defaultValue={typeof n.text === 'string' ? n.text : ''}
                   autoFocus
                   aria-label="Card text"
                   onPointerDown={(e) => e.stopPropagation()}
@@ -976,7 +978,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                     if (n.type === 'text') setEditing(n.id)
                   }}
                 >
-                  {n.text ?? ''}
+                  {typeof n.text === 'string' ? n.text : ''}
                 </div>
               )}
             </div>

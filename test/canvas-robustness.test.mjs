@@ -45,6 +45,44 @@ test('the info strip announces saving and errors to a screen reader', () => {
   assert.match(strip, /role="status"/, 'the info strip is not announced')
 })
 
+// --------------------------------------- a wrong-typed field must not crash
+
+test('a board can legally reach the view with a non-string text, label or file', () => {
+  // parseCanvas validates GEOMETRY only, by design — a board that is slightly
+  // wrong should still draw. So these values genuinely arrive at the render.
+  const doc = parseCanvas(
+    JSON.stringify({
+      nodes: [
+        { id: 'n', type: 'text', text: 42, x: 0, y: 0, width: 9, height: 9 },
+        { id: 'o', type: 'text', text: { rich: true }, x: 0, y: 0, width: 9, height: 9 },
+        { id: 'g', type: 'group', label: ['a'], x: 0, y: 0, width: 9, height: 9 },
+        { id: 'f', type: 'file', file: 7, x: 0, y: 0, width: 9, height: 9 },
+      ],
+      edges: [],
+    }),
+  )
+  assert.equal(doc.nodes.length, 4, 'parseCanvas rejected the fixture, so the render never sees it')
+  // And they survive untouched, which is why the render must cope rather than
+  // the parser repair them.
+  assert.equal(JSON.parse(serializeCanvas(doc)).nodes[0].text, 42)
+})
+
+test('the render narrows text, label and file instead of trusting them', () => {
+  // THE LOAD-BEARING ASSERTION. `{n.text ?? ''}` throws "Objects are not valid
+  // as a React child" for an object, and fileNodeTitle calls .split on whatever
+  // it is handed. App.tsx wraps the whole VaultPane in ONE ErrorBoundary, so a
+  // single bad field on one card unmounts the pane — taking the unsaved note
+  // buffer with it, which is the thing review-s2 exists to protect.
+  assert.match(VIEW, /typeof n\.text === 'string'/, 'a non-string text reaches React')
+  assert.match(VIEW, /typeof n\.label === 'string'/, 'a non-string label reaches React')
+  assert.match(VIEW, /typeof n\.file === 'string'/, 'a non-string file reaches fileNodeTitle')
+})
+
+test('the editor opens on a string even when the card holds something else', () => {
+  const edit = VIEW.slice(VIEW.indexOf('className="canvas-text-edit"'), VIEW.indexOf('onKeyDown'))
+  assert.match(edit, /typeof n\.text === 'string'/, 'the textarea can be handed a non-string')
+})
+
 // ------------------------------------------------- preservation rule
 
 test('the preservation rule is intact: a board still round-trips untouched', () => {

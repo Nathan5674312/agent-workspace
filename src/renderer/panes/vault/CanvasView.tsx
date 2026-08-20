@@ -878,13 +878,24 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                     // Connect mode is excluded for the same reason: picking a
                     // file card as an endpoint must not also leave the board.
                     if (connect || draggedLast.current) return
-                    // A modifier press was a selection, not an open. Read off
-                    // the click event rather than remembered from the
-                    // pointerdown, because the browser already carries it and a
-                    // second ref would be a second thing to keep in sync.
-                    // Without this a file card could never join a
-                    // multi-selection without navigating away from the board.
-                    if (e.shiftKey || e.ctrlKey || e.metaKey) return
+                    /**
+                     * A modifier press did something other than open. Read off
+                     * the click event rather than remembered from the
+                     * pointerdown, because the browser already carries it and a
+                     * second ref would be a second thing to keep in sync.
+                     *
+                     * Shift/Ctrl/Cmd were a SELECTION — without this a file
+                     * card could never join a multi-selection without
+                     * navigating away from the board.
+                     *
+                     * Alt was a DUPLICATE, and leaving it out made one gesture
+                     * do two things: the press cloned the card, `onUp`
+                     * persisted the clone because `created` was true, and then
+                     * this click opened the note and unmounted the board the
+                     * user was working on. `draggedLast` does not catch it,
+                     * because a press that never travels has `moved` false.
+                     */
+                    if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return
                     onOpenNote(n.file!)
                   }}
                 >

@@ -137,6 +137,18 @@ test('an Alt+press that never moves still saves', () => {
   )
 })
 
+test('an Alt press on a file card duplicates WITHOUT also opening the note', () => {
+  // THE LOAD-BEARING ASSERTION for this fix. One gesture, two actions: the
+  // Alt press duplicates the card, `onUp` persists it because `created` is
+  // true, and then the click reaches the file card's <button> and navigates to
+  // the note — unmounting the board the user was working on. `moved` is false
+  // for a press that never travels, so `draggedLast` does not catch it, and
+  // altKey was missing from the modifier list that catches the others.
+  const guard = VIEW.slice(VIEW.indexOf('onClick={(e) => {'), VIEW.indexOf('onOpenNote(n.file!)'))
+  assert.ok(guard.length > 0, 'the file card click handler no longer has the shape this test reads')
+  assert.match(guard, /e\.altKey/, 'an Alt press on a file card duplicates it and opens it too')
+})
+
 test('no delete or removal affordance came along with it', () => {
   // Duplication is additive and inside the green light. Removal is not, and is
   // still blocked on Nathan pending an undo or a confirm.

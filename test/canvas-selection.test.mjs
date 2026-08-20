@@ -124,11 +124,18 @@ test('the press decides additive from the real modifier keys', () => {
 test('a modifier click on a file card selects instead of opening it', () => {
   // Otherwise a file card could never join a multi-selection without
   // navigating away from the board.
-  assert.match(
-    VIEW,
-    /if \(e\.shiftKey \|\| e\.ctrlKey \|\| e\.metaKey\) return\s*\n\s*onOpenNote/,
-    'a modifier click on a file card still opens the note',
-  )
+  //
+  // Asserted as MEMBERSHIP per modifier, scoped to the guard region, rather
+  // than as one exact expression. The previous form pinned the literal list
+  // `shiftKey || ctrlKey || metaKey` AND required `onOpenNote` on the very next
+  // line, so adding a fourth modifier — which is exactly the fix for the
+  // Alt+press double-action — broke a test that had nothing to say about it.
+  const guard = VIEW.slice(VIEW.indexOf('onClick={(e) => {'), VIEW.indexOf('onOpenNote(n.file!)'))
+  assert.ok(guard.length > 0, 'the file card click handler no longer has the shape this test reads')
+  for (const key of ['shiftKey', 'ctrlKey', 'metaKey']) {
+    assert.match(guard, new RegExp(`e\\.${key}`), `a ${key} click on a file card still opens it`)
+  }
+  assert.match(guard, /\breturn\b/, 'the guard never returns early')
 })
 
 test('a press on empty board clears the selection, and so does changing board', () => {

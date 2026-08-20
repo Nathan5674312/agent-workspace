@@ -580,17 +580,44 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
               const derived = edgeAnchor(a, b)
               const from = anchorOn(a, edge.fromSide, derived.from)
               const to = anchorOn(b, edge.toSide, derived.to)
+              /**
+               * A label is only drawn when there is one to draw.
+               *
+               * Checked for a non-empty STRING rather than truthiness: the
+               * field is optional and unvalidated, and rendering `undefined`
+               * or a number would put the word "undefined" on someone's board.
+               * An empty label is a label the user cleared, so it draws
+               * nothing rather than an empty halo.
+               */
+              const label = typeof edge.label === 'string' ? edge.label.trim() : ''
               return (
-                <line
-                  key={edge.id}
-                  x1={from.x + EDGE_ORIGIN}
-                  y1={from.y + EDGE_ORIGIN}
-                  x2={to.x + EDGE_ORIGIN}
-                  y2={to.y + EDGE_ORIGIN}
-                  className="canvas-edge"
-                  markerStart={drawsArrow(edge.fromEnd, 'none') ? 'url(#canvas-arrow)' : undefined}
-                  markerEnd={drawsArrow(edge.toEnd, 'arrow') ? 'url(#canvas-arrow)' : undefined}
-                />
+                <g key={edge.id}>
+                  <line
+                    x1={from.x + EDGE_ORIGIN}
+                    y1={from.y + EDGE_ORIGIN}
+                    x2={to.x + EDGE_ORIGIN}
+                    y2={to.y + EDGE_ORIGIN}
+                    className="canvas-edge"
+                    markerStart={
+                      drawsArrow(edge.fromEnd, 'none') ? 'url(#canvas-arrow)' : undefined
+                    }
+                    markerEnd={drawsArrow(edge.toEnd, 'arrow') ? 'url(#canvas-arrow)' : undefined}
+                  />
+                  {label && (
+                    // Midpoint of the drawn line, which is the stated anchors
+                    // when the file gave them — so a hand-routed edge carries
+                    // its label along the route the user actually chose.
+                    <text
+                      x={(from.x + to.x) / 2 + EDGE_ORIGIN}
+                      y={(from.y + to.y) / 2 + EDGE_ORIGIN}
+                      className="canvas-edge-label"
+                      textAnchor="middle"
+                      dominantBaseline="middle"
+                    >
+                      {label}
+                    </text>
+                  )}
+                </g>
               )
             })}
           </svg>

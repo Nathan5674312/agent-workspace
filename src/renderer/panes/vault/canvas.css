@@ -68,6 +68,21 @@
   opacity: 0.55;
 }
 
+/* An edge label sits ON the line, so it needs to be legible over it without a
+   second element behind it. `paint-order: stroke` draws the halo first and the
+   glyphs on top, which is one declaration instead of a measured background
+   rect that would have to be re-measured on every font or zoom change.
+   The halo is the board ground, so it reads as the line being interrupted. */
+.canvas-edge-label {
+  fill: var(--label-secondary);
+  font-size: var(--text-xs);
+  font-family: inherit;
+  paint-order: stroke;
+  stroke: var(--bg-app);
+  stroke-width: 4px;
+  stroke-linejoin: round;
+}
+
 /* `context-stroke` resolves to the stroke of the line that referenced the
    marker, so one head follows whatever colour its edge is drawn in — including
    a per-edge `color` from the file. A fixed token here would look right today

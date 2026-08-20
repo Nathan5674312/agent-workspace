@@ -609,12 +609,22 @@ test('checkRoots() reports an unusable vault root', async (t) => {
   })
 
   await t.test('a root holding only skipped paths counts as empty', async () => {
-    // Templates/ and the vendored skill bundles are files, not notes. A root
-    // containing nothing else indexes to zero rows, and the honest answer is
-    // the same as an empty directory rather than a silent blank table.
+    /**
+     * REWRITTEN. This used to use `Templates/Note.md` and
+     * `System/Skill Sources/x/SKILL.md`, back when SKIP hardcoded one vault's
+     * folder names. Those are ordinary notes now (see test/any-folder.test.mjs),
+     * so the test kept passing for a different reason — checkRoots() started
+     * answering about the missing root note instead of the empty index, and the
+     * assertion could no longer tell the two apart.
+     *
+     * `.backups/` is the only thing still skipped, and it is skipped because
+     * this app writes it.
+     */
     vault._setVaultDirForTest(
-      await makeScratchVault(['Templates/Note.md', 'System/Skill Sources/x/SKILL.md']),
+      await makeScratchVault(['.backups/Home.md/2026-01-01T00-00-00.md']),
     )
-    assert.ok(await vault.checkRoots(), 'a root with no indexable notes went unreported')
+    const msg = await vault.checkRoots()
+    assert.ok(msg, 'a root with no indexable notes went unreported')
+    assert.match(msg, /no notes found/, `expected the empty-index answer, got: ${msg}`)
   })
 })

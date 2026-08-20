@@ -1101,53 +1101,43 @@ function sort(node: VaultTreeNode): void {
 }
 
 /**
- * Path prefixes that are files but not NOTES, excluded from the database and
- * the graph. Ported from the note server's `links.py` SKIP, which is where
- * these were tuned: third-party skill bundles and generated indexes ran to
- * thousands of documents and swamped both views.
+ * Paths the INDEX never counts as notes.
  *
- * Deliberately NOT the same list as HIDDEN above. HIDDEN hides things from the
- * EXPLORER; this hides them from the INDEX. `Templates/` is the case that shows
- * why they must stay separate — the explorer still lists it, because a person
- * browsing wants to open a template, while the database counting it as a note
- * would file every template shape as content.
+ * THIS LIST USED TO BE ONE PERSON'S VAULT, HARDCODED. It carried
+ * `graphify-out/`, `System/Skills/gstack/`, `System/Skills/skill-router/`,
+ * `System/Skill Sources/`, `Templates/` and `Inbox/` — ported from a note
+ * server's `links.py`, where they had been tuned against a single vault. Point
+ * the app at anyone else's folder and it silently dropped every file under a
+ * folder called `Templates` or `Inbox`, which are Obsidian's OWN conventions
+ * and ship in its default vault. Measured on an ordinary ten-note vault:
+ * 4 files invisible, and `checkRoots()` reported no problem at all.
  *
- * `Inbox/` is here for the reason it was in the server's note_list(): those are
- * pending captures, unfiled by definition, and every one of them would read as
- * an orphan. The Inbox tab reads them directly and is unaffected.
+ * A note app that only indexes one particular person's folder layout is not a
+ * note app. So the vault-specific entries are gone, and per-vault exclusions
+ * come from the mechanism that already exists and that users already control:
+ * `.obsidian/app.json` → `userIgnoreFilters`, read by `ignoreFilters()` above,
+ * re-anchored per vault. That is the same setting Obsidian's own
+ * "Files and links → Excluded files" writes, so the two apps agree without the
+ * user configuring anything twice.
  *
- * Trailing slashes are load-bearing: `links.py` matched the bare prefix
- * "Templates", which also swallowed any real note whose name merely started
- * with it.
+ * What is left is the app's OWN directory. `.backups/` is written by save();
+ * indexing it would count every historical copy of a note as a separate note.
+ * That is true of every vault because this app is what creates it.
+ *
+ * Trailing slash is load-bearing: a bare prefix also swallows any real note
+ * whose name merely starts with it.
  */
-const SKIP = [
-  'graphify-out/',
-  'System/Skills/gstack/',
-  'System/Skills/skill-router/',
-  'System/Skill Sources/',
-  'Templates/',
-  '.backups/',
-  'Inbox/',
-]
+const SKIP = ['.backups/']
 
 /**
- * Does this path sit under one of the SKIP prefixes — at the root, or under ANY
- * folder in the tree.
+ * Does this path sit under a skipped prefix — at the root, or under ANY folder
+ * in the tree.
  *
- * `p.startsWith(s)` alone was the second half of the same bug `ignoreFilters()`
- * had: these prefixes were written against one vault opened at its own root, so
- * the moment the real path became `Universal Vault/System/Skills/gstack/…` not
- * one of them matched and 168 gstack skills, 190 skill sources and 12 inbox
- * captures poured into the index. 633 of the files that came back are named
- * `SKILL.md`, which is what made the LINK count fall while the note count rose
- * fivefold — every `[[Skill]]` in the vault suddenly had 633 candidates.
- *
- * Matching mid-path fixes it without the caller having to know where any vault
- * begins. It is deliberately broader than "only at a vault boundary": these
- * names describe what a folder IS — a generated index, a template shelf, an
- * unfiled capture queue — and that does not stop being true one directory
- * further down. `/` on both sides keeps it on a segment boundary, so
- * `Templates/` still cannot swallow `TemplatesExtra/`.
+ * Matching mid-path rather than only at the root is what lets a vault opened
+ * from its PARENT directory still exclude correctly: the moment the real path
+ * became `Universal Vault/.backups/…`, a root-anchored prefix stopped matching
+ * and every backup poured into the index. `/` on both sides keeps it on a
+ * segment boundary, so `.backups/` cannot swallow `.backups-old/`.
  */
 function isSkipped(p: string): boolean {
   return SKIP.some((s) => p.startsWith(s) || p.includes(`/${s}`))
@@ -1403,6 +1393,37 @@ async function buildIndex(): Promise<VaultIndex> {
    */
   const byFile = new Map<string, string[]>()
   const byAlias = new Map<string, string[]>()
+  /**
+   * THIRD tier: every trailing path segment-run, so a PATH-FORM wikilink still
+   * resolves when the vault is opened from above it.
+   *
+   * `[[Daily/_Template|Daily Template]]` is a path relative to ITS vault's
+   * root. Registering only `n.path` means the key is whatever this walk's root
+   * makes it — open Universal Vault directly and the key is `daily/_template`
+   * and the link resolves; open Desktop and the key becomes
+   * `universal vault/daily/_template` while the link still says
+   * `daily/_template`, so it matches nothing at all.
+   *
+   * That was the last root-anchored assumption, and it was expensive precisely
+   * because it failed SILENTLY: resolve() returned undefined, the edge was
+   * simply not created, and the graph lost 100 of the vault's 657 edges with no
+   * error anywhere — including every one of the ~68 skill links out of
+   * `Fate/Skills Index.md`. Measured by diffing the two link sets: 100 lost, 0
+   * gained, so nothing was being mis-routed, it was being dropped.
+   *
+   * A SEPARATE tier rather than more keys in `byFile`, and consulted last, so
+   * this can only ever ADD a resolution that would otherwise fail. An exact
+   * filename and an exact full path both still win first, and no existing link
+   * changes where it points — which is what keeps the single-vault numbers
+   * identical (657 links either way).
+   *
+   * Deliberately more permissive than Obsidian, which would only accept the
+   * form anchored at its own vault root: we do not know where the user thinks
+   * the root is, and a suffix that lands on a segment boundary is a far better
+   * guess than nothing. Collisions fall through to `choose()` and resolve by
+   * proximity like every other duplicate name.
+   */
+  const bySuffix = new Map<string, string[]>()
   const add = (into: Map<string, string[]>, key: string, path: string) => {
     const k = norm(key)
     if (!k) return
@@ -1418,6 +1439,12 @@ async function buildIndex(): Promise<VaultIndex> {
   // filename that another note owns — hence a separate tier, not a later
   // insert into the same one.
   for (const n of notes) add(byAlias, n.title, n.path)
+  // Third pass. Starts at 1: the whole path is already in `byFile` and the bare
+  // filename is both there and meaningless as a "path form".
+  for (const n of notes) {
+    const parts = n.path.split('/')
+    for (let i = 1; i < parts.length - 1; i++) add(bySuffix, parts.slice(i).join('/'), n.path)
+  }
 
   /** The folder a note lives in, `''` at the vault root. */
   const dirOf = (p: string) => p.slice(0, p.lastIndexOf('/') + 1)
@@ -1465,7 +1492,11 @@ async function buildIndex(): Promise<VaultIndex> {
     const file = byFile.get(k)
     if (file) return choose(file, from)
     const alias = byAlias.get(k)
-    return alias ? choose(alias, from) : undefined
+    if (alias) return choose(alias, from)
+    // Last: a path form that was written against a vault root above or below
+    // this walk's root. See `bySuffix`.
+    const suffix = bySuffix.get(k)
+    return suffix ? choose(suffix, from) : undefined
   }
 
   const links: VaultGraph['links'] = []

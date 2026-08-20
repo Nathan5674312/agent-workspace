@@ -380,7 +380,15 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       K_MAX,
       Math.max(
         K_MIN,
-        Math.min((r.width - FIT_PAD * 2) / (maxX - minX), (r.height - FIT_PAD * 2) / (maxY - minY)),
+        // The spans are floored at 1 because a board whose content has zero
+        // width or height is legal — parseCanvas accepts width 0 — and 0/0 is
+        // NaN, which passes through Math.max and Math.min unchanged. The world
+        // would then get `transform: scale(NaN)`, the board would vanish, the
+        // readout would say NaN%, and nothing would throw.
+        Math.min(
+          (r.width - FIT_PAD * 2) / Math.max(1, maxX - minX),
+          (r.height - FIT_PAD * 2) / Math.max(1, maxY - minY),
+        ),
       ),
     )
     view.current = {

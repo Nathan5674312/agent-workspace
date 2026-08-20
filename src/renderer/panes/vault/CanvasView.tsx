@@ -298,6 +298,11 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     setMtime(0)
     setEditing(null)
     setSelected(new Set())
+    // A pending endpoint is the sharpest case: picked on the old board, it
+    // would pair with a click on the new one and write an edge whose source
+    // does not exist in the file it lands in. Connect MODE is left alone —
+    // that is a tool the user turned on, not state belonging to a file.
+    setLinkFrom(null)
 
     if (!path) {
       setError(null)
@@ -448,6 +453,18 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
 
   const addEdge = (fromNode: string, toNode: string) => {
     if (!doc) return
+    /**
+     * Both endpoints must exist ON THIS BOARD.
+     *
+     * A dangling edge is the quietest corruption this view can produce: the
+     * render skips an edge naming a missing node, so nothing appears, while
+     * the file carries the reference and the info strip counts it. The board
+     * reports a connection that is not there and gives no way to find out why.
+     * Obsidian reads the same file and is under no obligation to be as
+     * forgiving about it.
+     */
+    if (!doc.nodes.some((n) => n.id === fromNode)) return
+    if (!doc.nodes.some((n) => n.id === toNode)) return
     // The same ordered pair twice is a no-op rather than a second identical line
     // stacked invisibly on the first.
     if (doc.edges.some((e) => e.fromNode === fromNode && e.toNode === toNode)) return

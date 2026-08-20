@@ -63,6 +63,40 @@ test('an in-progress text edit does not survive a board change', () => {
   assert.match(teardown(), /setEditing\(null\)/, 'an open editor survives a change of board')
 })
 
+test('a half-finished connection does not survive a board change', () => {
+  // Pick an endpoint on board A, switch to board B, pick a second endpoint:
+  // addEdge is called with one id from each file. The result is an edge naming
+  // a node that does not exist in the board it was written to.
+  assert.match(teardown(), /setLinkFrom\(null\)/, 'a pending endpoint survives a change of board')
+})
+
+test('an edge is refused unless BOTH endpoints exist on this board', () => {
+  // The belt to the braces above. Anything that can reach addEdge with a
+  // foreign id must not be able to write a dangling reference into a file
+  // Obsidian also reads.
+  const add = VIEW.slice(VIEW.indexOf('const addEdge ='), VIEW.indexOf('const commitText ='))
+  assert.match(add, /nodes\.some\(\(n\) => n\.id === fromNode\)/, 'the source id is not checked')
+  assert.match(add, /nodes\.some\(\(n\) => n\.id === toNode\)/, 'the target id is not checked')
+})
+
+test('a dangling edge is invisible but real, which is why it must not be written', () => {
+  // Behavioural, not a replica: this shows what the guard prevents. The file
+  // happily carries an edge to a missing node, the view draws nothing for it,
+  // and the count still includes it — so the board reports a connection that
+  // does not exist and nothing anywhere reports why.
+  const doc = parseCanvas(
+    JSON.stringify({
+      nodes: [{ id: 'here', type: 'text', text: 'x', x: 0, y: 0, width: 10, height: 10 }],
+      edges: [{ id: 'dangling', fromNode: 'here', toNode: 'gone' }],
+    }),
+  )
+  const byId = new Map(doc.nodes.map((n) => [n.id, n]))
+  const drawable = doc.edges.filter((e) => byId.has(e.fromNode) && byId.has(e.toNode))
+  assert.equal(drawable.length, 0, 'the fixture does not actually produce a dangling edge')
+  assert.equal(doc.edges.length, 1, 'the file did not keep the dangling edge')
+  assert.match(serializeCanvas(doc), /dangling/, 'a dangling edge does reach disk')
+})
+
 test('the selection is still dropped too', () => {
   // Already true before this fix; asserted here so the teardown stays one
   // place rather than drifting back apart.

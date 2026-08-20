@@ -19,9 +19,11 @@ import './fixtures/ts-hooks.mjs'
 
 import test from 'node:test'
 import assert from 'node:assert/strict'
+import { readFileSync } from 'node:fs'
 
 const {
   buildSimulation,
+  groupForce,
   DEFAULT_FORCES,
   LINK_MAX,
   LINK_STRENGTH,
@@ -140,4 +142,73 @@ test('a zeroed slider is inert, not broken', () => {
   assert.equal(s.sim.force('x').strength()(s.nodes[0]), 0)
   assert.equal(s.sim.force('charge').strength()(s.nodes[0]), -0)
   assert.equal(s.sim.force('link').strength()(s.links[0]), 0)
+})
+
+// ---------------------------------------------------------------- groups
+
+/** Run the force once and report how far a node was pushed. */
+function nudge(force, nodes, alpha = 1) {
+  for (const n of nodes) {
+    n.vx = 0
+    n.vy = 0
+  }
+  force.initialize(nodes)
+  force(alpha)
+  return nodes.map((n) => ({ vx: n.vx, vy: n.vy }))
+}
+
+test('group pull at 0 is genuinely inert, not just small', () => {
+  // The whole promise of the default: groups off means the layout is EXACTLY
+  // what it was before groups existed. "Nearly zero" would still drift it.
+  const nodes = [{ id: 'a', degree: 1, x: 100, y: 100 }]
+  const f = groupForce(() => ({ x: 0, y: 0 }), () => 0)
+  const [v] = nudge(f, nodes)
+  assert.equal(v.vx, 0)
+  assert.equal(v.vy, 0)
+})
+
+test('a member is pulled toward its anchor, not away from it', () => {
+  const nodes = [{ id: 'a', degree: 1, x: 100, y: 0 }]
+  const f = groupForce(() => ({ x: 0, y: 0 }), () => 0.05)
+  const [v] = nudge(f, nodes)
+  assert.ok(v.vx < 0, `expected a pull toward x=0, got vx=${v.vx}`)
+  assert.equal(v.vy, 0, 'pulled off-axis toward an on-axis anchor')
+})
+
+test('an ungrouped node is left completely alone', () => {
+  // Root-level notes have no top-level folder. They must not all pile onto a
+  // single shared anchor, which is what returning a default position would do.
+  const nodes = [{ id: 'root', degree: 1, x: 300, y: 300 }]
+  const f = groupForce(() => null, () => 0.05)
+  const [v] = nudge(f, nodes)
+  assert.equal(v.vx, 0)
+  assert.equal(v.vy, 0)
+})
+
+test('the pull is alpha-scaled, so it fades as the layout cools', () => {
+  const at = (alpha) => {
+    const nodes = [{ id: 'a', degree: 1, x: 100, y: 0 }]
+    return Math.abs(nudge(groupForce(() => ({ x: 0, y: 0 }), () => 0.05), nodes, alpha)[0].vx)
+  }
+  assert.ok(at(0.5) < at(1), 'the force ignores alpha and would pin nodes to anchors')
+  assert.equal(at(0.5) * 2, at(1))
+})
+
+test('groups are a force, never a colour — the physics never sees a group name', () => {
+  /**
+   * The design decision this pins. Obsidian colours group members because its
+   * layout cannot express grouping; expressing it in the layout is what lets
+   * tokens.css §4b (no accent hue) survive. If a group name or colour ever
+   * reaches the physics, someone has started painting instead of arranging.
+   */
+  // Comments stripped: the doc comment on groupForce EXPLAINS why there is no
+  // colour here, and matching that would be checking prose rather than code.
+  const src = readFileSync(
+    new URL('../src/renderer/panes/vault/graphPhysics.ts', import.meta.url),
+    'utf-8',
+  )
+    .replace(/\/\*[\s\S]*?\*\//g, '')
+    .replace(/\/\/.*$/gm, '')
+  assert.doesNotMatch(src, /colou?r/i, 'graphPhysics learned about colour')
+  assert.doesNotMatch(src, /\.group(?!:)/, 'the physics reads a group name off a node')
 })

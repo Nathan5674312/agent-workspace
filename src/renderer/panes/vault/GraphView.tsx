@@ -10,6 +10,7 @@ import {
   LINK_MAX,
   type Forces,
 } from './graphPhysics.js'
+import { folderOf } from './helpers.js'
 import './graph.css'
 
 /**
@@ -30,6 +31,8 @@ import './graph.css'
  * thing worth naming.
  */
 const LABEL_MIN_SCREEN_RADIUS = 9
+/** Group pull at which group labels reach full opacity. */
+const GROUP_LABEL_FULL = 0.05
 import {
   Decay,
   Spring,
@@ -60,7 +63,13 @@ export interface GraphViewProps {
   onOpenNote?: (path: string) => void
 }
 
-type Node = d3.SimulationNodeDatum & { id: string; label: string; degree: number }
+type Node = d3.SimulationNodeDatum & {
+  id: string
+  label: string
+  degree: number
+  /** Top-level folder. '' for a note at the vault root. */
+  group: string
+}
 type Link = { source: Node; target: Node }
 
 const titleOf = (p: string) => p.split('/').pop()!.replace(/\.md$/i, '')
@@ -206,11 +215,37 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       degree.set(l.to, (degree.get(l.to) ?? 0) + 1)
     }
 
+    /**
+     * GROUPS ARE THE TOP-LEVEL FOLDER, derived, not configured.
+     *
+     * Obsidian makes you write a query per group. The vault already states its
+     * own structure in the path, so reading it costs the user nothing and is
+     * right on the first open rather than after a setup session.
+     */
+    const groupOf = (id: string) => folderOf(id).split('/')[0] ?? ''
+
     const nodes: Node[] = graph.nodes.map((id) => ({
       id,
       label: titleOf(id),
       degree: degree.get(id) ?? 0,
+      group: groupOf(id),
     }))
+
+    /**
+     * One anchor per group, evenly spaced on a circle.
+     *
+     * The radius scales with the square root of the node count so a big vault
+     * spreads further without a small one flying apart — area grows linearly
+     * with nodes, so the radius has to grow with its root.
+     */
+    const groupNames = [...new Set(nodes.map((n) => n.group))].filter(Boolean).sort()
+    const groupRadius = 120 + Math.sqrt(nodes.length) * 26
+    const anchors = new Map<string, { x: number; y: number }>(
+      groupNames.map((name, i) => {
+        const t = (i / groupNames.length) * Math.PI * 2 - Math.PI / 2
+        return [name, { x: Math.cos(t) * groupRadius, y: Math.sin(t) * groupRadius }]
+      }),
+    )
     // Dangling edges are dropped before d3 sees them: forceLink throws on an
     // unresolvable endpoint, synchronously, inside this effect.
     const links = resolvableLinks(graph.nodes, graph.links) as unknown as Link[]
@@ -258,6 +293,7 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       // `graph`, so closing over state would need it in the deps and every
       // slider pixel would rebuild the simulation and re-scatter the layout.
       () => forcesRef.current,
+      (n) => anchors.get(n.group) ?? null,
     )
     applySimForces.current = applyForces
 
@@ -619,6 +655,40 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         }
       }
       ctx.globalAlpha = 1
+
+      /**
+       * Name the regions, but only once they ARE regions.
+       *
+       * Below a real group pull the members are still interleaved, so a group
+       * label would sit over a crowd it does not describe — worse than no
+       * label. Above it, the label is the whole payoff: a region you cannot
+       * name is just a blob.
+       *
+       * Drawn at the live centroid rather than the fixed anchor, because the
+       * anchor is where the group is being PULLED and the centroid is where it
+       * actually IS. Links to other groups drag members off the anchor, and the
+       * label belongs on what is on screen.
+       */
+      if (forcesRef.current.group > 0 && groupNames.length > 1) {
+        const sum = new Map<string, { x: number; y: number; n: number }>()
+        for (const n of nodes) {
+          if (!n.group) continue
+          const acc = sum.get(n.group) ?? { x: 0, y: 0, n: 0 }
+          acc.x += n.x!
+          acc.y += n.y!
+          acc.n += 1
+          sum.set(n.group, acc)
+        }
+        // Fades in with the pull, so turning the slider up reveals the names
+        // at the same rate it reveals the regions.
+        ctx.globalAlpha = Math.min(1, forcesRef.current.group / GROUP_LABEL_FULL)
+        ctx.fillStyle = COL.label
+        ctx.font = `${14 / k}px ${css.fontFamily}`
+        for (const [name, acc] of sum) {
+          ctx.fillText(name, acc.x / acc.n, acc.y / acc.n)
+        }
+        ctx.globalAlpha = 1
+      }
     }
 
     /**
@@ -1145,9 +1215,19 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
           decimals={3}
           onChange={(v) => setForce('link', v)}
         />
+        <Slider
+          label="Group pull"
+          value={forces.group}
+          min={0}
+          max={0.12}
+          step={0.005}
+          decimals={3}
+          onChange={(v) => setForce('group', v)}
+        />
         <p className="graph-force-note">
-          Link force stops at {LINK_MAX}. Above it the orbit ring measures uneven, so the
-          slider only loosens.
+          Group pull gathers each top-level folder into its own region, named on the
+          canvas. Link force stops at {LINK_MAX} — above it the orbit ring measures
+          uneven, so that slider only loosens.
         </p>
       </div>
     </div>

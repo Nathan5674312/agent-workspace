@@ -108,6 +108,11 @@ export interface Forces {
   repelRange: number
   /** Resting `LINK_STRENGTH`. Capped at LINK_MAX — see below. */
   link: number
+  /**
+   * How hard a node is pulled toward its group's anchor. 0 = groups off, and
+   * the layout is byte-identical to having no groups at all.
+   */
+  group: number
 }
 
 export const DEFAULT_FORCES: Forces = {
@@ -115,6 +120,9 @@ export const DEFAULT_FORCES: Forces = {
   repel: 1,
   repelRange: CHARGE_MAX_DISTANCE,
   link: LINK_STRENGTH,
+  // OFF by default. Groups rearrange the whole canvas, so they are something
+  // you reach for, not something that happens to you on first open.
+  group: 0,
 }
 
 /**
@@ -347,6 +355,47 @@ export function orbitForce<N extends PhysicsNode>(
  * values so the caller keeps ownership of the interaction state; the module
  * never learns what a pointer is.
  */
+/**
+ * Pull each node toward its group's anchor.
+ *
+ * THIS IS WHY THE GRAPH NEEDS NO GROUP COLOURS. Obsidian paints group members
+ * because its layout cannot say "these belong together" — the graph is one
+ * undifferentiated field, so colour is the only channel left. Express grouping
+ * in the LAYOUT and the colour becomes unnecessary: a group turns into a place
+ * on the canvas you can point at, which is strictly more information than a
+ * hue, and `tokens.css` §4b survives untouched.
+ *
+ * Anchors are FIXED points supplied by the caller, not running centroids. A
+ * centroid chases its own members and the two oscillate; a fixed anchor lands
+ * groups in stable, predictable places, so the same vault lays out the same way
+ * twice.
+ *
+ * Velocity-based and alpha-scaled like every other force here, so it fades as
+ * the layout cools instead of pinning nodes on top of their anchor.
+ */
+export function groupForce<N extends PhysicsNode>(
+  anchorOf: (n: N) => { x: number; y: number } | null,
+  getStrength: () => number,
+) {
+  let nodes: N[] = []
+  const force = (alpha: number) => {
+    const k = getStrength()
+    if (k <= 0) return
+    for (const n of nodes) {
+      const a = anchorOf(n)
+      if (!a) continue
+      n.vx! += (a.x - n.x!) * k * alpha
+      n.vy! += (a.y - n.y!) * k * alpha
+    }
+  }
+  // d3 hands every force the node array; orbitForce does not need it because it
+  // walks the adjacency instead, but this one iterates everything.
+  force.initialize = (ns: N[]) => {
+    nodes = ns
+  }
+  return force
+}
+
 export function buildSimulation<
   N extends PhysicsNode,
   L extends { source: N; target: N },
@@ -358,6 +407,8 @@ export function buildSimulation<
   tuning: HoldTuning = HOLD,
   /** Read through a getter like `getHeld`, so the physics never holds React state. */
   getForces: () => Forces = () => DEFAULT_FORCES,
+  /** Where a node's group sits. `null` = ungrouped, and it is left alone. */
+  anchorOf: (n: N) => { x: number; y: number } | null = () => null,
 ) {
   const neighbourCount = (n: N | null) => (n ? (getAdjacency().get(n.id)?.length ?? 0) : 0)
 
@@ -389,6 +440,7 @@ export function buildSimulation<
     .force('x', d3.forceX<N>(0).strength(CENTRING_STRENGTH))
     .force('y', d3.forceY<N>(0).strength(CENTRING_STRENGTH))
     .force('orbit', orbitForce(getHeld, getAdjacency, tuning))
+    .force('group', groupForce<N>(anchorOf, () => getForces().group))
 
   /**
    * `forceLink` caches distance and strength when the accessor is set, so

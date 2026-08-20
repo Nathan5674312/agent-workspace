@@ -24,6 +24,7 @@ import { readFileSync } from 'node:fs'
 const {
   buildSimulation,
   groupForce,
+  LABEL_AT_DEFAULT,
   DEFAULT_FORCES,
   LINK_MAX,
   LINK_STRENGTH,
@@ -211,4 +212,41 @@ test('groups are a force, never a colour — the physics never sees a group name
     .replace(/\/\/.*$/gm, '')
   assert.doesNotMatch(src, /colou?r/i, 'graphPhysics learned about colour')
   assert.doesNotMatch(src, /\.group(?!:)/, 'the physics reads a group name off a node')
+})
+
+// --------------------------------------------------------------- display
+
+test('display defaults are the identity, so the panel opens unchanged', () => {
+  assert.equal(DEFAULT_FORCES.nodeSize, 1)
+  assert.equal(DEFAULT_FORCES.linkWidth, 1)
+  assert.equal(DEFAULT_FORCES.labelAt, LABEL_AT_DEFAULT)
+})
+
+test('node size scales COLLISION too, not just the drawing', () => {
+  /**
+   * The defect this stops: draw nodes at 2x while collide still reserves 1x of
+   * room and the big nodes visibly overlap. Node size is the one display value
+   * that is also a physics value.
+   */
+  const forces = { ...DEFAULT_FORCES }
+  const s = scratch(() => forces)
+  const at = () => s.sim.force('collide').radius()(s.nodes[0])
+
+  const base = at()
+  forces.nodeSize = 2
+  s.applyForces()
+  assert.ok(at() > base, 'collide ignored node size; big nodes will overlap')
+
+  // Padding is a constant gap, so the growth is in the radius only.
+  const COLLIDE_PADDING = 6
+  assert.equal(at() - COLLIDE_PADDING, (base - COLLIDE_PADDING) * 2)
+})
+
+test('Reset covers every key, including ones added later', () => {
+  // atDefaults in GraphView iterates DEFAULT_FORCES rather than listing fields,
+  // so this asserts the shape it depends on: no key is optional.
+  for (const [k, v] of Object.entries(DEFAULT_FORCES)) {
+    assert.equal(typeof v, 'number', `${k} is not a number, Reset compares with ===`)
+  }
+  assert.ok(Object.keys(DEFAULT_FORCES).length >= 7, 'a tunable went missing')
 })

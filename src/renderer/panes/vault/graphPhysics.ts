@@ -113,7 +113,22 @@ export interface Forces {
    * the layout is byte-identical to having no groups at all.
    */
   group: number
+
+  // ── display ──────────────────────────────────────────────────
+  // These are draw-time, not forces, and they live here anyway: they ride the
+  // same ref, the same apply path and the same Reset. A second object would be
+  // a second thing to keep in sync for no gain. `nodeSize` is the one that is
+  // genuinely both — see the collide force below.
+
+  /** Multiplier on `radius()`. Scales the drawing AND the collision. */
+  nodeSize: number
+  /** Multiplier on link stroke width. */
+  linkWidth: number
+  /** Screen radius below which a node's label is not drawn. Lower = more labels. */
+  labelAt: number
 }
+
+export const LABEL_AT_DEFAULT = 9
 
 export const DEFAULT_FORCES: Forces = {
   centre: CENTRING_STRENGTH,
@@ -123,7 +138,16 @@ export const DEFAULT_FORCES: Forces = {
   // OFF by default. Groups rearrange the whole canvas, so they are something
   // you reach for, not something that happens to you on first open.
   group: 0,
+  nodeSize: 1,
+  linkWidth: 1,
+  labelAt: LABEL_AT_DEFAULT,
 }
+
+/**
+ * `LABEL_AT_DEFAULT` above is the screen radius a node must reach before it
+ * names itself. Progressive by degree: hubs are bigger, so they cross it while
+ * the whole graph is still in frame and leaves wait until you read that corner.
+ */
 
 /**
  * The link slider's ceiling, and it is NOT a taste call.
@@ -436,7 +460,12 @@ export function buildSimulation<
         .strength((d) => CHARGE_BASE + d.degree * CHARGE_PER_DEGREE)
         .distanceMax(CHARGE_MAX_DISTANCE),
     )
-    .force('collide', d3.forceCollide<N>().radius((d) => radius(d) + COLLIDE_PADDING))
+    .force(
+      'collide',
+      d3
+        .forceCollide<N>()
+        .radius((d) => radius(d) * getForces().nodeSize + COLLIDE_PADDING),
+    )
     .force('x', d3.forceX<N>(0).strength(CENTRING_STRENGTH))
     .force('y', d3.forceY<N>(0).strength(CENTRING_STRENGTH))
     .force('orbit', orbitForce(getHeld, getAdjacency, tuning))
@@ -477,6 +506,11 @@ export function buildSimulation<
         .forceManyBody<N>()
         .strength((d) => (CHARGE_BASE + d.degree * CHARGE_PER_DEGREE) * f.repel)
         .distanceMax(f.repelRange),
+    )
+    // Collide caches its radii, so node size only lands after a re-register.
+    sim.force(
+      'collide',
+      d3.forceCollide<N>().radius((d) => radius(d) * f.nodeSize + COLLIDE_PADDING),
     )
     refresh()
     sim.alpha(0.3).restart()

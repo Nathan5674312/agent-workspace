@@ -94,6 +94,20 @@
 .graph-forces-reset:hover:not(:disabled) { background: var(--fill-hover); color: var(--label); }
 .graph-forces-reset:disabled { color: var(--label-quaternary); }
 
+/* Section heading. The panel now covers forces AND display, and an unbroken
+   run of seven sliders reads as a wall rather than two groups of controls. */
+.graph-forces-section {
+  margin: 0;
+  font-size: var(--text-xs);
+  font-weight: var(--weight-medium);
+  letter-spacing: var(--tracking-caps);
+  text-transform: uppercase;
+  color: var(--label-quaternary);
+}
+
+/* Not on the first one: it sits directly under the panel title. */
+.graph-forces-section ~ .graph-forces-section { margin-top: var(--space-2); }
+
 .graph-force { display: grid; gap: var(--space-2); }
 
 .graph-force-label {

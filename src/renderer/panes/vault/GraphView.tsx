@@ -30,7 +30,6 @@ import './graph.css'
  * 6px of radius is about where a dot stops being a speck and starts being a
  * thing worth naming.
  */
-const LABEL_MIN_SCREEN_RADIUS = 9
 /** Group pull at which group labels reach full opacity. */
 const GROUP_LABEL_FULL = 0.05
 import {
@@ -117,11 +116,10 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
     applySimForces.current?.()
   }
 
-  const atDefaults =
-    forces.centre === DEFAULT_FORCES.centre &&
-    forces.repel === DEFAULT_FORCES.repel &&
-    forces.repelRange === DEFAULT_FORCES.repelRange &&
-    forces.link === DEFAULT_FORCES.link
+  // Every key, so a new slider cannot silently escape Reset.
+  const atDefaults = (Object.keys(DEFAULT_FORCES) as (keyof Forces)[]).every(
+    (k) => forces[k] === DEFAULT_FORCES[k],
+  )
 
   useEffect(() => {
     const canvas = canvasRef.current
@@ -223,6 +221,16 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
      * right on the first open rather than after a setup session.
      */
     const groupOf = (id: string) => folderOf(id).split('/')[0] ?? ''
+
+    /**
+     * The node's radius AS DRAWN, size slider included.
+     *
+     * Every geometry site goes through this — drawing, labels, zoom-to-fit and
+     * BOTH hit tests. Scaling the drawing without scaling the hit test is the
+     * bug this exists to make impossible: the nodes get bigger and the clicks
+     * keep landing on the old circle.
+     */
+    const nodeR = (n: Node) => radius(n) * forcesRef.current.nodeSize
 
     const nodes: Node[] = graph.nodes.map((id) => ({
       id,
@@ -453,7 +461,7 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
        * grabbing.
        */
       const drawRadius = (n: Node) =>
-        radius(n) *
+        nodeR(n) *
         (pressed?.id === n.id ? 1.35 : n.id === hover?.id ? 1.18 : 1)
 
       /**
@@ -522,7 +530,7 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         // A lit edge is the thing being traced, so it also gets weight. At one
         // width the highlight relied on colour alone and thin Cream on Ink is
         // easy to lose against a dense cluster behind it.
-        ctx.lineWidth = (lit ? 1.6 : 0.9) / k
+        ctx.lineWidth = ((lit ? 1.6 : 0.9) * forcesRef.current.linkWidth) / k
         ctx.beginPath()
         ctx.moveTo(l.source.x!, l.source.y!)
         ctx.lineTo(l.target.x!, l.target.y!)
@@ -642,7 +650,7 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         // another label while the node under it had gone to `--accent`.
         ctx.fillStyle = COL.hot
         ctx.font = `${13 / k}px ${css.fontFamily}`
-        ctx.fillText(hover.label, hover.x!, hover.y! - radius(hover) - 6 / k)
+        ctx.fillText(hover.label, hover.x!, hover.y! - nodeR(hover) - 6 / k)
       } else {
         ctx.fillStyle = COL.label
         ctx.font = `${11 / k}px ${css.fontFamily}`
@@ -650,8 +658,8 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         // the whole graph is still in frame; leaves wait until you are actually
         // reading that corner of it.
         for (const n of nodes) {
-          if (radius(n) * k < LABEL_MIN_SCREEN_RADIUS) continue
-          ctx.fillText(n.label, n.x!, n.y! - radius(n) - 4 / k)
+          if (nodeR(n) * k < forcesRef.current.labelAt) continue
+          ctx.fillText(n.label, n.x!, n.y! - nodeR(n) - 4 / k)
         }
       }
       ctx.globalAlpha = 1
@@ -710,7 +718,7 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       let maxY = -Infinity
       for (const n of nodes) {
         if (n.x == null || n.y == null) continue
-        const r = radius(n)
+        const r = nodeR(n)
         minX = Math.min(minX, n.x - r)
         maxX = Math.max(maxX, n.x + r)
         minY = Math.min(minY, n.y - r)
@@ -809,7 +817,7 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       let bestD = Infinity
       for (const n of nodes) {
         const d = Math.hypot(n.x! - p.x, n.y! - p.y)
-        if (d < radius(n) + 6 / k && d < bestD) {
+        if (d < nodeR(n) + 6 / k && d < bestD) {
           best = n
           bestD = d
         }
@@ -1030,7 +1038,7 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       const r = canvas.getBoundingClientRect()
       const p = toGraph(e.clientX - r.left, e.clientY - r.top)
       for (const n of nodes) {
-        if (Math.hypot(n.x! - p.x, n.y! - p.y) < radius(n) + 6 / k) {
+        if (Math.hypot(n.x! - p.x, n.y! - p.y) < nodeR(n) + 6 / k) {
           open(n.id)
           return
         }
@@ -1167,7 +1175,7 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
 
       <div id="graph-forces" popover="auto" className="graph-forces">
         <div className="graph-forces-head">
-          <h2 className="graph-forces-title">Forces</h2>
+          <h2 className="graph-forces-title">Graph</h2>
           <button
             type="button"
             className="graph-forces-reset"
@@ -1178,6 +1186,8 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
             Reset
           </button>
         </div>
+
+        <h3 className="graph-forces-section">Forces</h3>
 
         <Slider
           label="Center force"
@@ -1228,6 +1238,40 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
           Group pull gathers each top-level folder into its own region, named on the
           canvas. Link force stops at {LINK_MAX} — above it the orbit ring measures
           uneven, so that slider only loosens.
+        </p>
+
+        <h3 className="graph-forces-section">Display</h3>
+
+        <Slider
+          label="Node size"
+          value={forces.nodeSize}
+          min={0.4}
+          max={2.5}
+          step={0.05}
+          decimals={2}
+          onChange={(v) => setForce('nodeSize', v)}
+        />
+        <Slider
+          label="Link thickness"
+          value={forces.linkWidth}
+          min={0.25}
+          max={3}
+          step={0.05}
+          decimals={2}
+          onChange={(v) => setForce('linkWidth', v)}
+        />
+        <Slider
+          label="Text fade"
+          value={forces.labelAt}
+          min={0}
+          max={30}
+          step={1}
+          decimals={0}
+          onChange={(v) => setForce('labelAt', v)}
+        />
+        <p className="graph-force-note">
+          Text fade is the size a node reaches before it names itself, so 0 labels
+          everything and 30 labels almost nothing.
         </p>
       </div>
     </div>

@@ -51,8 +51,9 @@ const OFFSET = 24
 const duplicate = (node) => ({
   ...node,
   id: canvasId(),
-  x: node.x + OFFSET,
-  y: node.y + OFFSET,
+  // Rounded, mirroring the view: the spec declares these integer.
+  x: Math.round(node.x + OFFSET),
+  y: Math.round(node.y + OFFSET),
 })
 
 // ------------------------------------------------------------------- format
@@ -117,7 +118,9 @@ test('the view spreads the source node rather than rebuilding it', () => {
   // THE LOAD-BEARING ASSERTION. Picking known fields renders identically and
   // loses everything above.
   assert.match(VIEW, /\.\.\.node,\s*id: canvasId\(\),/, 'the copy is not spread from the source')
-  assert.match(VIEW, /x: node\.x \+ DUPLICATE_OFFSET/, 'the copy is not offset')
+  // Not anchored to `x:` or to the whole expression, so wrapping it in a call —
+  // which is what rounding to the spec's integer type does — is allowed.
+  assert.match(VIEW, /node\.x \+ DUPLICATE_OFFSET/, 'the copy is not offset')
 })
 
 test('the duplicate is pushed onto the parsed doc, and it is the COPY that drags', () => {

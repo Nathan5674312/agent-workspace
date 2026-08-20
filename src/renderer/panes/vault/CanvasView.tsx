@@ -606,8 +606,11 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
             const copy: CanvasNode = {
               ...node,
               id: canvasId(),
-              x: node.x + DUPLICATE_OFFSET,
-              y: node.y + DUPLICATE_OFFSET,
+              // Rounded for the same reason as the drag: the offset is added to
+              // the source's coordinate, so a copy of a card placed before that
+              // fix would otherwise carry its fraction forward forever.
+              x: Math.round(node.x + DUPLICATE_OFFSET),
+              y: Math.round(node.y + DUPLICATE_OFFSET),
             }
             doc.nodes.push(copy)
             repaint()
@@ -637,8 +640,13 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
   const onMove = (e: React.PointerEvent) => {
     if (drag.current) {
       const p = toWorld(e.clientX, e.clientY)
-      drag.current.node.x = p.x - drag.current.dx
-      drag.current.node.y = p.y - drag.current.dy
+      // ROUNDED, because the spec declares x/y integer and `toWorld` divides by
+      // the view scale — which is fractional after any wheel notch and after
+      // `fit()` frames a board — so this wrote seventeen digits of noise into a
+      // file the user diffs in git, and Obsidian rewrote it to an integer on
+      // its next touch, so the two apps took turns rewriting the same card.
+      drag.current.node.x = Math.round(p.x - drag.current.dx)
+      drag.current.node.y = Math.round(p.y - drag.current.dy)
       drag.current.moved = true
       // The card itself moves without React. The re-render is only for the
       // EDGES, which are JSX and read their endpoints from the node geometry —

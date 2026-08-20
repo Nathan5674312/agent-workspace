@@ -954,7 +954,13 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                   aria-label="Card text"
                   onPointerDown={(e) => e.stopPropagation()}
                   onKeyDown={(e) => {
-                    if (e.key === 'Enter' && !e.shiftKey) {
+                    // `isComposing` guards the IME. When typing Japanese,
+                    // Chinese or Korean, Enter ACCEPTS the candidate rather
+                    // than submitting, so without this the card commits
+                    // mid-composition and stores the un-converted romaji as
+                    // its real text. This is the pane's first keyboard-commit,
+                    // so it is the first place that trap exists.
+                    if (e.key === 'Enter' && !e.shiftKey && !e.nativeEvent.isComposing) {
                       e.preventDefault()
                       commitText(n, e.currentTarget.value)
                     } else if (e.key === 'Escape') {

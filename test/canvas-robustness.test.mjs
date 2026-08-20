@@ -83,6 +83,19 @@ test('the editor opens on a string even when the card holds something else', () 
   assert.match(edit, /typeof n\.text === 'string'/, 'the textarea can be handed a non-string')
 })
 
+// ------------------------------------------------------------------- IME
+
+test('Enter does not commit the card while an IME candidate is open', () => {
+  // Typing Japanese, Chinese or Korean, Enter ACCEPTS the candidate — it is not
+  // a submit. Without an isComposing check the card commits mid-composition and
+  // closes, storing the un-converted romaji as the card's real text. This is
+  // the pane's first keyboard-commit, so it is the first place the trap exists;
+  // Editor.tsx commits on a button and never had it.
+  const key = VIEW.slice(VIEW.indexOf('onKeyDown={(e) => {'), VIEW.indexOf('Escape'))
+  assert.ok(key.length > 0, 'the textarea key handler no longer has the shape this test reads')
+  assert.match(key, /isComposing/, 'Enter commits during IME composition')
+})
+
 // ------------------------------------------------- preservation rule
 
 test('the preservation rule is intact: a board still round-trips untouched', () => {

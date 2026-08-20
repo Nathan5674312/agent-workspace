@@ -272,11 +272,34 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
   // ── load ───────────────────────────────────────────────────────
   useEffect(() => {
     let cancelled = false
-    // A different board is a different set of ids, so a selection held across
-    // the switch would highlight nothing and still report a count.
+
+    /**
+     * TEAR DOWN EVERYTHING BELONGING TO THE OLD BOARD FIRST, unconditionally.
+     *
+     * This view is not remounted when you pick a different board — only `path`
+     * changes — so state held here belongs to the previous file until it is
+     * cleared, and the read below is async. Clearing inside one arm of the
+     * branch is too late: the common case, switching from one real board to
+     * another, does not take that arm at all.
+     *
+     * What that window cost while it existed: the old board rendered under the
+     * new board's name, and a drag in it called `persist(doc)` — sending the
+     * OLD board's content to the NEW board's path, held off only by the mtime
+     * guard, which two files produced by a checkout or a sync client can
+     * easily share. And the error page's guard is `error && !doc`, so a board
+     * that failed to parse was not reported at all; the previous board was
+     * shown as if it were the broken one.
+     *
+     * A different board is also a different set of ids, so a selection or an
+     * open editor carried across either matches nothing or, worse, collides
+     * with an id on the new board.
+     */
+    setDoc(null)
+    setMtime(0)
+    setEditing(null)
     setSelected(new Set())
+
     if (!path) {
-      setDoc(null)
       setError(null)
       return
     }

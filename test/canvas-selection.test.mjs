@@ -18,18 +18,12 @@
 import './fixtures/ts-hooks.mjs'
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { readFileSync } from 'node:fs'
+import { readSource, readRaw } from './fixtures/source.mjs'
 
 const { parseCanvas, serializeCanvas } = await import('../src/shared/canvas.ts')
 
-const VIEW = readFileSync(
-  new URL('../src/renderer/panes/vault/CanvasView.tsx', import.meta.url),
-  'utf8',
-)
-const CSS = readFileSync(
-  new URL('../src/renderer/panes/vault/canvas.css', import.meta.url),
-  'utf8',
-)
+const VIEW = readSource('CanvasView.tsx')
+const CSS = readRaw('canvas.css')
 
 const BOARD = {
   nodes: [

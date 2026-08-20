@@ -19,14 +19,11 @@
 import './fixtures/ts-hooks.mjs'
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { readFileSync } from 'node:fs'
+import { readSource } from './fixtures/source.mjs'
 
 const { parseCanvas, serializeCanvas, edgeAnchor } = await import('../src/shared/canvas.ts')
 
-const VIEW = readFileSync(
-  new URL('../src/renderer/panes/vault/CanvasView.tsx', import.meta.url),
-  'utf8',
-)
+const VIEW = readSource('CanvasView.tsx')
 
 /** Two cards SIDE BY SIDE, so the derived route is horizontal. */
 const A = { id: 'a', type: 'text', text: 'a', x: 0, y: 0, width: 100, height: 100 }

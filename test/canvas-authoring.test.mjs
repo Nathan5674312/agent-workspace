@@ -22,16 +22,13 @@
 import './fixtures/ts-hooks.mjs'
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { readFileSync } from 'node:fs'
+import { readSource } from './fixtures/source.mjs'
 
 const { parseCanvas, serializeCanvas, canvasId, NEW_TEXT_SIZE } = await import(
   '../src/shared/canvas.ts'
 )
 
-const VIEW = readFileSync(
-  new URL('../src/renderer/panes/vault/CanvasView.tsx', import.meta.url),
-  'utf8',
-)
+const VIEW = readSource('CanvasView.tsx')
 
 /** A board authored in Obsidian, using parts of the spec this view never renders. */
 const AUTHORED = {

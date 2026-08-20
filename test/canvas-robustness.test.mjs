@@ -11,14 +11,11 @@
 import './fixtures/ts-hooks.mjs'
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
-import { readFileSync } from 'node:fs'
+import { readSource } from './fixtures/source.mjs'
 
 const { parseCanvas, serializeCanvas } = await import('../src/shared/canvas.ts')
 
-const VIEW = readFileSync(
-  new URL('../src/renderer/panes/vault/CanvasView.tsx', import.meta.url),
-  'utf8',
-)
+const VIEW = readSource('CanvasView.tsx')
 
 /** The file card's click guard, up to the call it protects. */
 const fileCardGuard = () => {

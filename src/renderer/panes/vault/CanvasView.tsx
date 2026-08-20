@@ -6,6 +6,8 @@ import {
   emptyCanvas,
   fileNodeTitle,
   edgeAnchor,
+  canvasId,
+  NEW_TEXT_SIZE,
   type CanvasDoc,
   type CanvasNode,
 } from '../../../shared/canvas.js'
@@ -83,6 +85,13 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
    *  mean copying nodes, which is exactly what the preservation rule forbids. */
   const [tick, setTick] = useState(0)
   const repaint = useCallback(() => setTick((t) => t + 1), [])
+
+  /** Connect mode: a press picks edge endpoints instead of dragging a card. */
+  const [connect, setConnect] = useState(false)
+  /** The first endpoint picked, while the second is still being chosen. */
+  const [linkFrom, setLinkFrom] = useState<string | null>(null)
+  /** The text card currently open for editing, by id. */
+  const [editing, setEditing] = useState<string | null>(null)
 
   const wrapRef = useRef<HTMLDivElement>(null)
   const worldRef = useRef<HTMLDivElement>(null)
@@ -261,6 +270,64 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     return { x: (clientX - r.left - tx) / k, y: (clientY - r.top - ty) / k }
   }
 
+  // ── authoring ──────────────────────────────────────────────────
+  /**
+   * New cards and edges are PUSHED onto the doc `parseCanvas` returned. They are
+   * never added by rebuilding the doc, for the same reason the drag writes
+   * through it: a board carrying groups, colours, edge labels and fields from a
+   * later spec version must come back out with all of them, and reconstructing
+   * the document to add one card is exactly how that gets silently dropped.
+   *
+   * `canvasId()` and `NEW_TEXT_SIZE` come from shared/canvas.ts rather than
+   * being invented here, so a card made in this app is shaped like one Obsidian
+   * made — same id form, same default size.
+   */
+  const addCard = () => {
+    if (!doc || !wrapRef.current) return
+    // Centre of the viewport, so a new card lands where the user is looking
+    // rather than at the world origin they may have panned far away from.
+    const r = wrapRef.current.getBoundingClientRect()
+    const p = toWorld(r.left + r.width / 2, r.top + r.height / 2)
+    const node: CanvasNode = {
+      id: canvasId(),
+      type: 'text',
+      text: '',
+      x: Math.round(p.x - NEW_TEXT_SIZE.width / 2),
+      y: Math.round(p.y - NEW_TEXT_SIZE.height / 2),
+      ...NEW_TEXT_SIZE,
+    }
+    doc.nodes.push(node)
+    // Straight into editing: an empty card with no cursor in it gives the user
+    // nothing to act on and reads as a card that failed to be created.
+    setEditing(node.id)
+    repaint()
+    void persist(doc)
+  }
+
+  const addEdge = (fromNode: string, toNode: string) => {
+    if (!doc) return
+    // The same ordered pair twice is a no-op rather than a second identical line
+    // stacked invisibly on the first.
+    if (doc.edges.some((e) => e.fromNode === fromNode && e.toNode === toNode)) return
+    // `fromSide`/`toSide` are deliberately omitted: the spec makes them optional
+    // and edgeAnchor already derives the nearest sides from the geometry, so
+    // writing them would freeze a routing decision that should follow the cards.
+    doc.edges.push({ id: canvasId(), fromNode, toNode })
+    repaint()
+    void persist(doc)
+  }
+
+  const commitText = (node: CanvasNode, value: string) => {
+    setEditing(null)
+    // A card opened and closed without a change must not write the file: save()
+    // takes a backup before every overwrite, so a no-op commit would fill
+    // .backups/ with identical copies.
+    if (!doc || (node.text ?? '') === value) return
+    node.text = value
+    repaint()
+    void persist(doc)
+  }
+
   const onBackgroundDown = (e: React.PointerEvent) => {
     // Only a press on the board itself pans. A press that started on a card is
     // that card's drag, and it stops propagation below.
@@ -273,6 +340,24 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     if (e.button !== 0) return
     // Without this the board pans at the same time as the card moves.
     e.stopPropagation()
+    /**
+     * In connect mode a press picks an endpoint and never starts a drag.
+     *
+     * Handled on pointerdown rather than click so it shares the one path a card
+     * press already takes — a click handler would run after this and have to
+     * undo a drag that had already begun.
+     */
+    if (connect) {
+      if (!linkFrom) {
+        setLinkFrom(node.id)
+        return
+      }
+      // A card connected to itself is a line with no meaning, so the second
+      // press just cancels the pending pick.
+      if (linkFrom !== node.id) addEdge(linkFrom, node.id)
+      setLinkFrom(null)
+      return
+    }
     const p = toWorld(e.clientX, e.clientY)
     // The grab offset is kept so the card does not jump its centre to the
     // cursor on the first move — the same correction GraphView documents.
@@ -368,6 +453,30 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
 
   return (
     <div className="canvas-view">
+      <div className="canvas-toolbar">
+        <button type="button" className="canvas-tool" onClick={addCard}>
+          + Card
+        </button>
+        <button
+          type="button"
+          className="canvas-tool"
+          aria-pressed={connect}
+          onClick={() => {
+            setConnect((c) => !c)
+            // Leaving the mode drops a half-finished pick, or the next entry
+            // would start with an endpoint the user has forgotten choosing.
+            setLinkFrom(null)
+          }}
+        >
+          Connect
+        </button>
+        {connect && (
+          <span className="canvas-tool-hint">
+            {linkFrom ? 'Click the card to connect to.' : 'Click the first card.'}
+          </span>
+        )}
+      </div>
+
       <div
         className="canvas-surface"
         ref={wrapRef}
@@ -377,6 +486,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
         onPointerCancel={onUp}
         onWheel={onWheel}
         data-tick={tick}
+        data-connect={connect || undefined}
       >
         {/* The transform is written by applyView(), never rendered. */}
         <div className="canvas-world" ref={worldRef}>
@@ -418,6 +528,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                 else nodeEls.current.delete(n.id)
               }}
               onPointerDown={(e) => onNodeDown(e, n)}
+              data-linking={linkFrom === n.id || undefined}
             >
               {n.type === 'file' && n.file ? (
                 <button
@@ -427,7 +538,9 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                   onClick={() => {
                     // A drag that ends on the card also fires a click. Without
                     // this, rearranging a board opens every card you touched.
-                    if (!draggedLast.current) onOpenNote(n.file!)
+                    // Connect mode is excluded for the same reason: picking a
+                    // file card as an endpoint must not also leave the board.
+                    if (!connect && !draggedLast.current) onOpenNote(n.file!)
                   }}
                 >
                   <FileText size={13} aria-hidden="true" />
@@ -443,10 +556,53 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                 </div>
               ) : n.type === 'group' ? (
                 <span className="canvas-group-label">{n.label ?? ''}</span>
+              ) : editing === n.id ? (
+                /**
+                 * Editing is a plain <textarea>, the same control the note
+                 * Editor uses. It stops its own pointer events so selecting
+                 * text does not drag the card out from under the cursor.
+                 *
+                 * COMMIT IS ENTER, NOT BLUR, and that is a rule rather than a
+                 * preference: review-s2-vault-pane forbids `onBlur=` across
+                 * this whole pane, because an implicit save is how an edit
+                 * nobody confirmed reaches disk. Enter-to-submit is the gesture
+                 * TerminalView already uses for its input, so this is the
+                 * pane's existing convention rather than a new one. Shift+Enter
+                 * stays the newline, so a multi-line card is still writable.
+                 */
+                <textarea
+                  className="canvas-text-edit"
+                  defaultValue={n.text ?? ''}
+                  autoFocus
+                  aria-label="Card text"
+                  onPointerDown={(e) => e.stopPropagation()}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter' && !e.shiftKey) {
+                      e.preventDefault()
+                      commitText(n, e.currentTarget.value)
+                    } else if (e.key === 'Escape') {
+                      // Discards the edit. Stopped so nothing behind the board
+                      // acts on the same Escape, as the dialogs here do.
+                      e.stopPropagation()
+                      setEditing(null)
+                    }
+                  }}
+                />
               ) : (
                 // Text cards show their markdown as written. Rendering it is
                 // the Editor's job and it does not live here yet.
-                <div className="canvas-text">{n.text ?? ''}</div>
+                <div
+                  className="canvas-text"
+                  onDoubleClick={() => {
+                    // Only `text` nodes are editable. This branch is also the
+                    // fallback for a node type from a later spec version, and
+                    // turning one of those into an edited text card would
+                    // destroy exactly what the preservation rule protects.
+                    if (n.type === 'text') setEditing(n.id)
+                  }}
+                >
+                  {n.text ?? ''}
+                </div>
               )}
             </div>
           ))}

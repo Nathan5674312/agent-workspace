@@ -170,6 +170,87 @@
   white-space: nowrap;
 }
 
+/* ── authoring ──────────────────────────────────────────────── */
+
+/* The tool strip. Mirrors .canvas-info at the other end of the view so the
+   board is bracketed by the same material top and bottom. */
+.canvas-toolbar {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+  padding: var(--space-2) var(--space-4);
+  border-bottom: 1px solid var(--separator);
+  background: var(--material-regular);
+  backdrop-filter: var(--blur-regular);
+  -webkit-backdrop-filter: var(--blur-regular);
+}
+
+/* Same shape as .canvas-list-new, which is the app's existing small button. */
+.canvas-tool {
+  padding: var(--space-1) var(--space-3);
+  border: 1px solid var(--separator-opaque);
+  border-radius: var(--radius-sm);
+  background: var(--material-light);
+  color: var(--label-secondary);
+  font: inherit;
+  font-size: var(--text-xs);
+}
+.canvas-tool:hover {
+  background: var(--fill-hover);
+  color: var(--label);
+}
+.canvas-tool:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 1px;
+}
+/* A held mode has to look held, or the board silently stops dragging and reads
+   as broken. aria-pressed carries it, so the state is one thing, not two. */
+.canvas-tool[aria-pressed='true'] {
+  background: var(--fill-selected);
+  color: var(--accent);
+  border-color: var(--accent);
+}
+.canvas-tool-hint {
+  color: var(--label-tertiary);
+  font-size: var(--text-xs);
+}
+
+/* Connect mode retargets the whole surface: nothing here drags, so the grab
+   cursor would be a promise the board does not keep. */
+.canvas-surface[data-connect],
+.canvas-surface[data-connect] .canvas-node {
+  cursor: crosshair;
+}
+.canvas-surface[data-connect]:active {
+  cursor: crosshair;
+}
+/* The first endpoint, while the second is being chosen. */
+.canvas-node[data-linking] {
+  border-color: var(--accent);
+}
+
+/* The editor for a text card. Fills its card exactly so the text does not
+   reflow at the moment editing starts or ends. */
+.canvas-text-edit {
+  width: 100%;
+  height: 100%;
+  padding: var(--space-3) var(--space-4);
+  border: none;
+  background: transparent;
+  color: var(--label);
+  font: inherit;
+  line-height: 1.45;
+  resize: none;
+  /* The surface sets user-select: none so a pan does not select the board.
+     A textarea is the one place inside it that must select normally. */
+  user-select: text;
+  cursor: text;
+}
+.canvas-text-edit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
 /* ── chrome ─────────────────────────────────────────────────── */
 
 /* Same material and placement as the graph's info strip, so the two views read

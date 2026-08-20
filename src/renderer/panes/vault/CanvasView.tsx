@@ -46,6 +46,15 @@ const K_MAX = 3
 const FIT_PAD = 64
 
 /**
+ * How far a duplicate lands from its original, in world units.
+ *
+ * Non-zero so an Alt+press that never moves still produces a visible second
+ * card rather than one hidden exactly behind the first, which is
+ * indistinguishable from the gesture having done nothing.
+ */
+const DUPLICATE_OFFSET = 24
+
+/**
  * Half-size of the edge layer, in canvas units.
  *
  * The edges were first drawn in a `width="0" height="0"` SVG with
@@ -356,7 +365,14 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
   /** Pointer position and view offset at the moment a background pan began. */
   const pan = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
   /** The card being dragged, and where inside it the grab landed, in world units. */
-  const drag = useRef<{ node: CanvasNode; dx: number; dy: number; moved: boolean } | null>(null)
+  const drag = useRef<{
+    node: CanvasNode
+    dx: number
+    dy: number
+    moved: boolean
+    /** True when this gesture created the node it is dragging (Alt+drag). */
+    created: boolean
+  } | null>(null)
 
   const toWorld = (clientX: number, clientY: number) => {
     const r = wrapRef.current!.getBoundingClientRect()
@@ -453,9 +469,50 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       return
     }
     const p = toWorld(e.clientX, e.clientY)
+
+    /**
+     * Alt+drag duplicates, which is Obsidian's own gesture for this.
+     *
+     * THE SPREAD IS THE FEATURE. `{ ...node }` carries every own key across —
+     * colour, `subpath`, a group's `background`, and any field from a spec
+     * version this app has never heard of. Building the copy from the fields
+     * this view knows about would quietly produce a card that is a downgraded
+     * version of the one it was copied from, and the loss would save
+     * immediately. This is the preservation rule applied to duplication.
+     *
+     * Only the three things that MUST differ are overridden: a fresh id,
+     * because two nodes sharing one would make every edge ambiguous, and the
+     * offset position.
+     *
+     * The original is never touched — the spread reads it and writes a new
+     * object, and it is the COPY that gets dragged.
+     */
+    const target =
+      e.altKey && doc
+        ? (() => {
+            const copy: CanvasNode = {
+              ...node,
+              id: canvasId(),
+              x: node.x + DUPLICATE_OFFSET,
+              y: node.y + DUPLICATE_OFFSET,
+            }
+            doc.nodes.push(copy)
+            repaint()
+            return copy
+          })()
+        : node
+
     // The grab offset is kept so the card does not jump its centre to the
     // cursor on the first move — the same correction GraphView documents.
-    drag.current = { node, dx: p.x - node.x, dy: p.y - node.y, moved: false }
+    // Measured against the TARGET, so a duplicate keeps its offset from the
+    // pointer rather than snapping back onto the original.
+    drag.current = {
+      node: target,
+      dx: p.x - target.x,
+      dy: p.y - target.y,
+      moved: false,
+      created: target !== node,
+    }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
   }
 
@@ -498,7 +555,10 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     // frame, and writing the file 60 times a second would take a backup copy
     // each time (save() backs up before overwrite) and fill .backups/ with a
     // hundred snapshots of one gesture.
-    if (drag.current?.moved && doc) void persist(doc)
+    // `created` as well as `moved`: an Alt+press that never moved still added a
+    // card to the doc, and leaving it unsaved would show a duplicate on screen
+    // that vanishes on reload.
+    if ((drag.current?.moved || drag.current?.created) && doc) void persist(doc)
     drag.current = null
     pan.current = null
   }

@@ -18,10 +18,37 @@
   min-width: 0;
 }
 
+/**
+ * THE SLOT IS THE BOX.
+ *
+ * It used to be an invisible wrapper: `.vault-tab` painted the background and
+ * the rounded corner, and the close x -- a SIBLING, because a <button> inside a
+ * <button> is invalid HTML -- was dragged back over the tab's right padding
+ * with a negative margin. The numbers could not work. The x is 16px wide
+ * (12px glyph + 2px padding a side) and the pull was --space-3, 8px, so eight
+ * of those pixels always hung past the tab's own rounded edge. On the active
+ * tab you could see it: the x sat half on the fill and half off it.
+ *
+ * Painting the SLOT instead makes the x inside the box by construction, at any
+ * icon size, with no negative margin to keep in sync with a padding value in
+ * another file.
+ */
 .vault-tab-slot {
   display: inline-flex;
   align-items: center;
   min-width: 0;
+  border-radius: var(--radius-md);
+  padding-inline-end: var(--space-2);
+}
+
+/* `:has()` rather than a second class in the TSX, so `activeTabId` keeps ONE
+   consumer and the active tab cannot be styled active while reading inactive. */
+.vault-tab-slot:has(.vault-tab--active) {
+  background: var(--fill-selected);
+}
+
+.vault-tab-slot:has(.vault-tab:active) {
+  background: var(--fill-active);
 }
 
 /* The tab's own label truncates, the close button never does — a long note
@@ -30,16 +57,18 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  /* The label's own right padding becomes the gap before the x, so the two are
+     spaced by one value instead of a padding fighting a negative margin. */
+  padding-inline-end: var(--space-2);
 }
 
-/* Pulled back under the tab's own right padding so the × reads as part of the
-   tab rather than as a separate control sitting beside it. */
+/* No negative margin any more: the slot above is the box, so the x is already
+   inside it and simply sits at the end of the row. */
 .vault-tab-close {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   flex: none;
-  margin-inline-start: calc(-1 * var(--space-3));
   padding: var(--space-1);
   background: transparent;
   border: none;

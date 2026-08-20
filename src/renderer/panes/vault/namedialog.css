@@ -1,0 +1,153 @@
+/**
+ * Name-entry modal. Imported by NameDialog.tsx, not by main.tsx — the styles
+ * arrive with the component instead of joining the app-wide sheet.
+ *
+ * Deliberately a near-copy of help.css rather than a shared sheet the dialogs
+ * all reach into, for the reason help.css gives about settings.css: two modals
+ * is not a design system, and the moment one is a file several edit, a change
+ * to Help starts moving this.
+ *
+ * Values come from tokens.css only, except the backdrop scrim, which is Ink at
+ * alpha for the reason settings.css gives — a grey scrim on a warm ground reads
+ * as a dead pixel layer.
+ */
+
+/* The <dialog> itself: the full-viewport hit area the backdrop-dismiss rule
+   needs, not the panel. No z-index — showModal() puts this in the TOP LAYER. */
+.name-overlay {
+  position: fixed;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  max-width: none;
+  max-height: none;
+  margin: 0;
+  padding: var(--space-6);
+  border: 0;
+  background: transparent;
+}
+
+/* `display`, not only the flex properties: the UA sheet closes a dialog with
+   `display: none`, and an unconditional `display: flex` would pin it open. */
+.name-overlay[open] {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.name-overlay::backdrop {
+  background: rgba(22, 12, 8, 0.6);
+  backdrop-filter: var(--blur-regular);
+  -webkit-backdrop-filter: var(--blur-regular);
+}
+
+.name-panel {
+  width: min(420px, 100%);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  padding: var(--space-6);
+
+  background: var(--bg-elevated);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-xl);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 var(--edge-highlight);
+  color: var(--label);
+  font-family: var(--font-ui);
+}
+
+.name-title {
+  margin: 0;
+  font-size: var(--text-lg);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
+  line-height: var(--leading-title);
+  color: var(--label);
+}
+
+.name-label {
+  font-size: var(--text-base);
+  color: var(--label-secondary);
+  line-height: var(--leading-body);
+}
+
+.name-input {
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-sunken);
+  border: 1px solid var(--separator-opaque);
+  border-radius: var(--radius-md);
+  color: var(--label);
+  font-family: var(--font-ui);
+  font-size: var(--text-md);
+}
+
+.name-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -1px;
+}
+
+/* Danger is a PROPOSED token (tokens.css §5 leaves semantic colour open), so
+   the message does not lean on hue alone to be readable — it is legible as
+   text against the panel whatever that value settles at. */
+.name-error {
+  margin: 0;
+  min-height: var(--leading-body);
+  font-size: var(--text-sm);
+  line-height: var(--leading-body);
+  color: var(--danger);
+  white-space: pre-wrap;
+}
+
+.name-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: var(--space-3);
+  margin-top: var(--space-2);
+}
+
+.name-cancel,
+.name-confirm {
+  padding: var(--space-3) var(--space-5);
+  border-radius: var(--radius-md);
+  border: 1px solid var(--separator-opaque);
+  font-family: var(--font-ui);
+  font-size: var(--text-base);
+  font-weight: var(--weight-medium);
+  cursor: default;
+}
+
+.name-cancel {
+  background: transparent;
+  color: var(--label-secondary);
+}
+
+.name-cancel:hover {
+  background: var(--fill-hover);
+  color: var(--label);
+}
+
+/* The accent is the brightest thing in the palette rather than a hue, so the
+   primary action reads by luminance — and its ink is Ink, per --label-on-accent. */
+.name-confirm {
+  background: var(--accent);
+  border-color: transparent;
+  color: var(--label-on-accent);
+}
+
+.name-confirm:hover:not(:disabled) {
+  background: var(--accent-pressed);
+}
+
+/* Disabled says "not yet", so it recedes rather than vanishing. */
+.name-confirm:disabled {
+  background: var(--material-light);
+  color: var(--label-quaternary);
+}
+
+@media (prefers-reduced-transparency: reduce) {
+  .name-overlay::backdrop {
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+    background: var(--bg-app);
+  }
+}

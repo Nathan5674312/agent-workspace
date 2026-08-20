@@ -405,9 +405,15 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   -webkit-backdrop-filter: var(--blur-regular);
   border-bottom: 1px solid var(--separator);
 }
-.vault-tab { padding: var(--space-2) var(--space-4); border-radius: var(--radius-md); color: var(--label-tertiary); }
-.vault-tab:active { transform: none; background: var(--fill-active); }
-.vault-tab--active { color: var(--label); background: var(--fill-selected); }
+/* The BOX around a tab is `.vault-tab-slot` in tabbar.css, not this button.
+   The close x is a SIBLING of the label (a <button> inside a <button> is
+   invalid HTML), so a box painted by this button necessarily excludes it -
+   which is what shipped: the x is 16px wide and was pulled back only 8px,
+   leaving half of it hanging past the tab's own rounded edge. The label keeps
+   its padding and its colour; the slot does the painting. */
+.vault-tab { padding: var(--space-2) var(--space-4); color: var(--label-tertiary); background: transparent; }
+.vault-tab:active { transform: none; }
+.vault-tab--active { color: var(--label); }
 
 .vault-note-header {
   display: flex; align-items: center; gap: var(--space-3);

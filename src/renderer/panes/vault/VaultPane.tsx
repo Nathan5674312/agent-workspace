@@ -56,6 +56,7 @@ const VIEW_LABEL: Record<MainView, string> = {
 import { ConflictDialog } from './ConflictDialog.js'
 import { SettingsDialog } from './SettingsDialog.js'
 import { HelpDialog } from './HelpDialog.js'
+import { NameDialog } from './NameDialog.js'
 import { ArtCredit } from './ArtCredit.js'
 import {
   collectFolderPaths,
@@ -128,6 +129,7 @@ export function VaultPane(): React.ReactElement {
   const [conflictOpen, setConflictOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
+  const [newFolderOpen, setNewFolderOpen] = useState(false)
   const [conflictData, setConflictData] = useState<{
     diskMtime: number
     diskText: string
@@ -483,35 +485,27 @@ export function VaultPane(): React.ReactElement {
   /**
    * Create a folder and reveal it.
    *
-   * `window.prompt` rather than a dialog: this file already asks with
-   * `window.confirm` on every dirty-buffer guard, so a native prompt is an
-   * established idiom here and not a new one. Cancel returns null, which is a
-   * decision and not an error — nothing is created and nothing is said.
+   * THIS USED TO CALL `window.prompt` AND DO NOTHING AT ALL.
+   *
+   * Electron does not implement prompt. It is on `window`, it is a function, so
+   * nothing type-checks or greps as wrong — and it throws `prompt() is not
+   * supported.` the instant it is called. The old comment here reasoned that a
+   * native prompt was an established idiom because this file already uses
+   * `window.confirm`; measured on the Electron 33 binary this app ships,
+   * `confirm` opens a real modal and blocks, and `prompt` throws. The throw
+   * landed on the handler's first line, ahead of its own try/catch, and the
+   * caller invokes it as `void handleNewFolder()` — so the rejection went
+   * nowhere and "+ Folder" was silently inert.
+   *
+   * The name now comes from <NameDialog>, and this half only creates.
    *
    * CONTAINMENT is not checked here and must not be: the name crosses IPC from
    * a renderer that is untrusted by design, so that check lives in
    * `vault.mkdir` where no caller can skip it, and its refusal lands in the
    * banner below.
-   *
-   * What IS checked here is a different thing — that the input is a NAME. The
-   * prompt asks for one, and a name with a separator in it quietly becomes a
-   * path: typed while `Notes/Untitled.md` was open, `../Escaped` joined to
-   * `Notes` and resolved to `Escaped` at the vault ROOT. Containment held, so
-   * main was right to allow it; it is this control that promised something
-   * narrower than it delivered. Found by driving the real app, not by reading.
    */
-  const handleNewFolder = async () => {
-    const typed = window.prompt('New folder name')
-    if (typed === null) return
-    const name = typed.trim()
-    // Nothing typed is a decision, not an error. Saying nothing is the answer.
-    if (!name) return
-    if (!isPlainName(name)) {
-      setOpenError(
-        `"${name}" is a path, not a folder name. New folders are created beside the open note; type a plain name.`,
-      )
-      return
-    }
+  const createFolder = async (name: string) => {
+    setNewFolderOpen(false)
     const parent = targetFolder()
     const path = parent ? `${parent}/${name}` : name
     try {
@@ -522,6 +516,22 @@ export function VaultPane(): React.ReactElement {
       setOpenError(`Could not create ${path}: ${e instanceof Error ? e.message : String(e)}`)
     }
   }
+
+  /**
+   * That the input is a NAME is a different check from containment, and it
+   * belongs in front of the user rather than behind the create.
+   *
+   * A name with a separator in it quietly becomes a path: typed while
+   * `Notes/Untitled.md` was open, `../Escaped` joined to `Notes` and resolved to
+   * `Escaped` at the vault ROOT. Containment held, so main was right to allow
+   * it; it is this control that promised something narrower than it delivered.
+   * Found by driving the real app, not by reading. It now refuses while the
+   * name is still being typed, instead of in a banner after the fact.
+   */
+  const folderNameError = (name: string): string | null =>
+    isPlainName(name)
+      ? null
+      : `"${name}" is a path, not a folder name. New folders are created beside the open note; type a plain name.`
 
   /**
    * A new tab shows nothing until a note is opened into it, which is what makes
@@ -679,7 +689,7 @@ export function VaultPane(): React.ReactElement {
             <>
               <ExplorerHeader
                 onNewNote={() => void handleNewNote()}
-                onNewFolder={() => void handleNewFolder()}
+                onNewFolder={() => setNewFolderOpen(true)}
                 onCollapse={handleCollapseAll}
                 onExpand={handleExpandAll}
                 sort={sort}
@@ -778,6 +788,22 @@ export function VaultPane(): React.ReactElement {
           showModal() dialog in the top layer, and this one opening under it
           changes nothing about which must be answered first. */}
       <HelpDialog isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
+
+      {/* Replaces `window.prompt`, which throws in Electron. See createFolder. */}
+      <NameDialog
+        isOpen={newFolderOpen}
+        title="New folder"
+        label={
+          targetFolder()
+            ? `Created inside ${targetFolder()}`
+            : 'Created at the top of the vault'
+        }
+        placeholder="Folder name"
+        confirmLabel="Create folder"
+        validate={folderNameError}
+        onSubmit={(name) => void createFolder(name)}
+        onCancel={() => setNewFolderOpen(false)}
+      />
     </div>
   )
 }

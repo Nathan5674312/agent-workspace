@@ -78,10 +78,24 @@ test('selecting cards changes nothing about the file', () => {
   const text = `${JSON.stringify(BOARD, null, 2)}\n`
   const doc = parseCanvas(text)
 
+  // Selection is driven off the REAL nodes in the doc, not off a standalone
+  // list of ids. The previous version of this test ran the replica over a Set
+  // built from string literals and never touched `doc` at all, so it was a
+  // plain round-trip test wearing a selection test's name: it would have passed
+  // unchanged against a view that wrote `selected: true` onto every node.
+  const keysBefore = doc.nodes.map((n) => Object.keys(n).join(','))
   let s = new Set()
-  for (const id of ['a', 'b', 'a', 'b']) s = select(s, id, true)
-  assert.equal(s.size, 0, 'the fixture did not actually exercise selection')
+  for (const n of doc.nodes) s = select(s, n.id, true)
+  assert.equal(s.size, doc.nodes.length, 'the fixture did not select the real nodes')
+  for (const n of doc.nodes) s = select(s, n.id, true)
+  assert.equal(s.size, 0, 'the fixture did not exercise deselection')
 
+  // No node may have gained, lost or reordered a key.
+  assert.deepEqual(
+    doc.nodes.map((n) => Object.keys(n).join(',')),
+    keysBefore,
+    'selecting a card altered the node object',
+  )
   assert.equal(serializeCanvas(doc), text, 'selection reached the file')
 })
 
@@ -150,6 +164,13 @@ test('selection is an outline so it cannot be mistaken for a card colour', () =>
 test('selection did not smuggle in a removal path', () => {
   // Set.delete removes an id from a highlight. nodes.splice removes a card from
   // someone's board. Removal is still blocked on Nathan.
-  assert.doesNotMatch(VIEW, /nodes\.splice\(|edges\.splice\(/, 'the view grew a removal path')
-  assert.doesNotMatch(VIEW, /nodes\.filter\(|edges\.filter\(/, 'the view grew a removal path')
+  // Narrowed to what actually removes from the DOCUMENT. The previous form
+  // banned any `.filter(` on nodes or edges, which is ordinary read-only code —
+  // culling off-screen cards, counting the edges touching one — and would have
+  // false-positived on z-order, the next item in the backlog, since reordering
+  // is a splice. A ban that fires on correct code teaches people to delete it.
+  assert.doesNotMatch(VIEW, /doc\.nodes\.splice\(/, 'a card can be removed from the document')
+  assert.doesNotMatch(VIEW, /doc\.edges\.splice\(/, 'an edge can be removed from the document')
+  assert.doesNotMatch(VIEW, /doc\.nodes\s*=\s/, 'the node list can be replaced wholesale')
+  assert.doesNotMatch(VIEW, /doc\.edges\s*=\s/, 'the edge list can be replaced wholesale')
 })

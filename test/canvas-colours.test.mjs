@@ -58,7 +58,16 @@ test('a preset resolves to a variable and a hex passes through as itself', () =>
     /\/\^\[1-6\]\$\/\.test\(color\)\) return `var\(--canvas-color-\$\{color\}\)`/,
     'presets do not resolve to a palette variable',
   )
-  assert.match(VIEW, /return color\b/, 'a hex colour is not passed through unchanged')
+  // Pins the hex TEST and its return together. `/return color\b/` alone never
+  // touched the hex branch: delete the whole `/^#.../` check and it still
+  // passed, as long as some function somewhere returned a variable called
+  // `color`. Which is exactly the branch whose absence would silently replace a
+  // user's chosen colour with a palette approximation.
+  assert.match(
+    VIEW,
+    /\/\^#\[0-9a-f\]\{3,8\}\$\/i\.test\(color\)\)\s*return color\b/,
+    'a hex colour is not passed through unchanged',
+  )
 })
 
 test('no colour means the property is REMOVED, not blanked', () => {

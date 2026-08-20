@@ -152,7 +152,23 @@ test('an Alt press on a file card duplicates WITHOUT also opening the note', () 
 test('no delete or removal affordance came along with it', () => {
   // Duplication is additive and inside the green light. Removal is not, and is
   // still blocked on Nathan pending an undo or a confirm.
-  assert.doesNotMatch(VIEW, /\.splice\(/, 'the view grew a removal path')
-  assert.doesNotMatch(VIEW, /nodes\.filter\(/, 'the view grew a node removal path')
-  assert.doesNotMatch(VIEW, /edges\.filter\(/, 'the view grew an edge removal path')
+  // Narrowed to what actually removes from the DOCUMENT — see the matching
+  // note in canvas-selection. A bare `.splice(` ban would fire on z-order, the
+  // next backlog item, because reordering nodes is a splice and has nothing to
+  // do with deletion.
+  assert.doesNotMatch(VIEW, /doc\.nodes\.splice\(/, 'a card can be removed from the document')
+  assert.doesNotMatch(VIEW, /doc\.edges\.splice\(/, 'an edge can be removed from the document')
+  assert.doesNotMatch(VIEW, /doc\.nodes\s*=\s/, 'the node list can be replaced wholesale')
+  assert.doesNotMatch(VIEW, /doc\.edges\s*=\s/, 'the edge list can be replaced wholesale')
+})
+
+test('the duplicate offset is a real distance, not zero', () => {
+  // Nothing pinned the VALUE. Set DUPLICATE_OFFSET to 0 and every assertion
+  // still passed, reintroducing the exact failure its own comment describes:
+  // a copy hidden precisely behind its original, indistinguishable from the
+  // gesture having done nothing.
+  const decl = VIEW.match(/const DUPLICATE_OFFSET = (-?\d+)/)
+  assert.ok(decl, 'DUPLICATE_OFFSET is no longer a plain numeric constant')
+  assert.ok(Math.abs(Number(decl[1])) >= 1, 'a duplicate lands exactly on top of its original')
+  assert.equal(Number(decl[1]), OFFSET, 'the local replica has drifted from the view')
 })

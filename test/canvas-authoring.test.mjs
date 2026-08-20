@@ -68,7 +68,16 @@ test('a new card leaves every authored field on the board untouched', () => {
 
 test('a new card is a valid text node that parses back', () => {
   const doc = parseCanvas(JSON.stringify(AUTHORED))
-  const card = newCard(500, 300)
+  // A DELIBERATELY FRACTIONAL centre. Every input here used to be a whole
+  // number, so `Math.round` was invisible to the assertions below and they
+  // passed with it deleted — which is how a fractional coordinate reached the
+  // file from the drag path for as long as it did. The viewport centre is a
+  // float in practice: it comes from a getBoundingClientRect divided by the
+  // view scale.
+  const cx = 500.4
+  const cy = 300.6
+  assert.ok(!Number.isInteger(cx - NEW_TEXT_SIZE.width / 2), 'the fixture cannot see rounding')
+  const card = newCard(cx, cy)
   doc.nodes.push(card)
 
   // Round-tripping through parse is the real check: parseCanvas refuses a node
@@ -82,8 +91,10 @@ test('a new card is a valid text node that parses back', () => {
   assert.equal(found.height, NEW_TEXT_SIZE.height)
   // Centred on the point, not placed at it: a card that appeared with its
   // corner under the cursor would sit off-centre in the viewport it was made in.
-  assert.equal(found.x, 500 - NEW_TEXT_SIZE.width / 2)
-  assert.equal(found.y, 300 - NEW_TEXT_SIZE.height / 2)
+  // And ROUNDED, because the spec declares x/y integer.
+  assert.equal(found.x, Math.round(500.4 - NEW_TEXT_SIZE.width / 2))
+  assert.equal(found.y, Math.round(300.6 - NEW_TEXT_SIZE.height / 2))
+  assert.ok(Number.isInteger(found.x) && Number.isInteger(found.y), 'a new card lands on a float')
 })
 
 test('ids are unique and shaped like the ones Obsidian writes', () => {
@@ -119,8 +130,15 @@ test('the view pushes onto the parsed doc rather than rebuilding it', () => {
   // Mutation through the doc is the whole preservation rule. `setDoc({...doc})`
   // or a `.map` over nodes here would pass every format test above and still
   // lose a user's groups on the first card.
-  assert.match(VIEW, /doc\.nodes\.push\(/, 'addCard does not push onto doc.nodes')
-  assert.match(VIEW, /doc\.edges\.push\(/, 'addEdge does not push onto doc.edges')
+  // Scoped to addCard and addEdge SPECIFICALLY. Unscoped, `doc.nodes.push(` was
+  // satisfied by the Alt+drag duplicate elsewhere in the file, so addCard could
+  // have been rewritten to rebuild the document and this assertion — the one
+  // written to catch exactly that — would still have passed.
+  const addCard = VIEW.slice(VIEW.indexOf('const addCard ='), VIEW.indexOf('const addEdge ='))
+  const addEdge = VIEW.slice(VIEW.indexOf('const addEdge ='), VIEW.indexOf('const commitText ='))
+  assert.ok(addCard.length > 0 && addEdge.length > 0, 'addCard/addEdge no longer have this shape')
+  assert.match(addCard, /doc\.nodes\.push\(/, 'addCard does not push onto doc.nodes')
+  assert.match(addEdge, /doc\.edges\.push\(/, 'addEdge does not push onto doc.edges')
   assert.doesNotMatch(VIEW, /setDoc\(\s*\{\s*\.\.\./, 'the view spreads the doc into a new object')
 })
 

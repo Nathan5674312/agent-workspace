@@ -85,6 +85,38 @@ const EDGE_ORIGIN = 5000
 const drawsArrow = (end: unknown, fallback: 'arrow' | 'none'): boolean =>
   (end === undefined ? fallback : end) === 'arrow'
 
+/** The midpoint of each side of a node's box, in world units. */
+const SIDE_POINT = {
+  top: (n: CanvasNode) => ({ x: n.x + n.width / 2, y: n.y }),
+  right: (n: CanvasNode) => ({ x: n.x + n.width, y: n.y + n.height / 2 }),
+  bottom: (n: CanvasNode) => ({ x: n.x + n.width / 2, y: n.y + n.height }),
+  left: (n: CanvasNode) => ({ x: n.x, y: n.y + n.height / 2 }),
+} as const
+
+/**
+ * Where one end of an edge attaches: the side the FILE names, or the derived
+ * fallback when it names none.
+ *
+ * `edgeAnchor()` picks the nearest pair from the geometry, which is right for
+ * an edge Obsidian routed automatically and wrong for one the user routed by
+ * hand. Both cases exist in the same file, so the choice has to be per END
+ * rather than per edge — an edge may legally state `fromSide` and omit
+ * `toSide`, and deriving both because one was missing would move an anchor the
+ * user placed.
+ *
+ * `unknown` in, because nothing validates these on the way through
+ * `parseCanvas`. A side that is not one of the four falls back rather than
+ * throwing: a board that is slightly wrong should still draw.
+ */
+const anchorOn = (
+  node: CanvasNode,
+  side: unknown,
+  derived: { x: number; y: number },
+): { x: number; y: number } => {
+  const point = typeof side === 'string' ? SIDE_POINT[side as keyof typeof SIDE_POINT] : undefined
+  return point ? point(node) : derived
+}
+
 export interface CanvasViewProps {
   /** Vault-relative `.canvas` path, or null when no board is open. */
   path: string | null
@@ -543,7 +575,11 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
               // An edge naming a node that is not in the file is skipped rather
               // than crashing the board. Obsidian leaves these behind.
               if (!a || !b) return null
-              const { from, to } = edgeAnchor(a, b)
+              // Derived first, then each end overridden only if the file names
+              // a side for it. See anchorOn.
+              const derived = edgeAnchor(a, b)
+              const from = anchorOn(a, edge.fromSide, derived.from)
+              const to = anchorOn(b, edge.toSide, derived.to)
               return (
                 <line
                   key={edge.id}

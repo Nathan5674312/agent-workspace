@@ -117,6 +117,47 @@ const anchorOn = (
   return point ? point(node) : derived
 }
 
+/**
+ * A JSON Canvas `color` as a CSS value, or null when there is nothing to paint.
+ *
+ * The spec allows two forms and they resolve differently. A PRESET is `"1"` to
+ * `"6"`, which is an index into a palette the reading app chooses — so it
+ * resolves to a variable, and the six values live in canvas.css where the rest
+ * of this app's colour decisions live. A HEX string is the user naming an exact
+ * colour, so it passes through as itself; substituting a palette entry there
+ * would be overriding a choice they made explicitly.
+ *
+ * Anything else returns null and the element keeps its default. Nothing
+ * validates this field on the way through `parseCanvas`, and a board carrying
+ * junk in one `color` should still draw.
+ */
+const canvasColorValue = (color: unknown): string | null => {
+  if (typeof color !== 'string') return null
+  if (/^[1-6]$/.test(color)) return `var(--canvas-color-${color})`
+  if (/^#[0-9a-f]{3,8}$/i.test(color)) return color
+  return null
+}
+
+/**
+ * Push a node or edge colour onto an element as a custom property.
+ *
+ * `style.setProperty` rather than a `style` prop because
+ * review-s2-vault-pane.test.mjs forbids inline style objects in this pane, and
+ * a hex from the file cannot become a stylesheet rule — it is per-element data,
+ * which is the case `appearance.ts` already handles this way.
+ *
+ * REMOVED, not set to empty, when there is no colour. An empty custom property
+ * still counts as set, so `var(--canvas-color, fallback)` would resolve to
+ * nothing instead of the fallback and the element would lose its default
+ * border entirely.
+ */
+const applyColor = (el: HTMLElement | SVGElement | null, color: unknown): void => {
+  if (!el) return
+  const value = canvasColorValue(color)
+  if (value === null) el.style.removeProperty('--canvas-color')
+  else el.style.setProperty('--canvas-color', value)
+}
+
 export interface CanvasViewProps {
   /** Vault-relative `.canvas` path, or null when no board is open. */
   path: string | null
@@ -179,6 +220,10 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     el.style.top = `${n.y}px`
     el.style.width = `${n.width}px`
     el.style.height = `${n.height}px`
+    // Here rather than in the JSX for the same reason as the geometry: this
+    // runs for every node after every render, so a colour cannot be missed by
+    // whichever code path caused the re-render.
+    applyColor(el, n.color)
   }
 
   /**
@@ -591,7 +636,14 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                */
               const label = typeof edge.label === 'string' ? edge.label.trim() : ''
               return (
-                <g key={edge.id}>
+                <g
+                  key={edge.id}
+                  /* Set on the GROUP so the line, its arrowheads (which fill
+                     with context-stroke) and the label all inherit one value. */
+                  ref={(el) => {
+                    applyColor(el, edge.color)
+                  }}
+                >
                   <line
                     x1={from.x + EDGE_ORIGIN}
                     y1={from.y + EDGE_ORIGIN}

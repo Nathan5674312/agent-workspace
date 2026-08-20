@@ -1,5 +1,6 @@
 /* Canvas view — a spatial board of cards under one CSS transform.
-   Every colour here is a token. See tokens.css: this palette is monochrome by
+   Every colour here is a token, with ONE documented exception: the six JSON
+   Canvas preset colours below. See tokens.css: this palette is monochrome by
    decision, so a card is separated from the board by luminance and a border,
    never by a hue. */
 
@@ -8,6 +9,29 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
+
+  /* ── PROVISIONAL, and it needs Nathan's decision ──────────────
+     JSON Canvas presets "1".."6" are red, orange, yellow, green, cyan, purple.
+     A file authored in Obsidian carries them and the user picked them
+     deliberately, so a board that renders every card grey is misreporting
+     their work — which is the defect this closes.
+
+     But tokens.css §4b / DECISION 8 keeps this app MONOCHROME, and only three
+     hues exist (--danger, --warning, --success), themselves recorded as
+     agent-proposed placeholders awaiting a decision. Six were needed and three
+     existed, so 1/2/4 reuse the existing tokens and 3/5/6 are muted to match
+     them rather than taken from Obsidian's brighter defaults.
+
+     THIS BLOCK IS THE ONLY PLACE TO CHANGE THEM. Nothing else in the app
+     hardcodes a canvas hue: `canvasColorValue()` emits var(--canvas-color-N)
+     and the elements read var(--canvas-color). Setting all six to a single
+     grey restores a strictly monochrome board in one edit. */
+  --canvas-color-1: var(--danger); /* red */
+  --canvas-color-2: var(--warning); /* orange */
+  --canvas-color-3: #d9bc3c; /* yellow — no token exists */
+  --canvas-color-4: var(--success); /* green */
+  --canvas-color-5: #5b8a94; /* cyan — no token exists */
+  --canvas-color-6: #8a6e94; /* purple — no token exists */
 }
 
 /* The viewport. `overflow: hidden` is what makes the world infinite: the
@@ -61,7 +85,7 @@
 }
 
 .canvas-edge {
-  stroke: var(--label-tertiary);
+  stroke: var(--canvas-color, var(--label-tertiary));
   stroke-width: 2;
   /* Clay at 5.0:1 rather than Taupe: an edge is structure, the same argument
      GraphView's link colour makes. Taupe is decorative-only by the palette. */
@@ -74,7 +98,7 @@
    rect that would have to be re-measured on every font or zoom change.
    The halo is the board ground, so it reads as the line being interrupted. */
 .canvas-edge-label {
-  fill: var(--label-secondary);
+  fill: var(--canvas-color, var(--label-secondary));
   font-size: var(--text-xs);
   font-family: inherit;
   paint-order: stroke;
@@ -100,7 +124,11 @@
      JSON Canvas puts no constraint on how the two are interleaved. */
   z-index: 1;
   box-sizing: border-box;
-  border: 1px solid var(--separator-opaque);
+  /* A card's colour is spent on its BORDER, not a filled ground: the artwork
+     layer and the monochrome palette both assume cards read by luminance, and
+     six tinted fills would take the board over. --canvas-color is written per
+     element by applyColor() and is absent on an uncoloured card. */
+  border: 1px solid var(--canvas-color, var(--separator-opaque));
   border-radius: var(--radius-md);
   background: var(--bg-elevated);
   color: var(--label);
@@ -113,8 +141,10 @@
 }
 /* Lifted, not shrunk: a card is an object you pick up, the same reasoning
    GraphView applies to a held node. */
+/* Hover keeps the card's own colour when it has one, or a coloured card would
+   turn grey under the pointer — the exact thing this feature fixes. */
 .canvas-node:hover {
-  border-color: var(--label-quaternary);
+  border-color: var(--canvas-color, var(--label-quaternary));
 }
 
 .canvas-text {

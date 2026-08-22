@@ -343,6 +343,31 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
    */
   const baseline = useRef('')
   const undoStack = useRef<string[]>([])
+
+  /**
+   * The CONTENTS of every file card on the board, by vault-relative path.
+   *
+   * A file card used to render its filename and nothing else, so a board of
+   * notes was a board of labels — the thing the card stands for was never on
+   * screen. This holds the real text so the card can show it.
+   *
+   * Keyed by PATH rather than by node id: two cards may point at one note, and
+   * they must show the same text and the same mtime or a save through one would
+   * be refused as a conflict caused by the other.
+   *
+   * `mtime` travels with the text because it is the lost-update token this
+   * file's own saves have to pass back — the same guard the editor uses.
+   */
+  const [files, setFiles] = useState<Record<string, { text: string; mtime: number; error?: string }>>(
+    {},
+  )
+  /**
+   * Paths already asked for, so a re-render does not re-read the same note.
+   *
+   * A ref rather than derived from `files`, because a read is in flight for a
+   * while before its result lands and the effect runs again in that window.
+   */
+  const requested = useRef(new Set<string>())
   const saveChain = useRef<Promise<void>>(Promise.resolve())
 
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -456,6 +481,11 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     // the same cross-board write the mtime guard above only narrowly prevents.
     undoStack.current = []
     baseline.current = ''
+    // File contents belong to the board that referenced them. Kept across, a
+    // card on the new board pointing at the same note would render text read
+    // before the old board was closed, and save it back with a stale mtime.
+    setFiles({})
+    requested.current = new Set()
 
     if (!path) {
       setError(null)
@@ -606,6 +636,76 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
         setSaving(false)
       }
     })
+  }
+
+  /**
+   * Reads the note behind every file card that has not been read yet.
+   *
+   * Runs on `tick` as well as `doc`, so a card dropped onto the board loads
+   * immediately rather than on the next unrelated render.
+   *
+   * A FAILED READ IS CACHED AS AN ERROR, not left absent. A missing or
+   * unreadable note would otherwise be retried on every render forever, and the
+   * card would sit on "Loading…" while the reason it is not loading — the file
+   * was renamed in Obsidian, say — is never shown.
+   */
+  useEffect(() => {
+    if (!doc) return
+    let cancelled = false
+    for (const n of doc.nodes) {
+      if (n.type !== 'file' || typeof n.file !== 'string') continue
+      const target = n.file
+      if (requested.current.has(target)) continue
+      requested.current.add(target)
+      void (async () => {
+        try {
+          const body = await window.api.vault.read(target)
+          if (cancelled) return
+          setFiles((f) => ({ ...f, [target]: { text: body.text, mtime: body.mtime } }))
+        } catch (e) {
+          if (cancelled) return
+          setFiles((f) => ({
+            ...f,
+            [target]: { text: '', mtime: 0, error: e instanceof Error ? e.message : String(e) },
+          }))
+        }
+      })()
+    }
+    return () => {
+      cancelled = true
+    }
+  }, [doc, tick])
+
+  /**
+   * Writes a file card's edit back to the NOTE, not to the board.
+   *
+   * This is the difference between a file card and a text card, and it is the
+   * whole point of the feature: the card is a window onto a real file, so
+   * editing it changes that file everywhere — in the editor next door, in
+   * Obsidian, on disk. The `.canvas` document is untouched; it only ever held
+   * the path.
+   *
+   * Goes through the same `vault.save` with the same mtime token, so a note
+   * changed underneath by another app is refused here exactly as it would be in
+   * the editor rather than silently overwritten.
+   */
+  const commitFile = async (node: CanvasNode, value: string) => {
+    setEditing(null)
+    const target = typeof node.file === 'string' ? node.file : null
+    if (!target) return
+    const cached = files[target]
+    // Unchanged is not a save: every write takes a backup first, so committing
+    // an untouched card would fill .backups/ with identical copies.
+    if (!cached || cached.error || cached.text === value) return
+    try {
+      const saved = await window.api.vault.save(target, value, cached.mtime)
+      setFiles((f) => ({ ...f, [target]: { text: value, mtime: saved.mtime } }))
+      setError(null)
+    } catch (e) {
+      // Surfaced rather than swallowed, for the same reason a board's save
+      // conflict is: a card that silently stops persisting looks like it works.
+      setError(e instanceof Error ? e.message : String(e))
+    }
   }
 
   // ── remove and undo ────────────────────────────────────────────
@@ -955,7 +1055,10 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       setEditing(null)
       return
     }
-    commitText(node, el.value)
+    // A file card's edit belongs to the NOTE; a text card's belongs to the
+    // board. Same gesture, two different destinations.
+    if (node.type === 'file') void commitFile(node, el.value)
+    else commitText(node, el.value)
   }
 
   const onBackgroundDown = (e: React.PointerEvent) => {
@@ -1393,11 +1496,25 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                * to draw an edge — not a request to start typing.
                */
               onDoubleClick={() => {
-                // Only `text` nodes are editable. This is also the fallback for
-                // a node type from a later spec version, and turning one of
-                // those into an edited text card would destroy exactly what the
-                // preservation rule protects.
-                if (!connect && n.type === 'text') setEditing(n.id)
+                /**
+                 * `text` edits the card, `file` edits the NOTE the card shows.
+                 *
+                 * Every other type is left alone. `link` and `group` have
+                 * nothing to type into, and this is also the fallback for a node
+                 * type from a later spec version — turning one of those into an
+                 * edited text card would destroy exactly what the preservation
+                 * rule protects.
+                 *
+                 * A file card whose note failed to read is not editable either:
+                 * there is no text and no mtime, so a commit would either write
+                 * an empty note over a real one or be refused.
+                 */
+                if (connect) return
+                if (n.type === 'text') setEditing(n.id)
+                else if (n.type === 'file' && typeof n.file === 'string') {
+                  const body = files[n.file]
+                  if (body && !body.error) setEditing(n.id)
+                }
               }}
               data-linking={linkFrom === n.id || undefined}
               data-selected={selected.has(n.id) || undefined}
@@ -1466,6 +1583,69 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                   <FileText size={13} aria-hidden="true" />
                   <span className="canvas-file-title">{fileNodeTitle(n.file)}</span>
                 </button>
+              ) : null}
+              {n.type === 'file' && typeof n.file === 'string' ? (
+                /**
+                 * THE CARD IS THE FILE. Its real text, under a title bar that
+                 * still opens the note in the editor.
+                 *
+                 * Double-click swaps this for a textarea over the same text, so
+                 * a note can be read and written without leaving the board —
+                 * which is the point of a board made of files rather than of
+                 * labels.
+                 */
+                editing === n.id ? (
+                  <textarea
+                    className="canvas-file-edit"
+                    ref={editRef}
+                    defaultValue={files[n.file]?.text ?? ''}
+                    autoFocus
+                    aria-label={`Contents of ${n.file}`}
+                    // Same reason as the text card's editor: selecting text
+                    // must not drag the card out from under the cursor.
+                    onPointerDown={(e) => e.stopPropagation()}
+                    // A note is many lines and Enter is a NEWLINE in one, not a
+                    // commit — the opposite of the text card, where a card is a
+                    // caption and Enter submits. Committing is pressing away
+                    // from the card, and Escape still discards.
+                    onKeyDown={(e) => {
+                      if (e.key === 'Escape') {
+                        e.stopPropagation()
+                        setEditing(null)
+                      }
+                    }}
+                    // The board zooms on wheel. Inside a scrolling note that
+                    // would zoom the board instead of moving through the text.
+                    onWheel={(e) => e.stopPropagation()}
+                  />
+                ) : (
+                  <div
+                    className="canvas-file-body"
+                    /**
+                     * Wheel is claimed only when this body can actually scroll
+                     * in the direction asked for. A card whose note fits has
+                     * nothing to scroll, so the wheel belongs to the board's
+                     * zoom — otherwise, with page-sized cards covering most of
+                     * the board, zooming would stop working almost everywhere.
+                     */
+                    onWheel={(e) => {
+                      const el = e.currentTarget
+                      const room = el.scrollHeight - el.clientHeight
+                      if (room <= 1) return
+                      const atTop = el.scrollTop <= 0 && e.deltaY < 0
+                      const atEnd = el.scrollTop >= room - 1 && e.deltaY > 0
+                      if (!atTop && !atEnd) e.stopPropagation()
+                    }}
+                  >
+                    {files[n.file]?.error ? (
+                      <span className="canvas-file-problem">{files[n.file]!.error}</span>
+                    ) : files[n.file] ? (
+                      files[n.file]!.text
+                    ) : (
+                      <span className="canvas-file-problem">Loading…</span>
+                    )}
+                  </div>
+                )
               ) : n.type === 'link' && n.url ? (
                 // Rendered as its URL, deliberately not as a live link: this is
                 // a renderer with node integration, and an <a> here would open

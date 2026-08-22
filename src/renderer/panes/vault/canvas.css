@@ -237,6 +237,64 @@
 .canvas-file:hover {
   background: var(--fill-hover);
 }
+
+/* A file card is a title bar plus the note itself, stacked. The card is the
+   flex container; the body takes whatever height is left, which is what lets it
+   scroll instead of pushing the card taller. */
+.canvas-node--file {
+  display: flex;
+  flex-direction: column;
+}
+.canvas-file {
+  flex: 0 0 auto;
+}
+
+/* THE NOTE'S REAL TEXT. `auto`, not `hidden`: a note longer than its card is
+   the normal case, and clipping it silently is how the card goes back to being
+   a label. `pre-wrap` because a note's own line breaks are content. */
+.canvas-file-body,
+.canvas-file-edit {
+  flex: 1 1 auto;
+  min-height: 0;
+  overflow-y: auto;
+  padding: var(--space-3) var(--space-4);
+  font-size: var(--text-sm);
+  line-height: 1.5;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.canvas-file-body {
+  color: var(--label-secondary);
+}
+
+/* The editor sits exactly where the body was, so double-clicking does not make
+   the card jump. Transparent ground and no border for the same reason: the
+   card should read as the same object, now writable. */
+.canvas-file-edit {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-sm);
+  resize: none;
+  /* The surface sets user-select: none so a pan does not select the board. A
+     textarea is one of the places inside it that must select normally. */
+  user-select: text;
+  cursor: text;
+}
+.canvas-file-edit:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* "Loading…" and a failed read. Quieter than the note's own text, because
+   neither is content — one is a wait and the other is a reason. */
+.canvas-file-problem {
+  color: var(--label-quaternary);
+  font-style: italic;
+}
 .canvas-file:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;

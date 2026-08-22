@@ -76,7 +76,12 @@ test('the render narrows text, label and file instead of trusting them', () => {
 })
 
 test('the editor opens on a string even when the card holds something else', () => {
-  const edit = VIEW.slice(VIEW.indexOf('className="canvas-text-edit"'), VIEW.indexOf('onKeyDown'))
+  // Anchored FROM the text editor. There are two textareas on a board now — a
+  // text card's and a file card's — and an unanchored search finds whichever
+  // appears first in the file, which is not necessarily this one.
+  const at = VIEW.indexOf('className="canvas-text-edit"')
+  const edit = VIEW.slice(at, VIEW.indexOf('onKeyDown', at))
+  assert.ok(at >= 0 && edit.length > 0, 'the text editor no longer has the shape this test reads')
   assert.match(edit, /typeof n\.text === 'string'/, 'the textarea can be handed a non-string')
 })
 
@@ -93,7 +98,12 @@ test('Enter does not commit the card while an IME candidate is open', () => {
   // connect-mode exit above uses it — and an unanchored indexOf finds the
   // earlier one, inverts the slice, and yields '' regardless of what the
   // textarea actually does.
-  const start = VIEW.indexOf('onKeyDown={(e) => {')
+  // Anchored off the TEXT card's textarea specifically. A file card has its own
+  // textarea and its own onKeyDown, and deliberately does NOT commit on Enter —
+  // a note is many lines and Enter is a newline in one — so finding that
+  // handler here would fail while the guard this test is about is intact.
+  const editor = VIEW.indexOf('className="canvas-text-edit"')
+  const start = VIEW.indexOf('onKeyDown={(e) => {', editor)
   const key = VIEW.slice(start, VIEW.indexOf('Escape', start))
   assert.ok(key.length > 0, 'the textarea key handler no longer has the shape this test reads')
   assert.match(key, /isComposing/, 'Enter commits during IME composition')

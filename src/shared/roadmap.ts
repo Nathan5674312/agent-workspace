@@ -87,6 +87,12 @@ export const ROADMAP: FeatureGroup[] = [
         note: 'All four views are built over one row set: table with filter, sort and group-by over frontmatter; board and gallery as groupings of the same rows; calendar placing them by `updated`. The calendar parses that date strictly and lists everything it cannot place rather than dropping it — most of this vault has no usable date. Kanban is the board, renamed. Not built: editing a value from a cell, which would need the lost-update guard from the save path somewhere a cell cannot show it.',
       },
       { label: 'Multi-hop lookup and rollup columns', status: 'planned', surface: 'Database tab' },
+      {
+        label: 'Tags that form without anyone maintaining them',
+        status: 'planned',
+        surface: 'Database tab',
+        note: 'Measured against the author\'s own vault on 2026-08-21, which is the whole argument for this entry: of 1999 notes, `tags:` appears on 131, `area:` on 96, `title:` on 96, `type:` on 90, `updated:` on 70 and `status:` on 56. Six conventions tried, every one stalled around 5%. Hand-maintained metadata does not survive contact with use, so a nicer tag input fails the same way. Inline #hashtags are worse than useless here without excluding code blocks first — the top matches in this vault are #endif, #include, #FFFFFF and #F59E0B, which are preprocessor directives and hex colours. TWO MECHANISMS, and conflating them is the trap. DERIVED facets are computed from what is already true — folder, link neighbourhood the graph already builds, date, filename series — cost nothing, need no model, are never wrong and never need approving, and have 100% coverage by construction. INFERRED tags are semantic, need an agent, can be wrong, and belong in the Inbox as proposals a human confirms. Ship the derived ones as a fact of the data; make the inferred ones a pipeline.',
+      },
       { label: 'Linked / relational databases', status: 'planned', surface: 'Database tab' },
       { label: 'Templates', status: 'planned' },
       { label: 'Inline embeds (tables, media, code blocks)', status: 'planned', surface: 'Editor tab' },
@@ -182,7 +188,13 @@ export const ROADMAP: FeatureGroup[] = [
   {
     title: 'Nice to haves',
     features: [
-      { label: 'API / plugin ecosystem', status: 'planned', surface: 'ribbon:plugins' },
+      {
+        label: 'Customisation — users building things nobody shipped',
+        status: 'planned',
+        surface: 'ribbon:canvas',
+        note: 'The competitor evidence is people turning Notion into things it was never sold as, an RPG that awards XP for finished work being the example that prompted this. What that person actually used was properties, formulas, and a gallery view — no code. The answer here is NOT a JS plugin API: the renderer runs default-src \'none\', a plugin sandbox would be a real security regression rather than a config change, and a third-party plugin ecosystem is also the biggest supply-chain risk Obsidian carries. THE CANVAS IS ALREADY THE CUSTOMISATION SURFACE. It is a file, so an agent can rewrite it; it is spatial and colour-capable, so it can look like anything; and it renders without executing anyone\'s code. An RPG dashboard here is a board an agent updates — XP is a card whose text gets rewritten, the quest log is a group, inventory is file cards. That needs no new API and no new attack surface. Two things genuinely block it. Media cards are refused by the renderer CSP (see docs/canvas-backlog.md item 17), and a dashboard with no art is a spreadsheet. And nothing triggers a pipeline on a schedule or an event, so every update has to be asked for by hand, which is exactly the maintenance burden that killed tags.',
+      },
+      { label: 'API / plugin ecosystem', status: 'planned', surface: 'ribbon:plugins', note: 'Kept on the list because it is what people ask for, but the entry above is the position: the agent is the plugin system and the canvas is the render target. Building a JS plugin host would be choosing Obsidian\'s supply-chain risk on purpose.' },
       { label: 'Web clipper', status: 'planned' },
       { label: 'Version history', status: 'partial', surface: 'Versions tab', note: 'The Versions tab lists every pre-edit copy in .backups/ for the open note, newest first, previews one, and restores it THROUGH save() so the lost-update guard and the backup-before-overwrite still apply. Both on-disk layouts are listed — the new mirrored one and the retired note server\'s flat one. The gap is that it has not been watched running yet: verified by test/versions.test.mjs against the real data layer, not by a human opening the tab. No pruning either — the history is still unbounded.' },
       { label: 'Server / client homelab setup', status: 'planned' },

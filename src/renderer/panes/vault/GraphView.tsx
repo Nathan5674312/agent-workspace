@@ -69,7 +69,7 @@ type Node = d3.SimulationNodeDatum & {
   /** Top-level folder. '' for a note at the vault root. */
   group: string
 }
-type Link = { source: Node; target: Node }
+type Link = { source: Node; target: Node; kind?: 'content' | 'structure' }
 
 const titleOf = (p: string) => p.split('/').pop()!.replace(/\.md$/i, '')
 
@@ -525,12 +525,28 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
          * 0.07 against a resting 0.4 — present enough to hold the shape, far
          * enough below the lit 0.95 that nothing competes with the answer.
          */
+        /**
+         * A folder-derived edge is drawn, but quietly.
+         *
+         * These exist so a folder nobody has written links in is still a web
+         * rather than a dust cloud — see VaultLink.kind. Drawn at full strength
+         * they would drown the authored links in exactly the vaults where those
+         * links are the entire point: the real vault carries 848 content edges
+         * and 441 structural ones, so a third of the picture would be scaffold
+         * competing with the subject.
+         *
+         * A third of the resting alpha keeps the shape readable while making it
+         * obvious which lines someone actually wrote. Lit is left alone — when
+         * you hover a node, everything touching it should answer at full
+         * strength regardless of where the edge came from.
+         */
+        const scaffold = l.kind === 'structure'
         ctx.strokeStyle = lit ? COL.hot : COL.link
-        ctx.globalAlpha = lit ? 0.95 : dim ? 0.07 : 0.4
+        ctx.globalAlpha = lit ? 0.95 : dim ? 0.07 : scaffold ? 0.14 : 0.4
         // A lit edge is the thing being traced, so it also gets weight. At one
         // width the highlight relied on colour alone and thin Cream on Ink is
         // easy to lose against a dense cluster behind it.
-        ctx.lineWidth = ((lit ? 1.6 : 0.9) * forcesRef.current.linkWidth) / k
+        ctx.lineWidth = ((lit ? 1.6 : scaffold ? 0.6 : 0.9) * forcesRef.current.linkWidth) / k
         ctx.beginPath()
         ctx.moveTo(l.source.x!, l.source.y!)
         ctx.lineTo(l.target.x!, l.target.y!)

@@ -31,6 +31,16 @@ process.env.TEST_USER_DATA = mkdtempSync(join(tmpdir(), 'aw-s4-'))
 import * as vault from '../src/main/vault.ts'
 
 /**
+ * The edges an AUTHOR wrote, without the folder-derived scaffold.
+ *
+ * `graph()` now also emits `structure` edges — file to its folder's index,
+ * index to its parent's — so that a folder containing no links at all is still
+ * a connected picture instead of a field of dots. They are a separate `kind`
+ * exactly so tests about wikilink parsing stay about wikilink parsing.
+ */
+const content = (g) => g.links.filter((l) => l.kind === 'content')
+
+/**
  * Every mutating vault call needs an actor, and none of them defaults to one.
  * These suites exercise the USER path — the person clicked or typed — which is
  * the path that must never prompt. The agent path is covered by consent.test.mjs.
@@ -524,7 +534,11 @@ test('graph() emits one edge per relationship, not per mention', async () => {
   })
 
   const g = await vault.graph()
-  assert.deepEqual(g.links, [{ from: 'A.md', to: 'Home.md' }])
+  // CONTENT edges only. The graph also carries folder-derived `structure`
+  // edges now so that a folder nobody has linked up is still a web rather than
+  // dust; they are a separate kind precisely so assertions about what an AUTHOR
+  // wrote stay about that. See VaultLink.kind.
+  assert.deepEqual(content(g), [{ from: 'A.md', to: 'Home.md', kind: 'content' }])
 })
 
 test('graph() ignores an unterminated [[', async () => {
@@ -536,7 +550,7 @@ test('graph() ignores an unterminated [[', async () => {
   })
 
   const g = await vault.graph()
-  assert.deepEqual(g.links, [])
+  assert.deepEqual(content(g), [])
 })
 
 test('graph() memo is shared by concurrent callers and dropped by save()', async () => {
@@ -544,14 +558,16 @@ test('graph() memo is shared by concurrent callers and dropped by save()', async
 
   // Overlapping callers (the graph tab and a backlinks lookup) share one scan.
   await Promise.all([vault.graph(), vault.graph(), vault.backlinks('Home.md')])
-  assert.deepEqual((await vault.graph()).links, [{ from: 'A.md', to: 'Home.md' }])
+  assert.deepEqual(content(await vault.graph()), [
+    { from: 'A.md', to: 'Home.md', kind: 'content' },
+  ])
 
   // Staleness is measured against the DISK: change a file behind the memo's
   // back and the memo must not notice, because it is a 30s cache.
   await writeFile(join(dir, 'A.md'), 'no links any more', 'utf-8')
   assert.deepEqual(
-    (await vault.graph()).links,
-    [{ from: 'A.md', to: 'Home.md' }],
+    content(await vault.graph()),
+    [{ from: 'A.md', to: 'Home.md', kind: 'content' }],
     'a cached call went back to disk inside the TTL',
   )
 
@@ -560,7 +576,7 @@ test('graph() memo is shared by concurrent callers and dropped by save()', async
   // the writer and the memo are in the same process now.
   const cur = await vault.read('A.md')
   await vault.save('A.md', 'still no links', cur.mtime, USER)
-  assert.deepEqual((await vault.graph()).links, [], 'save() did not invalidate the memo')
+  assert.deepEqual(content(await vault.graph()), [], 'save() did not invalidate the memo')
 })
 
 test('graph() on an empty vault resolves rather than deadlocking', async () => {

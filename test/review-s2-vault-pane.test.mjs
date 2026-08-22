@@ -843,13 +843,16 @@ test('resolvableLinks drops edges d3 cannot resolve, keeps the ones it can', () 
       { from: 'Ghost.md', to: 'B.md' },
       { from: 'Ghost.md', to: 'Other.md' },
     ]),
-    [{ source: 'A.md', target: 'B.md' }],
+    // `kind` rides along so the graph can draw an authored link differently
+    // from a folder-derived one; undefined here because these fixtures predate
+    // the field and never set it.
+    [{ source: 'A.md', target: 'B.md', kind: undefined }],
   )
   assert.deepEqual(resolvableLinks([], [{ from: 'A.md', to: 'B.md' }]), [])
   assert.deepEqual(resolvableLinks(nodes, []), [])
   // Self-links are d3-resolvable and are not this function's business to judge.
   assert.deepEqual(resolvableLinks(nodes, [{ from: 'A.md', to: 'A.md' }]), [
-    { source: 'A.md', target: 'A.md' },
+    { source: 'A.md', target: 'A.md', kind: undefined },
   ])
   // Order and duplicates are preserved — filtering must not dedupe silently.
   assert.equal(

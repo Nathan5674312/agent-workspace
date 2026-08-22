@@ -34,44 +34,103 @@ const rows = async () => new Map((await vault.list()).map((n) => [n.path, n]))
 
 // ---------------------------------------------------------------- the root
 
-test('checkRoots names the subfolder when the root is one level too high', async () => {
+/**
+ * A vault opened from its PARENT must index exactly as it does opened directly.
+ *
+ * These four replace two tests that asserted a WARNING here instead. The
+ * warning was the wrong repair and was rejected as such: it told the user not
+ * to point the app above a vault rather than making that work. Everything it
+ * described was real — notes 281 -> 1420, links FALLING 657 -> 567, 1344 of
+ * 1420 orphan — and all of it came from three separate root-anchored
+ * assumptions, each now fixed at its source. These pin the outcome the warning
+ * was standing in for.
+ */
+test('a nested vault keeps its OWN exclusions when opened from the parent', async () => {
+  // ignoreFilters() read <root>/.obsidian/app.json and nothing else, so from
+  // one level up a vault's userIgnoreFilters were not merely mis-anchored, they
+  // were never found — the parent's app.json, or none, answered instead.
   const dir = await build({
-    'Real Vault/.obsidian/app.json': '{}',
+    'Real Vault/.obsidian/app.json': JSON.stringify({
+      userIgnoreFilters: ['Skills/bundled'],
+    }),
     'Real Vault/Home.md': 'Hello [[Note]]',
     'Real Vault/Note.md': 'A note',
+    'Real Vault/Skills/bundled/SKILL.md': 'third-party noise',
+    'Real Vault/Skills/bundled/OTHER.md': 'more noise',
   })
-  vault.setVaultDir(dir)
 
-  const msg = await vault.checkRoots()
-  assert.ok(msg, 'a root above the vault must not pass silently')
-  assert.match(msg, /Real Vault/, 'the message must name the folder that IS a vault')
-  assert.match(msg, /exclusion/i, 'and say what actually breaks, not just "wrong path"')
+  vault.setVaultDir(join(dir, 'Real Vault'))
+  const inside = (await vault.list()).map((n) => n.path).sort()
+  assert.deepEqual(inside, ['Home.md', 'Note.md'], 'precondition: the filter works at the root')
+
+  vault.invalidateGraph()
+  vault.setVaultDir(dir)
+  const above = (await vault.list()).map((n) => n.path).sort()
+  assert.deepEqual(
+    above,
+    ['Real Vault/Home.md', 'Real Vault/Note.md'],
+    'the vault stopped honouring its own excluded-files list from one level up',
+  )
 })
 
-test('a root with its OWN .obsidian still reports a vault nested under it', async () => {
-  // THE REGRESSION. The child scan used to be skipped whenever the root had an
-  // .obsidian/ of its own, which assumed the marker was scarce. Pointing
-  // Obsidian at a folder CREATES one — so investigating "why is Desktop
-  // broken" by opening Desktop in Obsidian wrote C:\Users\Nathan\Desktop\
-  // .obsidian\ and permanently silenced the warning about Desktop. Measured
-  // through this module with that folder in place: 1420 notes, 567 links,
-  // 1344 of 1420 orphan, and checkRoots returned the mild "no Home.md at the
-  // root" instead of naming Universal Vault.
+test('a root with its own .obsidian still honours a nested vault below it', async () => {
+  // Pointing Obsidian at a folder CREATES an .obsidian/ in it, so the parent
+  // very often carries the marker too — C:\Users\Nathan\Desktop\.obsidian\ was
+  // written by Obsidian at 19:19 on the day this was found. The parent having
+  // one must not stop the child's filters being read.
   const dir = await build({
-    '.obsidian/app.json': '{}', // the marker the old guard trusted
-    'Real Vault/.obsidian/app.json': '{}',
+    '.obsidian/app.json': '{}',
+    'Real Vault/.obsidian/app.json': JSON.stringify({ userIgnoreFilters: ['Junk'] }),
     'Real Vault/Home.md': 'Hello [[Note]]',
     'Real Vault/Note.md': 'A note',
+    'Real Vault/Junk/Ignored.md': 'excluded by the vault itself',
   })
   vault.setVaultDir(dir)
+  const paths = (await vault.list()).map((n) => n.path)
+  assert.ok(
+    !paths.some((p) => p.includes('Junk')),
+    "the parent's own .obsidian suppressed the child's filters",
+  )
+})
 
-  const msg = await vault.checkRoots()
-  assert.ok(msg, 'a stray .obsidian at the root must not buy silence')
-  assert.match(msg, /Real Vault/, 'the message must still name the folder that IS a vault')
-  assert.match(msg, /exclusion/i)
-  // And it must not claim the root is not a vault when the root visibly has the
-  // marker — a warning caught lying about something checkable is one ignored.
-  assert.doesNotMatch(msg, /is not itself a vault/)
+test('a path-form wikilink still resolves when the vault is opened from above', async () => {
+  // [[Daily/_Template]] is a path relative to ITS vault's root. Only `n.path`
+  // was registered as a key, so from one level up it became
+  // "real vault/daily/_template" while the link still said "daily/_template"
+  // and matched nothing at all. Measured on the real vault: 100 of 657 edges
+  // silently disappeared, 0 gained — dropped, not mis-routed.
+  const dir = await build({
+    'Real Vault/.obsidian/app.json': '{}',
+    'Real Vault/Home.md': 'see [[Daily/_Template|the template]]',
+    'Real Vault/Daily/_Template.md': 'the template',
+  })
+
+  vault.setVaultDir(join(dir, 'Real Vault'))
+  assert.equal(
+    (await vault.graph()).links.find((l) => l.from === 'Home.md')?.to,
+    'Daily/_Template.md',
+    'precondition: the path form resolves at the root',
+  )
+
+  vault.invalidateGraph()
+  vault.setVaultDir(dir)
+  assert.equal(
+    (await vault.graph()).links.find((l) => l.from === 'Real Vault/Home.md')?.to,
+    'Real Vault/Daily/_Template.md',
+    'the edge was dropped rather than re-anchored',
+  )
+})
+
+test('a root above a vault no longer warns about being above a vault', async () => {
+  // The behaviour asked for in as many words: open any folder and have it work,
+  // rather than be told off for opening it.
+  const dir = await build({
+    'Real Vault/.obsidian/app.json': '{}',
+    'Real Vault/Home.md': 'Hello [[Note]]',
+    'Real Vault/Note.md': 'back to [[Home]]',
+  })
+  vault.setVaultDir(dir)
+  assert.equal(await vault.checkRoots(), null)
 })
 
 test('a real vault root passes', async () => {

@@ -144,7 +144,12 @@ test('the view pushes onto the parsed doc rather than rebuilding it', () => {
 
 test('new cards and edges use the shared id and size helpers', () => {
   assert.match(VIEW, /canvasId\(\)/, 'the view invents its own ids')
-  assert.match(VIEW, /NEW_TEXT_SIZE/, 'the view hardcodes a card size')
+  // PAGE_SIZE rather than NEW_TEXT_SIZE since a new card became page-shaped.
+  // The property is unchanged and is the one worth pinning: the size comes from
+  // a shared constant, so this view and anything else that makes a card agree
+  // on one number. A literal here is how two places drift apart.
+  assert.match(VIEW, /PAGE_SIZE/, 'the view hardcodes a card size')
+  assert.doesNotMatch(VIEW, /width: \d{2,}, height: \d{2,}/, 'a card size is written inline')
 })
 
 test('an edge cannot be drawn from a card to itself, or twice between a pair', () => {

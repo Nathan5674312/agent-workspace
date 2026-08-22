@@ -149,15 +149,34 @@ test('an Alt press on a file card duplicates WITHOUT also opening the note', () 
   assert.match(guard, /e\.altKey/, 'an Alt press on a file card duplicates it and opens it too')
 })
 
-test('no delete or removal affordance came along with it', () => {
-  // Duplication is additive and inside the green light. Removal is not, and is
-  // still blocked on Nathan pending an undo or a confirm.
-  // Narrowed to what actually removes from the DOCUMENT — see the matching
-  // note in canvas-selection. A bare `.splice(` ban would fire on z-order, the
-  // next backlog item, because reordering nodes is a splice and has nothing to
-  // do with deletion.
-  assert.doesNotMatch(VIEW, /doc\.nodes\.splice\(/, 'a card can be removed from the document')
-  assert.doesNotMatch(VIEW, /doc\.edges\.splice\(/, 'an edge can be removed from the document')
+test('duplication is still purely additive', () => {
+  // This test used to assert that NOTHING in the view could remove a node. That
+  // was a hold, not a property: the comment said removal was "blocked on Nathan
+  // pending an undo", and both landed together — Delete/Backspace on a
+  // selection, with Ctrl+Z to back it out. A file-wide ban would now fail for
+  // the feature it was waiting for, and it also fired on bring-to-front, which
+  // reorders with a splice and removes nothing, exactly as its own note
+  // predicted it would.
+  //
+  // What still has to be true is narrower and is the thing this file is about:
+  // the DUPLICATE path only ever adds. An Alt+drag that removed anything would
+  // destroy the card it was asked to copy.
+  // Anchored on `e.altKey && doc`, which occurs once. `const target =` looked
+  // like the natural start and is not: `persist` opens with `const target =
+  // path` hundreds of lines earlier, so the slice ran from there and swallowed
+  // every unrelated splice in between.
+  const start = VIEW.indexOf('e.altKey && doc')
+  const dup = VIEW.slice(start, VIEW.indexOf('selectNode(target.id', start))
+  assert.ok(start >= 0 && dup.length > 0, 'the duplicate path no longer has the shape this test reads')
+  assert.doesNotMatch(dup, /splice\(/, 'the duplicate path removes something')
+  assert.match(dup, /doc\.nodes\.push\(copy\)/, 'the duplicate never reaches the document')
+})
+
+test('the node and edge lists are still never replaced wholesale', () => {
+  // The half of the old ban that is still a real property. Removal splices IN
+  // PLACE; reassigning `doc.nodes` to a filtered copy is the first step of the
+  // reconstruction the preservation rule forbids, and would drop groups,
+  // colours and unknown fields on the first delete.
   assert.doesNotMatch(VIEW, /doc\.nodes\s*=\s/, 'the node list can be replaced wholesale')
   assert.doesNotMatch(VIEW, /doc\.edges\s*=\s/, 'the edge list can be replaced wholesale')
 })

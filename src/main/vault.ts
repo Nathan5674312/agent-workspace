@@ -332,39 +332,31 @@ export async function checkRoots(): Promise<string | null> {
   if (truncated) return `vault: ${truncated}`
   if (notes.length === 0) {
     return (
-      `vault: no notes found under ${VAULT_DIR}. ` +
-      `The directory exists but contains no indexable .md files, so the database ` +
-      `and graph will render empty. Check the vault path in settings.`
+      `vault: ${VAULT_DIR} contains no files at all, so the explorer, the ` +
+      `database and the graph will all be empty. Check the vault path in settings.`
     )
   }
 
-  // Reachability measured from nothing is reachability measured wrong. This is
-  // survivable — `reachRoot` falls back to the best-connected note — but the
-  // number the Orphans filter reports is only as good as the root it counted
-  // from, so the root gets said out loud either way.
-  const root = notes[0]?.reachRoot ?? null
-  if (root === null) {
-    return (
-      `vault: no note in ${VAULT_DIR} is linked to by any other, so there is no ` +
-      `root to measure reachability from. Every note will report as an orphan.`
-    )
-  }
   /**
-   * `endsWith`, not `=== ROOT_NOTE`.
+   * THE "no Home.md" AND "nothing links to anything" WARNINGS ARE GONE.
    *
-   * A `Home.md` one directory down is a pinned root, not a missing one —
-   * `pickRoot` looks for the shallowest one anywhere now. The strict compare
-   * fired on every vault opened from its parent and reported the correct root
-   * as a misconfiguration, which is exactly the noise that made the real
-   * warnings easy to ignore.
+   * Both were true statements and both were noise, for the same reason the
+   * root-above-a-vault warning was: they describe a folder for failing to be an
+   * Obsidian vault. Measured across ten real locations, one or the other fired
+   * on EIGHT of them — including `System32\drivers\etc`, where "Add a Home.md
+   * to pin it" is advice about someone's DNS configuration.
+   *
+   * They also stopped being true. `pickRoot` now finds a `Home.md` at any
+   * depth, and structural edges mean the graph is connected in every one of
+   * those ten locations, so "every note will report as an orphan" no longer
+   * describes what the user sees. A warning that is both unhelpful and
+   * out of date is worse than none: it trains people to dismiss the box that
+   * also carries the real messages above.
+   *
+   * What survives is only what makes the app UNUSABLE here — an unreadable
+   * directory, a truncated walk, an empty folder — none of which is an opinion
+   * about how the user organises their files.
    */
-  if (!root.endsWith(ROOT_NOTE)) {
-    return (
-      `vault: no ${ROOT_NOTE} anywhere under ${VAULT_DIR}, so reachability ` +
-      `and the Orphans filter are measured from ${root} instead — the ` +
-      `best-connected note. Add a ${ROOT_NOTE} to pin it.`
-    )
-  }
   return null
 }
 
@@ -383,13 +375,38 @@ export async function read(path: string): Promise<VaultNoteBody> {
   // `path` arrives over IPC from the renderer. Empty or non-string is refused
   // at the boundary rather than left to fail deeper with a worse message.
   const safePath = requirePath(path)
+  /**
+   * A binary is refused HERE, in main, not merely hidden in the renderer.
+   *
+   * Now that the explorer lists every file, `read()` is reachable for a `.png`
+   * or an `.exe` — and the editor's contract is read-into-a-textarea, edit,
+   * `save()` the string back. A UTF-8 decode of a PNG is lossy, so that round
+   * trip does not display a binary badly, it DESTROYS it, and `save()`'s
+   * backup would be taken after the damage was already in the buffer.
+   *
+   * Refusing at the boundary rather than in VaultPane is deliberate: the
+   * renderer is untrusted and there is more than one caller, so a guard that
+   * lives only in the UI is one new call site away from being absent.
+   */
+  if (!isTextFile(safePath)) {
+    throw new Error(
+      `vault: ${titleOf(safePath)} is not a text file, so it cannot be opened in the editor.`,
+    )
+  }
   try {
     const abs = resolveInVault(safePath)
-    const mtime = statSync(abs).mtimeMs
+    const st = statSync(abs)
+    // Loading a multi-gigabyte log into a <textarea> hangs the renderer hard
+    // enough to look like a crash. Far above the indexing cap on purpose.
+    if (st.size > MAX_OPEN_BYTES) {
+      throw new Error(
+        `vault: ${titleOf(safePath)} is ${Math.round(st.size / 1048576)} MB, too large to open in the editor.`,
+      )
+    }
     return {
       path: safePath,
       text: readFileSync(abs, 'utf8'),
-      mtime,
+      mtime: st.mtimeMs,
       title: titleOf(safePath),
     }
   } catch (e) {
@@ -512,6 +529,152 @@ function stamp(): string {
 const HIDDEN = new Set(['.git', '.obsidian', '.trash', 'node_modules', '__pycache__'])
 
 /**
+ * Extensions that are definitely NOT text, so the file is listed but never read.
+ *
+ * A DENYLIST, not an allowlist, and that direction is the point. An allowlist of
+ * "text extensions" is a list of the file types someone thought of, and every
+ * one they did not think of opens as an empty folder — which is exactly the
+ * failure being fixed here. Denying the handful of formats that are definitely
+ * binary means an unknown extension is treated as text, read, and indexed. The
+ * worst case for a wrong guess is a row whose link parse finds nothing; the
+ * worst case for the other default is a folder that looks empty.
+ *
+ * Size is the real guard against a huge unknown file, not this list — see
+ * MAX_TEXT_BYTES in `scan()`.
+ */
+const BINARY_EXT = new Set([
+  // images
+  'png', 'jpg', 'jpeg', 'gif', 'bmp', 'webp', 'ico', 'tif', 'tiff', 'avif', 'heic', 'psd',
+  // video and audio
+  'mp4', 'mkv', 'mov', 'avi', 'webm', 'wmv', 'flv', 'mp3', 'wav', 'flac', 'ogg', 'm4a', 'aac',
+  // archives and disk images
+  'zip', 'rar', '7z', 'gz', 'tar', 'bz2', 'xz', 'iso', 'dmg', 'cab', 'msi',
+  // executables and libraries
+  'exe', 'dll', 'so', 'dylib', 'bin', 'obj', 'o', 'a', 'lib', 'pdb', 'class', 'jar', 'pyc',
+  // documents that are containers rather than text
+  'pdf', 'doc', 'docx', 'xls', 'xlsx', 'ppt', 'pptx', 'odt', 'ods',
+  // fonts, databases, other opaque blobs
+  'ttf', 'otf', 'woff', 'woff2', 'eot', 'db', 'sqlite', 'sqlite3', 'mdb', 'dat', 'pack', 'idx',
+])
+
+/** Is this filename one we are willing to read as text? See BINARY_EXT. */
+function isTextFile(name: string): boolean {
+  const cut = name.lastIndexOf('.')
+  // No extension at all — LICENSE, Makefile, .gitignore — is text far more
+  // often than not, and reading it costs one small file.
+  if (cut <= 0) return true
+  return !BINARY_EXT.has(name.slice(cut + 1).toLowerCase())
+}
+
+/**
+ * Above this, a file is listed and indexed but its text is not read. See `scan()`.
+ *
+ * This is the INDEXING budget and it is paid thousands of times per scan, which
+ * is why it is small. It is NOT a limit on what the user may open — see
+ * MAX_OPEN_BYTES.
+ */
+const MAX_TEXT_BYTES = 2 * 1024 * 1024
+
+/**
+ * Above this, `read()` refuses rather than hand the renderer a <textarea> that
+ * will hang it.
+ *
+ * Deliberately a different, far larger number than MAX_TEXT_BYTES, and the
+ * first attempt at this used one constant for both — which broke opening a 4 MB
+ * note, a case the suite already guarded (`a multi-megabyte note round-trips
+ * intact`). The two limits answer different questions: indexing is a cost
+ * multiplied by every file in the tree and must stay cheap, while opening is
+ * one file the user explicitly asked for and should only be refused when it
+ * would genuinely wedge the window.
+ */
+const MAX_OPEN_BYTES = 64 * 1024 * 1024
+
+/**
+ * Markdown inline links — `[text](target)` — and the reference form's target.
+ *
+ * Excludes `(` and `)` from the target so a trailing `)` in prose cannot run
+ * away with the match, and excludes whitespace so a link with a title
+ * (`[a](b "t")`) stops at the path.
+ */
+const MD_LINK = /\[[^\]\n]*\]\(\s*<?([^)>\s]+)>?[^)]*\)/g
+
+/**
+ * Bare relative paths mentioned in prose or code: `./foo/bar.ts`, `src/x.py`.
+ *
+ * Deliberately requires a separator AND an extension. Without both this matches
+ * ordinary words and version numbers, and every false positive becomes a wrong
+ * edge in someone's graph.
+ */
+const BARE_PATH = /(?:^|[\s('"`])(\.{0,2}\/)?([\w.-]+(?:\/[\w.-]+)+\.[A-Za-z0-9]{1,8})/g
+
+/**
+ * Everything in `text` that might name another file in this tree.
+ *
+ * THREE grammars, because a vault is not the only thing a folder can be. The
+ * app understood `[[wikilinks]]` and nothing else, which is correct for
+ * Obsidian and useless everywhere else: measured across ten real locations,
+ * `agent-workspace` produced 24 notes and ZERO links and `cc-extension` 10 and
+ * ZERO, not because those repos are unconnected but because a README says
+ * `[the spec](docs/SPEC.md)` and never `[[SPEC]]`. Both rendered as 100%
+ * orphan dust.
+ *
+ * Wikilinks stay first and unchanged. The other two only ever ADD candidates,
+ * and every candidate still has to survive `resolve()` — a path that names no
+ * file in the tree produces nothing. So the cost of a false positive here is an
+ * edge that fails to resolve, not a wrong edge.
+ *
+ * `from` anchors the relative forms: `./x.ts` inside `src/main/` means
+ * `src/main/x.ts`, which is the whole reason a source tree links itself up
+ * without anyone writing a single link by hand.
+ */
+function linkTargets(text: string, from: string): string[] {
+  if (!text) return []
+  const out: string[] = []
+  const seen = new Set<string>()
+  const push = (raw: string) => {
+    const name = raw.trim()
+    if (!name || seen.has(name)) return
+    seen.add(name)
+    out.push(name)
+  }
+
+  for (const name of parseWikilinks(text)) push(name)
+
+  const dir = from.slice(0, from.lastIndexOf('/') + 1)
+  /** `./a`, `../a` and bare `a/b` resolved against the linking file's folder. */
+  const anchor = (target: string): void => {
+    // Absolute URLs, mailto:, anchors and query strings name nothing on disk.
+    if (/^[a-z][a-z0-9+.-]*:/i.test(target) || target.startsWith('#')) return
+    const clean = target.split(/[#?]/)[0]
+    if (!clean) return
+    push(clean) // as written — resolve() also matches vault-relative forms
+    // NOT `if (!dir) return`. A file at the ROOT has `dir === ''`, and skipping
+    // the walk there left `./docs/GUIDE.md` pushed only in its raw form, which
+    // matches no key because every indexed path is stored without the `./`.
+    // So a link from a top-level README — the single most common place a repo
+    // puts its links — resolved nothing while the identical link one folder
+    // down resolved fine.
+    //
+    // Walked here rather than with path.resolve(): these are vault-relative
+    // POSIX-ish strings, not OS paths, and `resolve` would drag in the drive.
+    const parts = `${dir}${clean}`.split('/')
+    const stack: string[] = []
+    for (const p of parts) {
+      if (p === '.' || p === '') continue
+      if (p === '..') stack.pop()
+      else stack.push(p)
+    }
+    push(stack.join('/'))
+  }
+
+  for (const m of text.matchAll(new RegExp(MD_LINK.source, 'g'))) anchor(m[1])
+  for (const m of text.matchAll(new RegExp(BARE_PATH.source, 'g'))) {
+    anchor(`${m[1] ?? ''}${m[2]}`)
+  }
+  return out
+}
+
+/**
  * A vault's OWN exclusions, from Obsidian's `.obsidian/app.json`
  * (`userIgnoreFilters`, the "Files and links → Excluded files" setting).
  *
@@ -570,6 +733,46 @@ function ignoreFilters(dir: string): string[] {
 /** Vault-relative path -> is it under one of the filters, on a segment boundary. */
 function isIgnored(rel: string, filters: string[]): boolean {
   return filters.some((f) => rel === f || rel.startsWith(`${f}/`))
+}
+
+/**
+ * When the open root is INSIDE a vault, that vault's exclusions still apply —
+ * they are just written from further up than we are standing.
+ *
+ * `tree()` walks DOWN and picks up a vault's `.obsidian/app.json` when it
+ * reaches one, which covers opening a vault or anything above it. It cannot
+ * cover opening a folder BELOW one, because the walk never passes the file.
+ * Measured: opening `Universal Vault\System` indexed 1179 notes against 13
+ * links — the whole of `System/Skills/gstack` and `System/Skill Sources` came
+ * back, because both the vault's own filters and this file's SKIP list are
+ * written as `System/…` while from in here the same notes are `Skills/…`.
+ *
+ * So walk UP for the nearest `.obsidian/`, and return the filters re-expressed
+ * relative to where we actually are: an ancestor's `System/Skills/gstack`
+ * becomes `Skills/gstack` when opened from `System`, and anything outside our
+ * subtree drops out entirely because it can never match a path we will see.
+ *
+ * Bounded by the filesystem root, and `dirname` is what terminates it: at a
+ * drive root `dirname(x) === x`, so the loop stops rather than spinning.
+ */
+function enclosingVaultFilters(dir: string): string[] {
+  let cur = resolve(dir)
+  let offset = '' // path of `dir` relative to the vault, '' until we climb
+  for (;;) {
+    const parent = dirname(cur)
+    if (parent === cur) return [] // filesystem root, no vault above us
+    offset = offset ? `${basename(cur)}/${offset}` : basename(cur)
+    cur = parent
+    if (!existsSync(resolve(cur, '.obsidian'))) continue
+    const prefix = `${offset}/`
+    return ignoreFilters(cur)
+      .filter((f) => f === offset || f.startsWith(prefix))
+      // `f === offset` means the vault excludes the very folder we opened. Keep
+      // it as '' so nothing matches it rather than dropping to a bare prefix
+      // that would swallow the entire tree.
+      .map((f) => (f === offset ? '' : f.slice(prefix.length)))
+      .filter(Boolean)
+  }
 }
 
 /**
@@ -1038,14 +1241,33 @@ export async function tree(): Promise<VaultTreeNode> {
           kind: 'folder',
           children: await walk(childAbs, childRel, depth + 1, filters),
         })
-      } else if (isFile && e.name.toLowerCase().endsWith('.md')) {
-        out.push({ name: e.name, path: childRel, kind: 'note' })
       } else if (isFile && e.name.toLowerCase().endsWith('.canvas')) {
         // The Canvas view's boards. Kept in the tree so the vault stays the one
         // source of "what is in here" — the canvas list reads this rather than
         // walking the disk a second time — and given their own kind so
         // `buildIndex` cannot mistake JSON for a note. See VaultTreeNode.
         out.push({ name: e.name, path: childRel, kind: 'canvas' })
+      } else if (isFile) {
+        /**
+         * EVERY file is listed now, not only `.md`.
+         *
+         * The explorer used to drop anything else on the floor, which is the
+         * single reason most folders on this machine opened completely empty:
+         * measured across ten locations, `Downloads`, `Documents`, `Pictures`,
+         * `System32\drivers\etc` and this repo's own `src/` all showed zero
+         * files and zero rows while being full of them. "Point it anywhere"
+         * cannot be true while the app can only see one extension.
+         *
+         * `isTextFile` decides whether it can be READ, not whether it is shown.
+         * A photograph belongs in the explorer and in the database — it is a
+         * thing in the folder — it just has no text to parse and must never
+         * reach the editor. See VaultTreeNode.kind.
+         */
+        out.push({
+          name: e.name,
+          path: childRel,
+          kind: isTextFile(e.name) ? 'note' : 'file',
+        })
       }
     }
     return out
@@ -1069,7 +1291,10 @@ export async function tree(): Promise<VaultTreeNode> {
     name: basename(VAULT_DIR) || VAULT_DIR,
     path: '',
     kind: 'folder',
-    children: await walk(VAULT_DIR, '', 0, []),
+    // Seeded with the enclosing vault's filters, so opening a SUBfolder of a
+    // vault is as correct as opening the vault. The walk adds any vault it
+    // meets on the way down to this.
+    children: await walk(VAULT_DIR, '', 0, enclosingVaultFilters(VAULT_DIR)),
   }
 
   // Recorded AFTER the walk, so the message reports what actually happened
@@ -1140,7 +1365,20 @@ const SKIP = ['.backups/']
  * segment boundary, so `.backups/` cannot swallow `.backups-old/`.
  */
 function isSkipped(p: string): boolean {
-  return SKIP.some((s) => p.startsWith(s) || p.includes(`/${s}`))
+  // Every trailing segment-run of each prefix, so the list also matches when
+  // the open root is BELOW where the prefix was written: `System/Skills/gstack/`
+  // has to match `Skills/gstack/x.md` for someone who opened `System`. Same
+  // failure as the vault's own filters — measured at 1179 notes against 13
+  // links opening `Universal Vault\System` — and fixed the same way.
+  return SKIP.some((s) => {
+    if (p.startsWith(s) || p.includes(`/${s}`)) return true
+    const parts = s.split('/').filter(Boolean)
+    for (let i = 1; i < parts.length; i++) {
+      const tail = `${parts.slice(i).join('/')}/`
+      if (p.startsWith(tail) || p.includes(`/${tail}`)) return true
+    }
+    return false
+  })
 }
 
 /**
@@ -1282,16 +1520,19 @@ export async function graph(): Promise<VaultGraph> {
  * the text: `parseFrontmatter` already ran here too.
  */
 async function scan(): Promise<{ note: VaultNoteMeta; names: string[] }[]> {
-  const { readFile } = await import('node:fs/promises')
+  const { readFile, stat } = await import('node:fs/promises')
   const { join } = await import('node:path')
 
-  const paths: string[] = []
+  // Both kinds: a `file` becomes a row with no text, so a folder of images is
+  // a list of images rather than an empty database. Only `note` is read.
+  const paths: { path: string; text: boolean }[] = []
   const collect = (n: VaultTreeNode): void => {
-    if (n.kind === 'note') paths.push(n.path)
+    if (n.kind === 'note') paths.push({ path: n.path, text: true })
+    else if (n.kind === 'file') paths.push({ path: n.path, text: false })
     n.children?.forEach(collect)
   }
   collect(await tree())
-  const keep = paths.filter((p) => !isSkipped(p))
+  const keep = paths.filter((p) => !isSkipped(p.path))
 
   const out: { note: VaultNoteMeta; names: string[] }[] = []
   // Bounded rather than `Promise.all` over every path: a vault in the low
@@ -1302,21 +1543,36 @@ async function scan(): Promise<{ note: VaultNoteMeta; names: string[] }[]> {
   let cursor = 0
   const worker = async (): Promise<void> => {
     while (cursor < keep.length) {
-      const path = keep[cursor++]
-      let text: string
-      try {
-        text = await readFile(join(VAULT_DIR, path), 'utf8')
-      } catch {
-        // Deleted between the walk and the read, or unreadable. Absent from the
-        // index is right; failing the index for one bad file is not.
-        continue
+      const { path, text: readable } = keep[cursor++]
+      let text = ''
+      if (readable) {
+        try {
+          /**
+           * Size checked BEFORE the read, because the read is the thing that
+           * hurts. Unknown extensions are treated as text (see BINARY_EXT), so
+           * this is what stands between "index any file type" and pulling a
+           * 4 GB `.log` or a mislabelled disk image into memory. 2 MB is far
+           * above any real note — the largest in the vault is 190 KB — and far
+           * below anything that threatens the main process.
+           *
+           * Oversized files are not skipped, only unread: the row still
+           * appears, it simply contributes no links. Vanishing from the
+           * explorer is the failure mode this whole change exists to remove.
+           */
+          const st = await stat(join(VAULT_DIR, path))
+          if (st.size <= MAX_TEXT_BYTES) text = await readFile(join(VAULT_DIR, path), 'utf8')
+        } catch {
+          // Deleted between the walk and the read, or unreadable. A row with no
+          // text is still the truth that the file was there; failing the whole
+          // index for one bad file never is.
+        }
       }
       const fm = parseFrontmatter(text)
       const cut = path.lastIndexOf('/')
       out.push({
         // Parsed HERE so `text` becomes garbage at the end of this iteration
         // instead of living until the index is finished. See the header.
-        names: parseWikilinks(text),
+        names: linkTargets(text, path),
         note: {
           path,
           // Filename first, frontmatter second — the same precedence the link
@@ -1525,7 +1781,7 @@ async function buildIndex(): Promise<VaultIndex> {
       const key = JSON.stringify([n.path, target])
       if (seenEdges.has(key)) continue
       seenEdges.add(key)
-      links.push({ from: n.path, to: target })
+      links.push({ from: n.path, to: target, kind: 'content' })
       // Adjacency, kept as the edges are found rather than rebuilt from
       // `links` afterwards, because the BFS below needs it and a second pass
       // over 20k edges to recover what we just computed is waste.
@@ -1533,6 +1789,121 @@ async function buildIndex(): Promise<VaultIndex> {
       if (adj) adj.push(target)
       else out.set(n.path, [target])
     }
+  }
+
+  /**
+   * STRUCTURAL edges: the folder tree, as a graph.
+   *
+   * Everything above needs somebody to have written a link. Most folders on a
+   * computer are not vaults and nobody has: measured across ten real locations,
+   * `Pictures` gave 26 files and 0 links, `System32\drivers\etc` 5 and 0,
+   * `Documents` 2 and 0, and a source tree managed 34 links across 83 files
+   * with 81 of them still unreachable. Every one of those rendered as a field
+   * of unconnected dots, which is what "the graph is broken everywhere except
+   * my vault" actually looked like.
+   *
+   * The filesystem is the relationship that always exists. Each folder elects
+   * one HUB — an index-like file if there is one, otherwise its first file by
+   * name — every other file in that folder points at the hub, and each hub
+   * points at its parent folder's hub. The result is a spanning tree over
+   * whatever is there, so the graph is connected in any location without the
+   * user creating a single link.
+   *
+   * Appended AFTER `inbound`, `depth` and `orphan` are computed from `out`
+   * below, and tagged `structure`, so none of them can see these. A note nobody
+   * links to is still an orphan and still reports 0 backlinks — it is simply
+   * drawn where it lives instead of nowhere.
+   */
+  const INDEX_NAMES = ['home.md', 'index.md', '_index.md', 'readme.md', 'readme']
+  const byFolder = new Map<string, string[]>()
+  for (const n of notes) {
+    const f = dirOf(n.path) // '' for the root, keeps the trailing slash
+    const list = byFolder.get(f)
+    if (list) list.push(n.path)
+    else byFolder.set(f, [n.path])
+  }
+
+  /** The one file that stands for a folder. Deterministic, so it never flickers. */
+  const hubOf = (folder: string): string | null => {
+    const files = byFolder.get(folder)
+    if (!files?.length) return null
+    let best = files[0]
+    let bestRank = Infinity
+    for (const p of files) {
+      const base = p.slice(p.lastIndexOf('/') + 1).toLowerCase()
+      const rank = INDEX_NAMES.indexOf(base)
+      const r = rank === -1 ? INDEX_NAMES.length : rank
+      if (r < bestRank || (r === bestRank && p < best)) {
+        best = p
+        bestRank = r
+      }
+    }
+    return best
+  }
+
+  const hubs = new Map<string, string>()
+  for (const f of byFolder.keys()) {
+    const h = hubOf(f)
+    if (h) hubs.set(f, h)
+  }
+
+  /**
+   * The single file the whole tree hangs from.
+   *
+   * Without this the spanning tree does not span. `parentHub` walks up looking
+   * for an ancestor folder that HOLDS a file, and a folder containing only
+   * subfolders holds none — so in a tree like `System/Skills/<name>/SKILL.md`
+   * every skill's hub climbed to `Skills/`, found nothing, climbed to the root,
+   * found nothing, and gave up. Measured: 259 nodes in 64 disconnected
+   * components with only 185 of the needed 258 edges, which on screen is the
+   * same field of loose dots the structural edges exist to prevent.
+   *
+   * Shallowest folder wins, ties broken on name, so the anchor is stable across
+   * rescans rather than dependent on Map insertion order.
+   */
+  let globalHub: string | null = null
+  {
+    let bestFolder: string | null = null
+    for (const f of hubs.keys()) {
+      if (
+        bestFolder === null ||
+        f.split('/').length < bestFolder.split('/').length ||
+        (f.split('/').length === bestFolder.split('/').length && f < bestFolder)
+      ) {
+        bestFolder = f
+      }
+    }
+    globalHub = bestFolder === null ? null : (hubs.get(bestFolder) ?? null)
+  }
+
+  /** Nearest ancestor folder that actually holds a file, so empty tiers are skipped. */
+  const parentHub = (folder: string): string | null => {
+    let f = folder
+    while (f) {
+      f = f.slice(0, f.lastIndexOf('/', f.length - 2) + 1)
+      const h = hubs.get(f)
+      if (h) return h
+      if (!f) break
+    }
+    // No ancestor holds a file. Attach to the tree's anchor rather than
+    // floating: an unattached hub strands its entire subtree.
+    return globalHub
+  }
+
+  const structural: VaultGraph['links'] = []
+  const addStructural = (from: string, to: string) => {
+    if (!to || from === to) return
+    const key = JSON.stringify([from, to])
+    if (seenEdges.has(key)) return // an author already said this; theirs wins
+    seenEdges.add(key)
+    structural.push({ from, to, kind: 'structure' })
+  }
+  for (const [folder, files] of byFolder) {
+    const hub = hubs.get(folder)
+    if (!hub) continue
+    for (const p of files) if (p !== hub) addStructural(p, hub)
+    const up = parentHub(folder)
+    if (up) addStructural(hub, up)
   }
 
   /**
@@ -1592,7 +1963,19 @@ async function buildIndex(): Promise<VaultIndex> {
     n.reachRoot = reachRoot
   }
 
-  const value: VaultIndex = { notes, graph: { nodes: notes.map((n) => n.path), links } }
+  /**
+   * Structural edges join the GRAPH here — after every count above, on purpose.
+   *
+   * `inbound`, `out`, `depth`, `orphan`, `links` and `backlinks` have all been
+   * taken from content edges alone by this point, so adding these changes what
+   * is DRAWN and nothing that is measured. Doing it earlier would have quietly
+   * emptied the Orphans filter and set every "How linked" bucket to at least
+   * one, which is a real feature traded away for a cosmetic win.
+   */
+  const value: VaultIndex = {
+    notes,
+    graph: { nodes: notes.map((n) => n.path), links: [...links, ...structural] },
+  }
   indexCache = { at: Date.now(), value }
   return value
 }

@@ -49,8 +49,16 @@ export type VaultTreeNode = {
    * a note it would contribute a garbage row to the database view and its
    * quoted text could resolve as links. Giving it its own kind means both
    * skip it by construction rather than by a second extension check.
+   *
+   * `file` is anything that is NOT text: an image, an archive, an executable.
+   * These are listed and indexed as rows — a folder of photographs should show
+   * its photographs rather than look empty, which is what happened when the
+   * explorer admitted `.md` alone — but they are never read as text and never
+   * opened in the editor, because a <textarea> round-trip through a PNG
+   * corrupts it. The editor refuses them by KIND rather than by re-deriving the
+   * extension, so there is one answer to "is this editable".
    */
-  kind: 'folder' | 'note' | 'canvas'
+  kind: 'folder' | 'note' | 'canvas' | 'file'
   children?: VaultTreeNode[]
 }
 
@@ -135,7 +143,26 @@ export type ShellResult = {
 }
 
 /** One edge of the graph view. Derived from [[wikilinks]], never authoritative. */
-export type VaultLink = { from: string; to: string }
+/**
+ * `kind` distinguishes an edge somebody WROTE from one the folder tree implies.
+ *
+ * `content` is a [[wikilink]], a markdown `[a](b)`, or a path mentioned in the
+ * text — a real assertion by the author that two files are related.
+ *
+ * `structure` is derived from where the files SIT: each file to its folder's
+ * index, each index to its parent's. It exists because most folders on a
+ * machine are not vaults and contain no links at all — a folder of photographs
+ * or of `hosts`/`lmhosts.sam` can never produce a content edge, and rendered
+ * without these the graph is a field of unconnected dots. Measured before they
+ * existed: `Pictures` 26 notes / 0 links, `System32\drivers\etc` 5 / 0,
+ * `Documents` 2 / 0.
+ *
+ * Kept SEPARATE rather than folded in, because `orphan`, `depth`, `links` and
+ * `backlinks` are all still counted from `content` alone. A note nobody links
+ * to is still an orphan — the Orphans filter and the "How linked" grouping keep
+ * meaning exactly what they meant — it is merely no longer stranded on screen.
+ */
+export type VaultLink = { from: string; to: string; kind?: 'content' | 'structure' }
 
 export type VaultGraph = { nodes: string[]; links: VaultLink[] }
 

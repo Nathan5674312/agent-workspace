@@ -159,6 +159,32 @@ export const NEW_TEXT_SIZE = { width: 250, height: 60 }
 /** Default size for a new file card. Obsidian's own default. */
 export const NEW_FILE_SIZE = { width: 400, height: 400 }
 
+/**
+ * The house card size: US Letter at 72dpi, 8.5in x 11in.
+ *
+ * A card on this board is going to HOLD A FILE, so it is shaped like the page
+ * that file prints to rather than like a sticky note. 72dpi is the reason the
+ * numbers are these and not some other pair: it is the PostScript point, one
+ * unit per point, so 8.5x11in is exactly 612x792 and the card is a page at 1:1
+ * rather than a rectangle that merely has a page's proportions.
+ *
+ * Portrait, because that is how the documents these cards stand for are read.
+ *
+ * Kept separate from NEW_TEXT_SIZE rather than replacing it: that constant is
+ * Obsidian's default and is what a board authored over there will carry, so it
+ * stays the name for that idea. This one is a decision this app is making.
+ */
+export const PAGE_SIZE = { width: 612, height: 792 }
+
+/**
+ * The floor a card can be resized to.
+ *
+ * Not zero, and not one: a card dragged to nothing cannot be grabbed again to
+ * drag it back, which is the same trap as a card buried under another. Wide
+ * enough to still show a grip and a line of text.
+ */
+export const MIN_CARD_SIZE = { width: 120, height: 60 }
+
 /** The title a `file` node shows: the filename, extension dropped. */
 export function fileNodeTitle(file: string): string {
   return file.split('/').pop()!.replace(/\.md$/i, '')

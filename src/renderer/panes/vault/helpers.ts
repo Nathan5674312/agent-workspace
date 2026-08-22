@@ -180,11 +180,15 @@ export function resolveWikilink(
 export function resolvableLinks(
   nodes: string[],
   links: VaultLink[],
-): Array<{ source: string; target: string }> {
+): Array<{ source: string; target: string; kind: VaultLink['kind'] }> {
   const ids = new Set(nodes)
   return links
     .filter((l) => ids.has(l.from) && ids.has(l.to))
-    .map((l) => ({ source: l.from, target: l.to }))
+    // `kind` is carried through because the graph draws the two differently: a
+    // link somebody wrote is the subject, a folder-derived one is the scaffold
+    // holding up the parts nobody wrote about. Dropping it here is what made
+    // every edge look equally authored.
+    .map((l) => ({ source: l.from, target: l.to, kind: l.kind }))
 }
 
 /**

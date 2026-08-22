@@ -146,20 +146,26 @@ test('a dot-folder is refused at the picker, not accepted and puzzled over', asy
 })
 
 test('the boot warning is recomputed, not carried over from the old root', async () => {
-  // A root one level above a vault produces a message naming the subfolder to
-  // use. After switching INTO that subfolder the advice is stale and would sit
-  // there telling you to pick the folder you are already in.
-  const parent = mkdtempSync(join(tmpdir(), 'parent-'))
-  const inner = join(parent, 'Real Vault')
-  mkdirSync(join(inner, '.obsidian'), { recursive: true })
-  writeFileSync(join(inner, '.obsidian', 'app.json'), '{}', 'utf8')
-  writeFileSync(join(inner, 'Home.md'), '# Home\n', 'utf8')
+  // A warning describes the root it was measured against, so switching roots
+  // must recompute it. Left alone it sits there condemning the folder the user
+  // has just moved to, on evidence gathered about a different one.
+  //
+  // The precondition used to be "root one level above a vault", which no longer
+  // warns about anything — that arrangement now indexes the nested vault
+  // correctly, which is the whole point of the change. An EMPTY folder is the
+  // warning that survives, and it exercises this the same way.
+  const empty = mkdtempSync(join(tmpdir(), 'empty-'))
+  const real = mkdtempSync(join(tmpdir(), 'real-'))
+  mkdirSync(join(real, '.obsidian'), { recursive: true })
+  writeFileSync(join(real, '.obsidian', 'app.json'), '{}', 'utf8')
+  writeFileSync(join(real, 'Home.md'), '# Home\n[[Note]]\n', 'utf8')
+  writeFileSync(join(real, 'Note.md'), 'a note\n', 'utf8')
 
-  vault.setVaultDir(parent)
-  choose(inner)
+  vault.setVaultDir(empty)
+  choose(real)
   await pick()
   settings.setRootMismatch(await vault.checkRoots())
-  assert.match(get().rootMismatch ?? '', /Real Vault/, 'precondition: the bad-root warning')
+  assert.match(get().rootMismatch ?? '', /no files/, 'precondition: the empty-root warning')
 
   await apply()
   assert.equal(get().rootMismatch, null, 'the stale warning outlived the root it described')

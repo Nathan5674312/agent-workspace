@@ -7,7 +7,8 @@ import {
   fileNodeTitle,
   edgeAnchor,
   canvasId,
-  NEW_TEXT_SIZE,
+  PAGE_SIZE,
+  MIN_CARD_SIZE,
   type CanvasDoc,
   type CanvasNode,
 } from '../../../shared/canvas.js'
@@ -76,6 +77,16 @@ const DUPLICATE_OFFSET = 24
  * raise this and the CSS box together if that ever shows up.
  */
 const EDGE_ORIGIN = 5000
+
+/**
+ * How many steps back an undo can go.
+ *
+ * Bounded because each entry is a whole serialized board and a long editing
+ * session would otherwise hold every state it ever passed through. Fifty is far
+ * past the point anyone reaches for Ctrl+Z and is a few hundred kilobytes at
+ * most for a board of ordinary size.
+ */
+const UNDO_LIMIT = 50
 
 /**
  * Whether an edge end draws an arrowhead, per JSON Canvas 1.0.
@@ -190,6 +201,38 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
   const [linkFrom, setLinkFrom] = useState<string | null>(null)
   /** The text card currently open for editing, by id. */
   const [editing, setEditing] = useState<string | null>(null)
+
+  /**
+   * Escape leaves connect mode.
+   *
+   * Connect mode makes a press pick an endpoint instead of starting a drag, so
+   * while it is on NO card can be moved — `onNodeDown` returns before it ever
+   * sets `drag.current`. Until now the only way out was the Connect button, and
+   * a user who did not remember pressing it reads the board as frozen rather
+   * than as moded. The crosshair cursor says something changed but not what.
+   *
+   * Escape is what every other mode in this pane already answers to — the card
+   * textarea above discards on it, and the dialogs do too — so this is the
+   * pane's existing convention rather than a new key to learn.
+   *
+   * On `window` because the surface is not focusable: there is nothing to give
+   * keyboard focus to, so a handler on the element would never fire. Bound only
+   * while the mode is on, so this listener does not exist for the whole session
+   * and cannot swallow an Escape that belongs to something else.
+   */
+  useEffect(() => {
+    if (!connect) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key !== 'Escape') return
+      // Not stopped: leaving a mode is not a reason to deny the same Escape to
+      // whatever else is listening, and the textarea's own handler already
+      // stops the ones that belong to an open editor.
+      setConnect(false)
+      setLinkFrom(null)
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [connect])
   /**
    * The selected cards, by id. PURE UI — nothing here is ever written to the
    * file. JSON Canvas has no concept of selection, and inventing a key for it
@@ -213,6 +256,20 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
    */
   const mtimeRef = useRef(0)
   const pathRef = useRef<string | null>(path)
+  /**
+   * Undo state, in refs for the same reason as the save state: a snapshot is
+   * taken inside `persist`, which a closure from an earlier render would read
+   * stale.
+   *
+   * `baseline` is the board as of the last load or write. `undoStack` holds the
+   * states before that, oldest first. Whole serialized documents rather than a
+   * command log: a board is a few kilobytes of JSON, the mutations here are
+   * varied (move, add, duplicate, recolour, retext, connect, delete), and a
+   * per-operation inverse for each is a great deal of code to get subtly wrong
+   * for something the file itself already represents exactly.
+   */
+  const baseline = useRef('')
+  const undoStack = useRef<string[]>([])
   const saveChain = useRef<Promise<void>>(Promise.resolve())
 
   const wrapRef = useRef<HTMLDivElement>(null)
@@ -321,6 +378,11 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     // does not exist in the file it lands in. Connect MODE is left alone —
     // that is a tool the user turned on, not state belonging to a file.
     setLinkFrom(null)
+    // History belongs to a FILE. Carried across, a Ctrl+Z on the new board
+    // would restore a snapshot of the old one and save it over the new path —
+    // the same cross-board write the mtime guard above only narrowly prevents.
+    undoStack.current = []
+    baseline.current = ''
 
     if (!path) {
       setError(null)
@@ -334,6 +396,10 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
         const parsed = parseCanvas(body.text)
         setDoc(parsed)
         mtimeRef.current = body.mtime
+        // The state the first undo returns to. Serialized rather than reusing
+        // `body.text`, so it is normalised the same way every later snapshot
+        // is and an undo cannot reformat the file as a side effect.
+        baseline.current = serializeCanvas(parsed)
         // Framing happens in the layout effect below, once the surface is
         // actually mounted. See `framed`.
       } catch (e) {
@@ -407,8 +473,32 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
    * free. `.canvas` needed no new channel: `read`/`save` were never markdown,
    * they were always text plus an mtime.
    */
-  const persist = (d: CanvasDoc) => {
+  const persist = (d: CanvasDoc, record = true) => {
     if (!path) return
+    /**
+     * Snapshot the state being REPLACED, not the one being written.
+     *
+     * `baseline` holds the board as it was after the last load or write, so at
+     * the moment a mutation asks to be saved it is still the pre-mutation text
+     * — exactly what an undo has to return to. Taken here rather than at each
+     * call site because every mutation already funnels through this one
+     * function, and a snapshot per call site is a snapshot someone will forget.
+     *
+     * Serialized EAGERLY. The write below runs inside the save chain, by which
+     * time the user may have dragged again and mutated `d` further; reading it
+     * then would record a state that was never the one being replaced.
+     *
+     * `record` is false only for the write an undo itself performs. Recording
+     * that would push the undone state straight back onto the stack and turn
+     * Ctrl+Z into a toggle between two boards.
+     */
+    if (record) {
+      if (baseline.current) {
+        undoStack.current.push(baseline.current)
+        if (undoStack.current.length > UNDO_LIMIT) undoStack.current.shift()
+      }
+      baseline.current = serializeCanvas(d)
+    }
     const target = path
     // The token this board had when the write was queued. Used only if the
     // board has moved on by the time it runs — see below.
@@ -445,6 +535,107 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     })
   }
 
+  // ── remove and undo ────────────────────────────────────────────
+  /**
+   * Deletes the selection, and every edge that touched it.
+   *
+   * Spliced IN PLACE, back to front, rather than reassigning `doc.nodes` to a
+   * filtered copy. Same reason the drag writes through the document: the arrays
+   * are the ones `parseCanvas` handed back, and replacing them is the first
+   * step of the reconstruction the preservation rule forbids. Back to front so
+   * removing one index does not shift the ones not yet examined.
+   *
+   * The edge pass is not optional. An edge naming a node that no longer exists
+   * is the dangling reference `addEdge` refuses to create — the render skips
+   * it, so nothing appears, while the file carries it and the info strip counts
+   * it. Deleting a card must not produce the corruption adding one is guarded
+   * against.
+   */
+  const deleteSelected = () => {
+    if (!doc || selected.size === 0) return
+    for (let i = doc.nodes.length - 1; i >= 0; i--)
+      if (selected.has(doc.nodes[i].id)) doc.nodes.splice(i, 1)
+    for (let i = doc.edges.length - 1; i >= 0; i--) {
+      const e = doc.edges[i]
+      if (selected.has(e.fromNode) || selected.has(e.toNode)) doc.edges.splice(i, 1)
+    }
+    // The ids are gone, so a selection holding them would highlight nothing and
+    // arm a second Delete that removes nothing.
+    setSelected(new Set())
+    setEditing(null)
+    repaint()
+    void persist(doc)
+  }
+
+  /**
+   * Steps the board back one mutation.
+   *
+   * Restores by PARSING the stored text, which is the same path `load` takes,
+   * so an undo carries groups, colours and unknown fields back exactly as the
+   * file had them. Replacing `doc` is safe here for that reason and only that
+   * reason: this object was never taken apart, so nothing can have been lost
+   * from it.
+   */
+  const undo = () => {
+    const prev = undoStack.current.pop()
+    if (prev === undefined) return
+    let restored: CanvasDoc
+    try {
+      restored = parseCanvas(prev)
+    } catch {
+      // A snapshot this view serialized cannot normally fail to parse. If it
+      // does, dropping it is better than replacing a working board with
+      // nothing, and the stack has already discarded the bad entry.
+      return
+    }
+    baseline.current = prev
+    setDoc(restored)
+    setSelected(new Set())
+    setEditing(null)
+    repaint()
+    // `false`: see the note in persist. This write is the undo, not a new
+    // mutation to be undone.
+    void persist(restored, false)
+  }
+
+  /**
+   * Delete removes the selection, Ctrl/Cmd+Z steps back.
+   *
+   * On `window` because the board is not focusable — the same reason the
+   * connect-mode Escape is. Bound only while a board is open.
+   *
+   * THE TEXT-ENTRY GUARD IS THE LOAD-BEARING PART. Backspace inside the card
+   * editor is how you correct a typo; without this it would delete the card you
+   * are typing into. `editing` alone is not enough — the rename and search
+   * fields elsewhere in the pane are not this view's state and it cannot see
+   * them, so the focused element is checked directly.
+   */
+  useEffect(() => {
+    if (!doc) return
+    const onKey = (e: KeyboardEvent) => {
+      const el = document.activeElement as HTMLElement | null
+      const typing =
+        editing !== null ||
+        (el !== null && (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT' || el.isContentEditable))
+      if (typing) return
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        undo()
+        return
+      }
+      if (e.key === 'Delete' || e.key === 'Backspace') {
+        // Only when something is selected, so a stray Backspace on an empty
+        // board is not swallowed from whatever else might want it.
+        if (selected.size === 0) return
+        e.preventDefault()
+        deleteSelected()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [doc, editing, selected])
+
   // ── interaction ────────────────────────────────────────────────
   /** Pointer position and view offset at the moment a background pan began. */
   const pan = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
@@ -457,6 +648,61 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     /** True when this gesture created the node it is dragging (Alt+drag). */
     created: boolean
   } | null>(null)
+
+  /**
+   * The card being resized, and the size and pointer position it started from.
+   *
+   * The ORIGIN is kept rather than the last position, so the size is always
+   * `start + total travel`. Accumulating per-move deltas drifts: every move
+   * rounds to an integer and the roundings add up over a gesture, so a card
+   * dragged out and back does not come home to the size it left.
+   */
+  const resize = useRef<{
+    node: CanvasNode
+    x0: number
+    y0: number
+    w0: number
+    h0: number
+  } | null>(null)
+
+  const onResizeDown = (e: React.PointerEvent, node: CanvasNode) => {
+    if (e.button !== 0) return
+    // Not a card drag and not a board pan. Without this the grip moves the card
+    // it is supposed to be resizing.
+    e.stopPropagation()
+    const p = toWorld(e.clientX, e.clientY)
+    resize.current = { node, x0: p.x, y0: p.y, w0: node.width, h0: node.height }
+    ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+  }
+
+  /**
+   * Sets every card to the house size.
+   *
+   * Groups are skipped. A group is a labelled REGION that contains cards, not a
+   * card, and resizing one to a page would shrink it out from under whatever it
+   * was drawn around.
+   *
+   * Position is left alone. Resizing from the top-left means a card grows down
+   * and right, which can overlap a neighbour — but the alternative is moving
+   * cards the user placed deliberately, and after this landed a drag brings the
+   * covered card back to the front anyway.
+   */
+  const uniformSize = () => {
+    if (!doc) return
+    let changed = false
+    for (const n of doc.nodes) {
+      if (n.type === 'group') continue
+      if (n.width === PAGE_SIZE.width && n.height === PAGE_SIZE.height) continue
+      n.width = PAGE_SIZE.width
+      n.height = PAGE_SIZE.height
+      changed = true
+    }
+    // A no-op must not write the file: every save takes a backup first, so
+    // pressing this twice would fill .backups/ with identical copies.
+    if (!changed) return
+    repaint()
+    void persist(doc)
+  }
 
   const toWorld = (clientX: number, clientY: number) => {
     const r = wrapRef.current!.getBoundingClientRect()
@@ -486,9 +732,11 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       id: canvasId(),
       type: 'text',
       text: '',
-      x: Math.round(p.x - NEW_TEXT_SIZE.width / 2),
-      y: Math.round(p.y - NEW_TEXT_SIZE.height / 2),
-      ...NEW_TEXT_SIZE,
+      // A card is page-shaped from the moment it exists, so a board does not
+      // become a mix of two sizes the first time someone adds one.
+      x: Math.round(p.x - PAGE_SIZE.width / 2),
+      y: Math.round(p.y - PAGE_SIZE.height / 2),
+      ...PAGE_SIZE,
     }
     doc.nodes.push(node)
     // Straight into editing: an empty card with no cursor in it gives the user
@@ -643,9 +891,63 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       created: target !== node,
     }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+    /**
+     * Raised for the duration of the gesture, so the card being dragged is not
+     * painted UNDER the cards it travels across. Written straight to the
+     * element for the same reason the geometry is: this changes 60 times a
+     * gesture and none of it is state anything else reads.
+     *
+     * Only when the gesture is moving the card it started on. An Alt+drag is
+     * dragging a COPY whose element does not exist yet — the copy was pushed to
+     * the end of `doc.nodes`, so it already paints above everything, and
+     * raising `currentTarget` here would raise the original it was copied from.
+     */
+    if (!drag.current.created) (e.currentTarget as HTMLElement).style.zIndex = '2'
+  }
+
+  /**
+   * Moves a node to the END of `doc.nodes`, which is what puts it in front.
+   *
+   * PAINT ORDER IS DOCUMENT ORDER. Every card carries the same `z-index: 1`, so
+   * two overlapping cards are resolved by their position in the file and
+   * nothing else. A card dropped onto one that is later in the document is
+   * painted underneath it, and from that moment the pointer cannot reach it:
+   * every press lands on the card on top. With no delete and no undo that card
+   * was unrecoverable without hand-editing the file.
+   *
+   * Reordering rather than raising `z-index` permanently, because order is
+   * where JSON Canvas actually stores this. A z-index that lives in the DOM
+   * would be forgotten on reload and would not survive the round trip to
+   * Obsidian, which reads the same file and orders it the same way.
+   *
+   * Groups are unaffected: `.canvas-node--group` sits at `z-index: 0`, so a
+   * group brought forward still paints behind the cards it contains.
+   */
+  const bringToFront = (node: CanvasNode) => {
+    if (!doc) return
+    const i = doc.nodes.indexOf(node)
+    // Already last => already in front, and splicing would dirty the file for
+    // nothing on every drag of the topmost card.
+    if (i < 0 || i === doc.nodes.length - 1) return
+    doc.nodes.splice(i, 1)
+    doc.nodes.push(node)
+    repaint()
   }
 
   const onMove = (e: React.PointerEvent) => {
+    if (resize.current) {
+      const p = toWorld(e.clientX, e.clientY)
+      const r = resize.current
+      // Rounded and floored for the same reasons as the drag: the spec declares
+      // width and height INTEGER, and `toWorld` divides by a fractional scale.
+      r.node.width = Math.max(MIN_CARD_SIZE.width, Math.round(r.w0 + (p.x - r.x0)))
+      r.node.height = Math.max(MIN_CARD_SIZE.height, Math.round(r.h0 + (p.y - r.y0)))
+      applyNode(r.node)
+      // Edges anchor to the card's SIDES, so a resize moves the ends of every
+      // line touching it.
+      if (doc && doc.edges.length > 0) repaint()
+      return
+    }
     if (drag.current) {
       const p = toWorld(e.clientX, e.clientY)
       // ROUNDED, because the spec declares x/y integer and `toWorld` divides by
@@ -684,7 +986,25 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
   const draggedLast = useRef(false)
 
   const onUp = () => {
+    // Saved on RELEASE, like the drag: a resize emits a pointer event per frame
+    // and writing the file at that rate would take a backup copy each time.
+    if (resize.current) {
+      const r = resize.current
+      resize.current = null
+      // Only when the size actually changed. A press on the grip that never
+      // travelled is not an edit and must not write the file.
+      if (doc && (r.node.width !== r.w0 || r.node.height !== r.h0)) void persist(doc)
+    }
     draggedLast.current = drag.current?.moved ?? false
+    const held = drag.current
+    if (held) {
+      // The gesture raise comes off whatever the outcome. Removed by id rather
+      // than from `currentTarget`, because a pointerup can land anywhere.
+      nodeEls.current.get(held.node.id)?.style.removeProperty('z-index')
+      // Ordered BEFORE the save below, so the write carries the new order
+      // rather than needing a second one.
+      if (held.moved) bringToFront(held.node)
+    }
     // Saving on RELEASE, not on every move: a drag emits a pointer event per
     // frame, and writing the file 60 times a second would take a backup copy
     // each time (save() backs up before overwrite) and fill .backups/ with a
@@ -744,6 +1064,14 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       <div className="canvas-toolbar">
         <button type="button" className="canvas-tool" onClick={addCard}>
           + Card
+        </button>
+        <button
+          type="button"
+          className="canvas-tool"
+          onClick={uniformSize}
+          title={`Set every card to ${PAGE_SIZE.width}x${PAGE_SIZE.height} (US Letter at 72dpi)`}
+        >
+          Page size
         </button>
         <button
           type="button"
@@ -883,6 +1211,24 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
               data-linking={linkFrom === n.id || undefined}
               data-selected={selected.has(n.id) || undefined}
             >
+              {/**
+               * The resize grip. Last in the card so it paints over the
+               * content, and `aria-hidden` because it is a pointer affordance
+               * with a keyboard equivalent nowhere yet — announcing a control
+               * that cannot be operated is worse than announcing nothing.
+               *
+               * Not rendered in connect mode: there a press means "pick this
+               * endpoint", and a grip that swallowed it would make the corner
+               * of every card a dead spot in the one mode where the whole card
+               * is supposed to be a target.
+               */}
+              {!connect && (
+                <div
+                  className="canvas-resize"
+                  aria-hidden="true"
+                  onPointerDown={(e) => onResizeDown(e, n)}
+                />
+              )}
               {n.type === 'file' && typeof n.file === 'string' ? (
                 <button
                   type="button"

@@ -401,7 +401,12 @@ test('every vault call works with nothing running but this process', async () =>
 
   const notes = await vault.list()
   assert.equal(notes.length, 2)
-  assert.deepEqual((await vault.graph()).links, [{ from: 'Home.md', to: 'Deep.md' }])
+  // Content edges only: the graph also carries folder-derived `structure`
+  // edges so any folder is a connected picture. See VaultLink.kind.
+  assert.deepEqual(
+    (await vault.graph()).links.filter((l) => l.kind === 'content'),
+    [{ from: 'Home.md', to: 'Deep.md', kind: 'content' }],
+  )
 
   const note = await vault.read('Home.md')
   assert.ok(note.text.includes('[[Deep]]'))
@@ -423,7 +428,15 @@ test('list() and graph() read the disk, not a note index', async () => {
   assert.equal(notes.length, 2)
 
   const g = await vault.graph()
-  assert.deepEqual(g.links, [{ from: 'Home.md', to: 'Deep.md' }])
+  assert.deepEqual(
+    g.links.filter((l) => l.kind === 'content'),
+    [{ from: 'Home.md', to: 'Deep.md', kind: 'content' }],
+  )
+  // And the folder-derived edge that makes any folder connected is there too.
+  assert.deepEqual(
+    g.links.filter((l) => l.kind === 'structure'),
+    [{ from: 'Deep.md', to: 'Home.md', kind: 'structure' }],
+  )
 })
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -625,6 +638,6 @@ test('checkRoots() reports an unusable vault root', async (t) => {
     )
     const msg = await vault.checkRoots()
     assert.ok(msg, 'a root with no indexable notes went unreported')
-    assert.match(msg, /no notes found/, `expected the empty-index answer, got: ${msg}`)
+    assert.match(msg, /no files/, `expected the empty-index answer, got: ${msg}`)
   })
 })

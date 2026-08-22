@@ -161,16 +161,58 @@ test('selection is an outline so it cannot be mistaken for a card colour', () =>
   assert.match(CSS, /\.canvas-node\[data-selected\]\s*\{\s*outline:/, 'selection is not an outline')
 })
 
-test('selection did not smuggle in a removal path', () => {
-  // Set.delete removes an id from a highlight. nodes.splice removes a card from
-  // someone's board. Removal is still blocked on Nathan.
-  // Narrowed to what actually removes from the DOCUMENT. The previous form
-  // banned any `.filter(` on nodes or edges, which is ordinary read-only code —
-  // culling off-screen cards, counting the edges touching one — and would have
-  // false-positived on z-order, the next item in the backlog, since reordering
-  // is a splice. A ban that fires on correct code teaches people to delete it.
-  assert.doesNotMatch(VIEW, /doc\.nodes\.splice\(/, 'a card can be removed from the document')
-  assert.doesNotMatch(VIEW, /doc\.edges\.splice\(/, 'an edge can be removed from the document')
-  assert.doesNotMatch(VIEW, /doc\.nodes\s*=\s/, 'the node list can be replaced wholesale')
-  assert.doesNotMatch(VIEW, /doc\.edges\s*=\s/, 'the edge list can be replaced wholesale')
+// --------------------------------------------------------------- removal
+
+/**
+ * This test used to assert removal did not exist, because it was "blocked on
+ * Nathan" pending an undo. The undo landed with it, so the hold is over and the
+ * assertions now pin how removal behaves rather than that it is absent.
+ */
+
+test('deleting a selection takes its edges with it', () => {
+  // THE EDGE PASS IS THE LOAD-BEARING PART. An edge naming a node that no
+  // longer exists is the dangling reference `addEdge` refuses to create: the
+  // render skips it so nothing appears, while the file still carries it and the
+  // info strip still counts it. Deleting a card must not produce the corruption
+  // adding one is guarded against.
+  const del = VIEW.slice(VIEW.indexOf('const deleteSelected ='), VIEW.indexOf('const undo ='))
+  assert.ok(del.length > 0, 'deleteSelected no longer has the shape this test reads')
+  assert.match(del, /doc\.nodes\.splice\(/, 'a selected card is not removed from the document')
+  assert.match(del, /doc\.edges\.splice\(/, 'an edge to a removed card outlives it')
+  // Both ends, or an edge INTO the deleted card survives while one out of it
+  // does not, which is the half-fix that looks like it works.
+  assert.match(del, /selected\.has\(e\.fromNode\)/, 'the from end is not checked')
+  assert.match(del, /selected\.has\(e\.toNode\)/, 'the to end is not checked')
+})
+
+test('a keyboard removal cannot fire while text is being typed', () => {
+  // Backspace inside the card editor is how a typo gets corrected. Without this
+  // guard it deletes the card being typed into. `editing` alone is not enough:
+  // the rename and search fields elsewhere in the pane are not this view's
+  // state, so the focused element is checked directly.
+  const start = VIEW.indexOf('const typing =')
+  const handler = VIEW.slice(start, VIEW.indexOf('window.addEventListener', start))
+  assert.ok(start >= 0 && handler.length > 0, 'the key handler no longer has the shape this test reads')
+  assert.match(handler, /TEXTAREA/, 'typing in a textarea can still delete a card')
+  assert.match(handler, /isContentEditable/, 'a contenteditable is not treated as text entry')
+  assert.match(handler, /if \(typing\) return/, 'the guard is computed but not applied')
+})
+
+test('an undo does not record itself', () => {
+  // `persist(restored, false)` is what stops Ctrl+Z becoming a toggle between
+  // two boards: recording the undo would push the state it just left straight
+  // back onto the stack.
+  const undo = VIEW.slice(VIEW.indexOf('const undo ='), VIEW.indexOf('Delete removes the selection'))
+  assert.ok(undo.length > 0, 'undo no longer has the shape this test reads')
+  assert.match(undo, /persist\(restored, false\)/, 'an undo records itself and Ctrl+Z toggles')
+  // Restored by parsing the stored text, the same path `load` takes, so groups,
+  // colours and unknown fields come back exactly as the file had them.
+  assert.match(undo, /parseCanvas\(prev\)/, 'an undo rebuilds the doc instead of parsing it')
+})
+
+test('history is dropped when the board changes', () => {
+  // A snapshot belongs to a FILE. Carried across, a Ctrl+Z on the new board
+  // would restore the old board and save it over the new path.
+  assert.match(VIEW, /undoStack\.current = \[\]/, 'undo history survives a board change')
+  assert.match(VIEW, /baseline\.current = ''/, 'the undo baseline survives a board change')
 })

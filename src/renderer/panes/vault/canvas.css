@@ -139,6 +139,49 @@
 .canvas-node:active {
   cursor: grabbing;
 }
+
+/* The resize grip: bottom-right corner, the corner every resizable thing on
+   this platform uses. Sized generously because it is a drag target at whatever
+   zoom the board happens to be at, and a 6px corner is unhittable at 40%. */
+.canvas-resize {
+  position: absolute;
+  right: 0;
+  bottom: 0;
+  width: 16px;
+  height: 16px;
+  z-index: 2;
+  cursor: nwse-resize;
+  /* Two short strokes, the standard grip, drawn rather than added as an element
+     so the card keeps one child for its content. */
+  background:
+    linear-gradient(
+      135deg,
+      transparent 0 45%,
+      var(--canvas-color, var(--label-quaternary)) 45% 55%,
+      transparent 55%
+    ),
+    linear-gradient(
+      135deg,
+      transparent 0 70%,
+      var(--canvas-color, var(--label-quaternary)) 70% 80%,
+      transparent 80%
+    );
+  /* Invisible until the card is under the pointer or selected: fifteen cards
+     each showing a permanent corner mark is visual noise on a board whose whole
+     job is to be read at a glance. */
+  opacity: 0;
+  transition: opacity 120ms ease;
+}
+.canvas-node:hover .canvas-resize,
+.canvas-node[data-selected] .canvas-resize {
+  opacity: 0.8;
+}
+/* Stays up for the whole gesture: the pointer leaves the card as soon as the
+   card is made smaller than the cursor's travel, and a grip that vanished
+   mid-drag would read as the gesture having been dropped. */
+.canvas-resize:active {
+  opacity: 1;
+}
 /* Lifted, not shrunk: a card is an object you pick up, the same reasoning
    GraphView applies to a held node. */
 /* Hover keeps the card's own colour when it has one, or a coloured card would

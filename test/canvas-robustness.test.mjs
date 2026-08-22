@@ -88,7 +88,13 @@ test('Enter does not commit the card while an IME candidate is open', () => {
   // closes, storing the un-converted romaji as the card's real text. This is
   // the pane's first keyboard-commit, so it is the first place the trap exists;
   // Editor.tsx commits on a button and never had it.
-  const key = VIEW.slice(VIEW.indexOf('onKeyDown={(e) => {'), VIEW.indexOf('Escape'))
+  // The end anchor is searched FROM the start index, not from the top of the
+  // file. 'Escape' is an ordinary word that any other handler may use — the
+  // connect-mode exit above uses it — and an unanchored indexOf finds the
+  // earlier one, inverts the slice, and yields '' regardless of what the
+  // textarea actually does.
+  const start = VIEW.indexOf('onKeyDown={(e) => {')
+  const key = VIEW.slice(start, VIEW.indexOf('Escape', start))
   assert.ok(key.length > 0, 'the textarea key handler no longer has the shape this test reads')
   assert.match(key, /isComposing/, 'Enter commits during IME composition')
 })

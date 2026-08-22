@@ -185,6 +185,22 @@ export const PAGE_SIZE = { width: 612, height: 792 }
  */
 export const MIN_CARD_SIZE = { width: 120, height: 60 }
 
+/**
+ * The drag payload a canvas accepts: one vault-relative note path.
+ *
+ * A CUSTOM TYPE RATHER THAN `text/plain`, and that is the whole point of naming
+ * it. The board must accept a note dragged out of this app's own tree and
+ * refuse a paragraph dragged out of a browser, a file dragged off the desktop,
+ * or a selection dragged from the editor next door — all of which arrive as
+ * `text/plain` and none of which are a vault path. `dragover` can then answer
+ * honestly: the cursor shows a drop target only where dropping will work.
+ *
+ * Vendor-prefixed and lowercase because the drag-and-drop API lowercases every
+ * type it is given, so a mixed-case constant would never match what comes back
+ * out of `getData`.
+ */
+export const CANVAS_DROP_MIME = 'application/x-agent-workspace-note'
+
 /** The title a `file` node shows: the filename, extension dropped. */
 export function fileNodeTitle(file: string): string {
   return file.split('/').pop()!.replace(/\.md$/i, '')

@@ -1,4 +1,5 @@
 import type { VaultTreeNode } from '../../../shared/ipc.js'
+import { CANVAS_DROP_MIME } from '../../../shared/canvas.js'
 
 /**
  * Folder tree — real vault folders, collapsible, in vault order.
@@ -99,9 +100,27 @@ function TreeNode({
           )}
         </>
       ) : (
+        /**
+         * Notes are DRAGGABLE, so one can be dropped onto an open canvas to
+         * become a card. Folders are not: a folder is not a thing a board can
+         * hold, and a drag that starts but can never be dropped anywhere is
+         * worse than no drag at all.
+         *
+         * The path travels, not the name — two notes in different folders share
+         * a name and the board needs the one that was actually dragged.
+         *
+         * `effectAllowed` and the custom type together are what make the cursor
+         * tell the truth: a copy cursor over a board that will take it, and a
+         * no-drop cursor everywhere else.
+         */
         <button
           className="vault-tree-item vault-tree-note"
           onClick={() => onSelectNote(node.path)}
+          draggable
+          onDragStart={(e) => {
+            e.dataTransfer.setData(CANVAS_DROP_MIME, node.path)
+            e.dataTransfer.effectAllowed = 'copy'
+          }}
         >
           <span className="vault-tree-label">{node.name}</span>
         </button>

@@ -7,6 +7,7 @@ import {
   fileNodeTitle,
   edgeAnchor,
   canvasId,
+  CANVAS_DROP_MIME,
   PAGE_SIZE,
   MIN_CARD_SIZE,
   type CanvasDoc,
@@ -810,6 +811,50 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     void persist(doc)
   }
 
+  /**
+   * A note dragged out of the tree becomes a file card where it was dropped.
+   *
+   * `dragover` has to preventDefault or no `drop` ever fires — the default
+   * action for a dragged thing is "refuse it", and the refusal is silent, which
+   * is the single commonest reason a drop target does nothing. It is guarded on
+   * the custom type so the board only claims drags it can actually take.
+   */
+  const onDragOver = (e: React.DragEvent) => {
+    if (!doc || !e.dataTransfer.types.includes(CANVAS_DROP_MIME)) return
+    e.preventDefault()
+    e.dataTransfer.dropEffect = 'copy'
+  }
+
+  const onDrop = (e: React.DragEvent) => {
+    if (!doc) return
+    const file = e.dataTransfer.getData(CANVAS_DROP_MIME)
+    // Empty means this was somebody else's drag that reached us anyway. Left
+    // un-defaulted so the drop falls through to whatever would have had it.
+    if (!file) return
+    e.preventDefault()
+    /**
+     * Dropped where the CURSOR is, centred on it, which is where the user
+     * pointed. `toWorld` already accounts for pan and zoom, so a card dropped
+     * on a board scrolled far from the origin lands under the pointer rather
+     * than at some remembered coordinate.
+     */
+    const p = toWorld(e.clientX, e.clientY)
+    const node: CanvasNode = {
+      id: canvasId(),
+      type: 'file',
+      file,
+      x: Math.round(p.x - PAGE_SIZE.width / 2),
+      y: Math.round(p.y - PAGE_SIZE.height / 2),
+      ...PAGE_SIZE,
+    }
+    doc.nodes.push(node)
+    // Selected on arrival: the card is the thing the user is now working with,
+    // and it is what a following Delete or Ctrl+Z should act on.
+    selectNode(node.id, false)
+    repaint()
+    void persist(doc)
+  }
+
   const addEdge = (fromNode: string, toNode: string) => {
     if (!doc) return
     /**
@@ -1164,6 +1209,8 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
         onPointerMove={onMove}
         onPointerUp={onUp}
         onPointerCancel={onUp}
+        onDragOver={onDragOver}
+        onDrop={onDrop}
         onWheel={onWheel}
         data-tick={tick}
         data-connect={connect || undefined}

@@ -670,12 +670,46 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       } else {
         ctx.fillStyle = COL.label
         ctx.font = `${11 / k}px ${css.fontFamily}`
-        // Progressive, by degree — see `labelZoom`. Hubs name themselves while
-        // the whole graph is still in frame; leaves wait until you are actually
-        // reading that corner of it.
-        for (const n of nodes) {
-          if (nodeR(n) * k < forcesRef.current.labelAt) continue
-          ctx.fillText(n.label, n.x!, n.y! - nodeR(n) - 4 / k)
+        /**
+         * `labelAt` is a FLOOR, not the whole rule. Crowding is culled by
+         * collision on top of it.
+         *
+         * The floor alone could not do this job. It keys off ZOOM while the
+         * problem is DENSITY, and the two fight: zooming in puts fewer nodes on
+         * screen but pushes more of them over the threshold, and the threshold
+         * wins. Worse, `radius()` uses sqrt(degree), so a leaf and a 25-link hub
+         * differ by only 2.2x — the entire progression from "a few hubs named"
+         * to "everything named" fits inside one 2.2x of zoom, which is the
+         * "slightly scroll in and it is suddenly unreadable" this fixes.
+         *
+         * Raising the floor only slides that band; the crowd returns one scroll
+         * later. A max-label count needs a constant that is wrong for somebody's
+         * vault. Overlap culling is self-regulating at every zoom, adds no
+         * tunable, and DESCENDING DEGREE means the label dropped is always the
+         * least important one competing for that space.
+         */
+        const named = nodes
+          .filter((n) => nodeR(n) * k >= forcesRef.current.labelAt)
+          .sort((a, b) => b.degree - a.degree)
+        // ponytail: O(n^2) overlap scan against a plain array. A graph this size
+        // never makes it matter; reach for a grid only if a vault ever puts
+        // thousands of labels past the floor at once.
+        const placed: { x0: number; y0: number; x1: number; y1: number }[] = []
+        // Font is already set above, so measureText is in the right one. Height
+        // is the font size; the baseline is alphabetic, so the box runs upward.
+        const lineH = 11 / k
+        for (const n of named) {
+          const cx = n.x!
+          const cy = n.y! - nodeR(n) - 4 / k
+          const halfW = ctx.measureText(n.label).width / 2
+          const box = { x0: cx - halfW, y0: cy - lineH, x1: cx + halfW, y1: cy }
+          if (
+            placed.some((p) => box.x0 < p.x1 && box.x1 > p.x0 && box.y0 < p.y1 && box.y1 > p.y0)
+          ) {
+            continue
+          }
+          placed.push(box)
+          ctx.fillText(n.label, cx, cy)
         }
       }
       ctx.globalAlpha = 1

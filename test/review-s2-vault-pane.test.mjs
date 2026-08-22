@@ -449,7 +449,28 @@ test('async effects are cancellable so late responses cannot overwrite state', (
 
 test('tree expansion is controlled, so expand-all and collapse-all actually fire', () => {
   const tree = stripComments(src('FolderTree.tsx'))
-  assert.doesNotMatch(tree, /useState/, 'FolderTree still seeds expansion once on mount')
+  /**
+   * The bug this guards was FolderTree seeding EXPANSION into local state, so
+   * the seed was read once on mount and the explorer's expand/collapse buttons
+   * did nothing.
+   *
+   * It used to be enforced by banning `useState` outright. That was a proxy,
+   * and it now fires on the last-touched-row highlight, which is local UI
+   * feedback nothing outside the tree acts on and which has nothing to do with
+   * expansion.
+   *
+   * So the contract is asserted DIRECTLY instead, and positively: expansion is
+   * read from the prop on every render. That is stronger than the old ban —
+   * absence of `useState` never proved expansion was live, while this fails if
+   * expansion is ever cached locally under any name.
+   */
+  assert.match(
+    tree,
+    /const isExpanded = expanded\.has\(node\.path\)/,
+    'expansion is not read from the prop on every render',
+  )
+  assert.doesNotMatch(tree, /setExpanded/, 'FolderTree owns expansion state again')
+  assert.doesNotMatch(tree, /useState[^)]*expand/i, 'FolderTree seeds expansion locally')
   assert.match(tree, /expanded: Set<string>/)
   assert.match(tree, /onToggle/)
 

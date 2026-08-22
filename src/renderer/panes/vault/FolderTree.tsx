@@ -1,3 +1,4 @@
+import { useState } from 'react'
 import type { VaultTreeNode } from '../../../shared/ipc.js'
 import { CANVAS_DROP_MIME } from '../../../shared/canvas.js'
 
@@ -24,6 +25,18 @@ export function FolderTree({
   expanded,
   onToggle,
 }: FolderTreeProps) {
+  /**
+   * The last note the user touched — clicked once, or started dragging.
+   *
+   * Local, because it is feedback about a gesture and nothing outside this tree
+   * acts on it. Lifting it to VaultPane would make every pane re-render to
+   * light up one row.
+   *
+   * Not the same thing as the OPEN note: you can touch a file, drag it onto a
+   * board, and never open it. This answers "which one did I just grab", which
+   * is the question a single click now asks, since opening moved to double.
+   */
+  const [touched, setTouched] = useState<string | null>(null)
   // Render the root's CHILDREN, not the root. Obsidian lists the vault's
   // top-level folders directly in the explorer; the vault itself is named once,
   // at the bottom, by the vault switcher. Rendering the root node here put
@@ -38,6 +51,8 @@ export function FolderTree({
           expanded={expanded}
           onToggle={onToggle}
           onSelectNote={onSelectNote}
+          touched={touched}
+          onTouch={setTouched}
           depth={0}
         />
       ))}
@@ -50,6 +65,9 @@ interface TreeNodeProps {
   expanded: Set<string>
   onToggle: (path: string) => void
   onSelectNote: (path: string) => void
+  /** Path of the last-touched note, or null. */
+  touched: string | null
+  onTouch: (path: string) => void
   depth: number
 }
 
@@ -58,6 +76,8 @@ function TreeNode({
   expanded,
   onToggle,
   onSelectNote,
+  touched,
+  onTouch,
   depth,
 }: TreeNodeProps) {
   const isExpanded = expanded.has(node.path)
@@ -93,6 +113,8 @@ function TreeNode({
                   expanded={expanded}
                   onToggle={onToggle}
                   onSelectNote={onSelectNote}
+                  touched={touched}
+                  onTouch={onTouch}
                   depth={depth + 1}
                 />
               ))}
@@ -115,9 +137,33 @@ function TreeNode({
          */
         <button
           className="vault-tree-item vault-tree-note"
-          onClick={() => onSelectNote(node.path)}
+          data-touched={touched === node.path || undefined}
+          /**
+           * ONE CLICK MARKS, TWO CLICKS OPEN.
+           *
+           * A single click used to open the note, which fought the other thing
+           * this row is for: dragging it onto a board. Reaching for a file to
+           * drag meant opening it first, and opening a note unmounts whatever
+           * view you were in — including the board you were dragging it to.
+           *
+           * THE KEYBOARD PATH IS THE EXCEPTION AND IT IS NOT OPTIONAL. Enter or
+           * Space on a focused button fires a click with no pointer behind it,
+           * and there is no such thing as a keyboard double-click here — so
+           * treating every click as "just mark it" would leave a keyboard user
+           * with no way to open a note at all. A synthesised click carries
+           * `detail: 0`, which is the same signal the canvas uses to tell a
+           * real press from one the browser made up.
+           */
+          onClick={(e) => {
+            onTouch(node.path)
+            if (e.detail === 0) onSelectNote(node.path)
+          }}
+          onDoubleClick={() => onSelectNote(node.path)}
           draggable
           onDragStart={(e) => {
+            // Marked on drag too: the point of the highlight is "this is the
+            // one you just grabbed", and a drag is the strongest form of that.
+            onTouch(node.path)
             e.dataTransfer.setData(CANVAS_DROP_MIME, node.path)
             e.dataTransfer.effectAllowed = 'copy'
           }}

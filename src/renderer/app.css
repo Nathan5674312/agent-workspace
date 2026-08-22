@@ -191,6 +191,19 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
 .vault-tree-node[data-depth="3"] { padding-left: 3em; }
 .vault-tree-note .vault-tree-label { color: var(--label-tertiary); }
 
+/* The last file touched — clicked once, or picked up to drag. Answers "which
+   one did I just grab", which is the question a single click now asks since
+   opening moved to double-click.
+
+   A left bar plus a lift in text colour, not a filled row: the fill is already
+   spoken for by hover and :active, and three filled states on one row is how a
+   list stops reading as a list. */
+.vault-tree-item[data-touched] {
+  background: var(--fill-selected);
+  box-shadow: inset 2px 0 0 var(--accent);
+}
+.vault-tree-item[data-touched] .vault-tree-label { color: var(--label); }
+
 .vault-switcher {
   display: flex; align-items: center; gap: var(--space-2);
   padding: var(--space-4);

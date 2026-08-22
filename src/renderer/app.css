@@ -137,6 +137,31 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
      the element that lights up on hover. A 1px border beside a 6px handle reads
      as a double rule and leaves the thin one looking like the draggable edge. */
 }
+/* The divider between the two stacked sections of the canvas sidebar: boards
+   above, files below. It names the lower one, because two unlabelled trees in
+   one column read as a single tree that has gone wrong.
+
+   `flex: none` so the heading keeps its height while the trees either side of it
+   take the space and scroll independently — without it a long file tree pushes
+   the board list off the top of the sidebar. */
+.vault-sidebar-heading {
+  flex: none;
+  padding: var(--space-2) var(--space-3) var(--space-1);
+  border-top: 1px solid var(--separator);
+  color: var(--label-tertiary);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+/* Both trees scroll on their own, so reaching a note near the bottom of a big
+   vault does not scroll the board list out of view. */
+.vault-sidebar > .vault-folder-tree,
+.vault-sidebar > .canvas-list {
+  min-height: 0;
+  overflow-y: auto;
+}
+
 .vault-explorer-header {
   display: flex; align-items: center; gap: var(--space-1);
   padding: var(--space-3);

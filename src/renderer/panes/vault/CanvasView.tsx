@@ -1325,16 +1325,26 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
   return (
     <div className="canvas-view">
       <div className="canvas-toolbar">
+        {/**
+         * "Page", not "Card".
+         *
+         * A card is a sticky note — something small you jot on. These are
+         * US Letter at 1:1, they hold a whole file, and you scroll and edit
+         * inside them. The word was describing the old thing.
+         *
+         * The size button loses the name to avoid two controls both called
+         * "Page"; what it does is make every page the same size, so it says so.
+         */}
         <button type="button" className="canvas-tool" onClick={addCard}>
-          + Card
+          + Page
         </button>
         <button
           type="button"
           className="canvas-tool"
           onClick={uniformSize}
-          title={`Set every card to ${PAGE_SIZE.width}x${PAGE_SIZE.height} (US Letter at 72dpi)`}
+          title={`Set every page to ${PAGE_SIZE.width}x${PAGE_SIZE.height} (US Letter at 72dpi)`}
         >
-          Page size
+          Uniform size
         </button>
         <button
           type="button"
@@ -1716,7 +1726,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
         <span>{path.split('/').pop()}</span>
         <span className="canvas-info-sep">·</span>
         <span>
-          {doc.nodes.length} card{doc.nodes.length === 1 ? '' : 's'}
+          {doc.nodes.length} page{doc.nodes.length === 1 ? '' : 's'}
         </span>
         {doc.edges.length > 0 && (
           <>

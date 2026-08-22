@@ -813,15 +813,42 @@ export function VaultPane(): React.ReactElement {
               onCreated={vault.reload}
             />
           ) : activeRibbon === 'canvas' ? (
-            /* Reads the boards out of the same tree the explorer draws, so
-               there is one answer to what is in the vault. Opening one goes
-               through `openNote`, which routes .canvas to the Canvas view. */
-            <CanvasList
-              tree={vault.tree}
-              current={canvasPath}
-              onOpen={(path) => void openNote(path)}
-              onCreated={vault.reload}
-            />
+            /**
+             * TWO SECTIONS, not one, and that is a fix rather than a layout
+             * preference.
+             *
+             * Every other ribbon icon replaces the file tree, which is right for
+             * them — bookmarks and daily notes are lists you read on their own.
+             * The canvas section is different because a board is something you
+             * drag files INTO: notes are draggable out of the tree and become
+             * cards where they land. Swapping the tree away the moment you open
+             * a board meant the source of that gesture was never on screen at
+             * the same time as its target, so the gesture was close to
+             * unreachable in normal use.
+             *
+             * The boards come first because that is what the icon was pressed
+             * for; the tree sits under it as the thing you pull from.
+             */
+            <>
+              {/* Reads the boards out of the same tree the explorer draws, so
+                  there is one answer to what is in the vault. Opening one goes
+                  through `openNote`, which routes .canvas to the Canvas view. */}
+              <CanvasList
+                tree={vault.tree}
+                current={canvasPath}
+                onOpen={(path) => void openNote(path)}
+                onCreated={vault.reload}
+              />
+              {/* Named, because two unlabelled trees stacked in one column read
+                  as one tree that has gone wrong. */}
+              <div className="vault-sidebar-heading">Files</div>
+              <FolderTree
+                root={sortedTree}
+                onSelectNote={openNote}
+                expanded={expanded}
+                onToggle={handleToggleFolder}
+              />
+            </>
           ) : activeRibbon === 'terminal' ? (
             /* The first ribbon icon to graduate from a placeholder to a real
                panel. The rest still describe themselves; see SidebarPlaceholder. */

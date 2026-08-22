@@ -88,8 +88,16 @@
   stroke: var(--canvas-color, var(--label-tertiary));
   stroke-width: 2;
   /* Clay at 5.0:1 rather than Taupe: an edge is structure, the same argument
-     GraphView's link colour makes. Taupe is decorative-only by the palette. */
-  opacity: 0.55;
+     GraphView's link colour makes. Taupe is decorative-only by the palette.
+
+     0.85, not 0.55. At 0.55 over the artwork ground the connections were the
+     faintest thing on the board — the cards read, the lines between them
+     almost did not, which inverts what a board of connected notes is FOR.
+     Structure carries the meaning here and has to survive the backdrop. */
+  opacity: 0.85;
+  /* A curve has ends now, and a butt cap leaves a visible notch where the
+     stroke meets an arrowhead. */
+  stroke-linecap: round;
 }
 
 /* An edge label sits ON the line, so it needs to be legible over it without a

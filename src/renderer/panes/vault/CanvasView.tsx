@@ -138,6 +138,70 @@ const anchorOn = (
 }
 
 /**
+ * Which side of a card an anchor sits on, as an outward unit vector.
+ *
+ * Derived from the geometry rather than read off `fromSide`/`toSide`, because
+ * those are OPTIONAL — most edges omit them and let `edgeAnchor` derive the
+ * nearest pair. Measuring which of the four edges the point actually lies on
+ * covers both cases with one rule, and a stated side has already been turned
+ * into a point by `anchorOn` before this sees it.
+ */
+const outward = (node: CanvasNode, p: { x: number; y: number }) => {
+  const toLeft = Math.abs(p.x - node.x)
+  const toRight = Math.abs(p.x - (node.x + node.width))
+  const toTop = Math.abs(p.y - node.y)
+  const toBottom = Math.abs(p.y - (node.y + node.height))
+  const nearest = Math.min(toLeft, toRight, toTop, toBottom)
+  if (nearest === toLeft) return { x: -1, y: 0 }
+  if (nearest === toRight) return { x: 1, y: 0 }
+  if (nearest === toTop) return { x: 0, y: -1 }
+  return { x: 0, y: 1 }
+}
+
+/**
+ * The control points of the curve an edge is drawn as.
+ *
+ * A STRAIGHT LINE BETWEEN TWO ANCHORS IS THE THING THAT LOOKED WRONG. It leaves
+ * a card at whatever angle the other card happens to be at, so it reads as a
+ * line laid over the board rather than as a cable plugged into a side. Pulling
+ * each control point straight out from its own side makes the curve leave
+ * perpendicular and turn on its way, which is what every diagram tool does and
+ * what makes the connection read as belonging to the card.
+ *
+ * The handle length scales with the distance so near cards get a gentle bend
+ * rather than a loop, and is clamped so far cards do not get a handle so long
+ * the curve swings out past both of them.
+ */
+const edgeCurve = (
+  a: CanvasNode,
+  from: { x: number; y: number },
+  b: CanvasNode,
+  to: { x: number; y: number },
+) => {
+  const da = outward(a, from)
+  const db = outward(b, to)
+  const pull = Math.min(Math.max(Math.hypot(to.x - from.x, to.y - from.y) * 0.4, 24), 160)
+  const c1 = { x: from.x + da.x * pull, y: from.y + da.y * pull }
+  const c2 = { x: to.x + db.x * pull, y: to.y + db.y * pull }
+  const o = EDGE_ORIGIN
+  return {
+    d:
+      `M ${from.x + o} ${from.y + o} ` +
+      `C ${c1.x + o} ${c1.y + o}, ${c2.x + o} ${c2.y + o}, ${to.x + o} ${to.y + o}`,
+    /**
+     * The curve's own midpoint, for the label. The straight midpoint of the two
+     * anchors is NOT on a curved line, so a label placed there floats off the
+     * edge it belongs to. This is the cubic evaluated at t=0.5, which reduces
+     * to (P0 + 3C1 + 3C2 + P3) / 8.
+     */
+    mid: {
+      x: (from.x + 3 * c1.x + 3 * c2.x + to.x) / 8 + o,
+      y: (from.y + 3 * c1.y + 3 * c2.y + to.y) / 8 + o,
+    },
+  }
+}
+
+/**
  * A JSON Canvas `color` as a CSS value, or null when there is nothing to paint.
  *
  * The spec allows two forms and they resolve differently. A PRESET is `"1"` to
@@ -1157,6 +1221,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                * nothing rather than an empty halo.
                */
               const label = typeof edge.label === 'string' ? edge.label.trim() : ''
+              const curve = edgeCurve(a, from, b, to)
               return (
                 <g
                   key={edge.id}
@@ -1166,24 +1231,25 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                     applyColor(el, edge.color)
                   }}
                 >
-                  <line
-                    x1={from.x + EDGE_ORIGIN}
-                    y1={from.y + EDGE_ORIGIN}
-                    x2={to.x + EDGE_ORIGIN}
-                    y2={to.y + EDGE_ORIGIN}
+                  <path
+                    d={curve.d}
                     className="canvas-edge"
+                    /* A path has an interior; an edge is a stroke. Without this
+                       every curve is filled black between its ends. */
+                    fill="none"
                     markerStart={
                       drawsArrow(edge.fromEnd, 'none') ? 'url(#canvas-arrow)' : undefined
                     }
                     markerEnd={drawsArrow(edge.toEnd, 'arrow') ? 'url(#canvas-arrow)' : undefined}
                   />
                   {label && (
-                    // Midpoint of the drawn line, which is the stated anchors
-                    // when the file gave them — so a hand-routed edge carries
-                    // its label along the route the user actually chose.
+                    // Midpoint of the CURVE, not of the two anchors — see
+                    // edgeCurve. A hand-routed edge still carries its label
+                    // along the route the user actually chose, because the
+                    // curve is built from the anchors the file stated.
                     <text
-                      x={(from.x + to.x) / 2 + EDGE_ORIGIN}
-                      y={(from.y + to.y) / 2 + EDGE_ORIGIN}
+                      x={curve.mid.x}
+                      y={curve.mid.y}
                       className="canvas-edge-label"
                       textAnchor="middle"
                       dominantBaseline="middle"

@@ -225,14 +225,49 @@
 .canvas-file {
   display: flex;
   align-items: center;
-  gap: var(--space-2);
   width: 100%;
-  padding: var(--space-3) var(--space-4);
   color: var(--accent);
   font: inherit;
   text-align: left;
   border-bottom: 1px solid var(--separator);
   background: var(--material-light);
+  /**
+   * THE TITLE CANCELS THE ZOOM, so a page says what it is at a glance instead
+   * of only once you have zoomed into it.
+   *
+   * `--canvas-k` is the board's scale, written by applyView(). Dividing by it
+   * gives a world size that lands at a constant 15px on SCREEN whatever the
+   * zoom: at 25% the title is 60 world units, at 200% it is 7.5, and both read
+   * the same to the eye. Sizing it in plain world units instead can only ever
+   * be right at one zoom level.
+   *
+   * The `min()` is the floor on that trick. Left unbounded, surveying a whole
+   * vault at 5% would ask for a 300-unit title and swallow the page it names,
+   * so past roughly 20% zoom the title stops growing and starts shrinking with
+   * everything else — legibility gives way to not lying about the layout.
+   *
+   * Padding, gap and the icon are all in `em` so the whole bar scales with the
+   * text as one object rather than a big title in a thin strip.
+   */
+  font-size: min(calc(15px / var(--canvas-k, 1)), 68px);
+  font-weight: 600;
+  padding: 0.5em 0.7em;
+  gap: 0.45em;
+}
+/* Sized in em for the same reason, or the icon becomes a speck beside the
+   title at low zoom. `flex: none` so a long name shortens the text, not it. */
+.canvas-file svg {
+  width: 1em;
+  height: 1em;
+  flex: none;
+}
+/* A filename longer than the page is clipped rather than wrapped: the title
+   bar is one line, and a wrapped title at 60 units tall would eat the content
+   it is labelling. */
+.canvas-file-title {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }
 .canvas-file:hover {
   background: var(--fill-hover);

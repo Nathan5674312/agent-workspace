@@ -402,6 +402,20 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     if (!w) return
     const { tx, ty, k } = view.current
     w.style.transform = `translate(${tx}px, ${ty}px) scale(${k})`
+    /**
+     * The zoom, published to CSS so a page's title can cancel it out.
+     *
+     * Everything in the world is inside one `scale(k)`, so a title sized in
+     * world units shrinks with the board and is unreadable at the zoom you
+     * actually survey a board from. Dividing by this variable in the
+     * stylesheet holds the title at a constant SCREEN size instead, so you can
+     * tell what a page is without zooming into it.
+     *
+     * A variable rather than a second transform on the title: a counter-scale
+     * transform would need a matching origin and would fight the card's own
+     * layout. This changes one number and the browser does the rest.
+     */
+    w.style.setProperty('--canvas-k', String(k))
   }, [])
 
   const applyNode = (n: CanvasNode) => {

@@ -8,6 +8,10 @@ import {
   edgeAnchor,
   canvasId,
   CANVAS_DROP_MIME,
+  boardTree,
+  isCanvasPath,
+  ROOT_BOARD,
+  type BoardRow,
   PAGE_SIZE,
   MIN_CARD_SIZE,
   type CanvasDoc,
@@ -1550,6 +1554,31 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                * endpoint, and two picks in quick succession are an ordinary way
                * to draw an edge — not a request to start typing.
                */
+              /**
+               * A page that names another BOARD opens it. The drill-down: the
+               * main board holds a page per pipeline, and clicking one goes
+               * into that pipeline.
+               *
+               * ON THE CARD for the same reason the double-click is: pointer
+               * capture retargets the click here, so the handler on the inner
+               * title button never fires. That is why clicking a file page did
+               * nothing at all.
+               *
+               * Only boards. A page naming a NOTE is already showing that note
+               * and is edited in place by double-click — and a single click
+               * that opened the editor would fire on the way to every
+               * double-click, unmounting the board mid-gesture.
+               */
+              onClick={(e) => {
+                if (connect || n.type !== 'file' || typeof n.file !== 'string') return
+                if (!isCanvasPath(n.file)) return
+                // A drag that ends on the page also fires a click; without this
+                // rearranging a board would navigate away from it.
+                if (e.detail !== 0 && draggedLast.current) return
+                // A modifier press was a selection or a duplicate, not an open.
+                if (e.shiftKey || e.ctrlKey || e.metaKey || e.altKey) return
+                onOpenNote(n.file)
+              }}
               onDoubleClick={() => {
                 /**
                  * `text` edits the card, `file` edits the NOTE the card shows.
@@ -1567,6 +1596,11 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                 if (connect) return
                 if (n.type === 'text') setEditing(n.id)
                 else if (n.type === 'file' && typeof n.file === 'string') {
+                  // A page naming a BOARD is opened, not edited. Editing one
+                  // here would put its raw JSON in a textarea, which is not a
+                  // thing anyone wants and is an excellent way to corrupt a
+                  // board by hand.
+                  if (isCanvasPath(n.file)) return
                   const body = files[n.file]
                   if (body && !body.error) setEditing(n.id)
                 }
@@ -1825,10 +1859,101 @@ function collectCanvases(node: VaultTreeNode | null): VaultTreeNode[] {
   return out
 }
 
+/**
+ * One board in the sidebar tree.
+ *
+ * DRAGGABLE, carrying the same payload a note from the file tree carries, so a
+ * board can be dropped onto an open board and become a page pointing at it.
+ * That page opens the board it names, which is the drill-down: the main board
+ * holds a page per pipeline, and clicking one takes you into that pipeline.
+ *
+ * `data-depth` rather than an inline margin, matching how the folder tree
+ * expresses nesting — the indent is a styling decision and belongs in CSS.
+ */
+function BoardRowButton({
+  board,
+  current,
+  onOpen,
+}: {
+  board: BoardRow
+  current: string | null
+  onOpen: (path: string) => void
+}) {
+  return (
+    <button
+      type="button"
+      className="canvas-list-item"
+      data-depth={board.depth}
+      aria-current={board.path === current}
+      title={board.path}
+      onClick={() => onOpen(board.path)}
+      draggable
+      onDragStart={(e) => {
+        e.dataTransfer.setData(CANVAS_DROP_MIME, board.path)
+        e.dataTransfer.effectAllowed = 'copy'
+      }}
+    >
+      <Frame size={13} aria-hidden="true" />
+      <span className="canvas-list-item-name">{board.name.replace(/\.canvas$/i, '')}</span>
+    </button>
+  )
+}
+
 export function CanvasList({ tree, current, onOpen, onCreated }: CanvasListProps) {
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
   const boards = collectCanvases(tree)
+
+  /**
+   * Which boards each board links to, read from the boards themselves.
+   *
+   * The tree cannot be built from the file listing alone: a board's children
+   * are the `.canvas` pages sitting ON it, which means every board has to be
+   * read. That is a handful of small JSON files, done once per listing change.
+   *
+   * Keyed on the joined paths rather than the array, which is rebuilt on every
+   * render by `collectCanvases` and would re-read the whole vault each time.
+   */
+  const [links, setLinks] = useState<Record<string, string[]>>({})
+  const listing = boards.map((b) => b.path).join('\n')
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const next: Record<string, string[]> = {}
+      for (const path of listing ? listing.split('\n') : []) {
+        try {
+          const body = await window.api.vault.read(path)
+          next[path] = parseCanvas(body.text)
+            .nodes.filter(
+              (n) => n.type === 'file' && typeof n.file === 'string' && isCanvasPath(n.file),
+            )
+            .map((n) => n.file as string)
+        } catch {
+          // A board that will not read has no children as far as the tree is
+          // concerned. It still appears; it just cannot nest anything.
+          next[path] = []
+        }
+      }
+      if (!cancelled) setLinks(next)
+    })()
+    return () => {
+      cancelled = true
+    }
+    // `current` as well as `listing`: dropping a board onto another changes
+    // which board is a CHILD without changing which boards EXIST, so the
+    // listing alone would leave the tree showing the old shape. Re-read on
+    // navigation, which is when the tree is next looked at.
+    //
+    // Not live: the tree still lags a link made on the board you are standing
+    // on until you move off it. Closing that needs a save signal plumbed from
+    // the board up to this list, which is more than this change is.
+  }, [listing, current])
+
+  const rows = boardTree(boards, links)
+  // Split so the sidebar can head them separately. Everything the root reaches
+  // is the pipeline; the rest are boards nothing links to yet.
+  const linked = rows.filter((r) => r.reachable)
+  const loose = rows.filter((r) => !r.reachable)
 
   /**
    * A free name at the vault root: `Canvas.canvas`, then `Canvas 2.canvas`.
@@ -1883,19 +2008,23 @@ export function CanvasList({ tree, current, onOpen, onCreated }: CanvasListProps
         </p>
       ) : (
         <div className="canvas-list-items">
-          {boards.map((b) => (
-            <button
-              key={b.path}
-              type="button"
-              className="canvas-list-item"
-              aria-current={b.path === current}
-              title={b.path}
-              onClick={() => onOpen(b.path)}
-            >
-              <Frame size={13} aria-hidden="true" />
-              <span className="canvas-list-item-name">{b.name.replace(/\.canvas$/i, '')}</span>
-            </button>
+          {linked.map((b) => (
+            <BoardRowButton key={b.path} board={b} current={current} onOpen={onOpen} />
           ))}
+          {loose.length > 0 && (
+            <>
+              {/* Boards the root cannot reach. Shown rather than hidden: a board
+                  that vanished the moment nothing linked to it would be a file
+                  on disk the app denied having. Drag one onto the main board and
+                  it moves up into the tree above. */}
+              <div className="canvas-list-subhead">
+                {linked.length === 0 ? `No ${ROOT_BOARD} yet` : 'Not linked'}
+              </div>
+              {loose.map((b) => (
+                <BoardRowButton key={b.path} board={b} current={current} onOpen={onOpen} />
+              ))}
+            </>
+          )}
         </div>
       )}
     </div>

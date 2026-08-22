@@ -201,6 +201,87 @@ export const MIN_CARD_SIZE = { width: 120, height: 60 }
  */
 export const CANVAS_DROP_MIME = 'application/x-agent-workspace-note'
 
+/**
+ * The board every other board hangs from.
+ *
+ * Convention rather than configuration: the board called `Main.canvas` is the
+ * root, and the pipelines it links to nest under it. Nothing to set up and
+ * obvious from the vault alone, which is the point — the hierarchy has to be
+ * legible to someone reading the folder without this app.
+ */
+export const ROOT_BOARD = 'Main.canvas'
+
+export type BoardRef = { path: string; name: string }
+export type BoardRow = BoardRef & { depth: number; reachable: boolean }
+
+/**
+ * Arranges the boards into the tree the sidebar draws.
+ *
+ * THE HIERARCHY IS THE BOARDS THEMSELVES. A board is a child of another when
+ * the parent holds a page pointing at it, so the tree is derived from what is
+ * actually on the boards rather than from a folder layout that can disagree
+ * with them. Link a pipeline into the main board and it appears nested; unlink
+ * it and it stops being nested. There is no second place to keep in sync.
+ *
+ * `links` maps a board's path to the `.canvas` paths its pages point at.
+ *
+ * A board reached twice is listed ONCE, at the first place it is reached.
+ * Boards legitimately share sub-pipelines, and drawing one under every parent
+ * would turn a shared step into several entries that are really one file — you
+ * would not know which to open, and editing "both" would edit the same board.
+ *
+ * `seen` is also the CYCLE GUARD. Two boards linking each other is an ordinary
+ * thing to author by accident and would otherwise recurse until the stack gave
+ * out, taking the sidebar and the app with it.
+ *
+ * Boards the root cannot reach are still returned, flagged `reachable: false`,
+ * so the sidebar can show them under their own heading. Dropping them would
+ * make a board invisible the moment it was unlinked — the file would still be
+ * there and the app would deny it existed.
+ */
+export function boardTree(
+  boards: BoardRef[],
+  links: Record<string, string[]>,
+  root: string = ROOT_BOARD,
+): BoardRow[] {
+  // Compared case-insensitively throughout: this runs on Windows, where
+  // `main.canvas` and `Main.canvas` are the same file.
+  const byPath = new Map(boards.map((b) => [b.path.toLowerCase(), b]))
+  const wanted = root.toLowerCase()
+  const rootBoard =
+    byPath.get(wanted) ??
+    // Also matched by NAME, so a root that lives in a folder rather than at the
+    // vault root is still found.
+    boards.find((b) => b.name.toLowerCase() === wanted)
+
+  const rows: BoardRow[] = []
+  const seen = new Set<string>()
+
+  const walk = (board: BoardRef, depth: number) => {
+    const key = board.path.toLowerCase()
+    if (seen.has(key)) return
+    seen.add(key)
+    rows.push({ ...board, depth, reachable: true })
+    for (const child of links[board.path] ?? []) {
+      const found = byPath.get(child.toLowerCase())
+      // A page may point at a board that has been deleted or renamed. Skipped
+      // rather than invented, for the same reason a dangling edge is skipped.
+      if (found) walk(found, depth + 1)
+    }
+  }
+
+  if (rootBoard) walk(rootBoard, 0)
+  for (const board of boards) {
+    if (!seen.has(board.path.toLowerCase())) rows.push({ ...board, depth: 0, reachable: false })
+  }
+  return rows
+}
+
+/** Whether a vault path names a board. */
+export function isCanvasPath(path: string): boolean {
+  return path.toLowerCase().endsWith('.canvas')
+}
+
 /** The title a `file` node shows: the filename, extension dropped. */
 export function fileNodeTitle(file: string): string {
   return file.split('/').pop()!.replace(/\.md$/i, '')

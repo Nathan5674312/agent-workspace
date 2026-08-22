@@ -3,6 +3,7 @@ import type { VaultNoteBody, VaultGraph } from '../../../shared/ipc.js'
 import { Editor } from './Editor.js'
 import { GraphView } from './GraphView.js'
 import { CanvasView } from './CanvasView.js'
+import { isCanvasPath } from '../../../shared/canvas.js'
 import { DatabaseView } from './DatabaseView.js'
 import { InboxView } from './InboxView.js'
 import { RoadmapView } from './RoadmapView.js'
@@ -342,10 +343,21 @@ export function MainCanvas({
           <CanvasView
             path={canvasPath}
             onOpenNote={(path) => {
-              // Same contract as the table and the graph: a file card that
+              // Same contract as the table and the graph: a file page that
               // opens a note behind the board reads as a dead click.
               void onOpenNote(path).then((opened) => {
-                if (opened) onViewChange('editor')
+                /**
+                 * UNLESS THE PAGE IS ANOTHER BOARD, which is the drill-down:
+                 * the main board holds a page per pipeline and clicking one
+                 * goes INTO that pipeline.
+                 *
+                 * `openNote` already routed the `.canvas` to the canvas view
+                 * and returned true. Switching to the editor here undid that
+                 * one line later, so opening a board from a board landed you in
+                 * the markdown editor instead — the exact "dead click" this
+                 * callback exists to prevent, caused by the fix for it.
+                 */
+                if (opened && !isCanvasPath(path)) onViewChange('editor')
               })
             }}
           />

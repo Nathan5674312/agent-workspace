@@ -142,10 +142,21 @@
   color: var(--label);
   font-size: var(--text-base);
   overflow: hidden;
-  cursor: grab;
-}
-.canvas-node:active {
-  cursor: grabbing;
+  /**
+   * `move`, NOT `grab`, and the difference is the whole point.
+   *
+   * The board is `grab` because dragging it pans the view. A card was `grab`
+   * too, so the pointer looked identical over a card and over the empty board
+   * between cards — and those two gestures do completely different things. Press
+   * a card and that one card moves; press the gap beside it and the whole board
+   * slides, every card together, which reads as "I grabbed one card and they all
+   * moved". There was no way to tell which one you were about to get.
+   *
+   * `move` is the four-way arrow every platform uses for "this object moves",
+   * so the cursor now changes the instant you are over something draggable and
+   * the two gestures are distinguishable before you commit to one.
+   */
+  cursor: move;
 }
 
 /* The resize grip: bottom-right corner, the corner every resizable thing on

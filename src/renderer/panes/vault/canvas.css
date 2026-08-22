@@ -157,13 +157,32 @@
      JSON Canvas puts no constraint on how the two are interleaved. */
   z-index: 1;
   box-sizing: border-box;
-  /* A card's colour is spent on its BORDER, not a filled ground: the artwork
-     layer and the monochrome palette both assume cards read by luminance, and
-     six tinted fills would take the board over. --canvas-color is written per
-     element by applyColor() and is absent on an uncoloured card. */
+  /**
+   * A page's colour is now its GROUND as well as its border.
+   *
+   * It used to be border-only, on the reasoning that six tinted fills would
+   * take the board over. That held when a page was a caption; it does not now
+   * that a page is a whole document and a board is a pipeline you read at a
+   * glance. A 1px edge is not enough colour to tell two phases apart from
+   * across a zoomed-out board, which is exactly when you need to.
+   *
+   * `color-mix` at 16% keeps it a tint rather than a fill, so text on it still
+   * reads and the artwork still shows through. The `transparent` fallback is
+   * what makes one rule serve both cases: on an uncoloured page `--canvas-color`
+   * is absent, so this mixes transparent with transparent and the layer simply
+   * is not there — no second rule, no attribute to keep in sync.
+   *
+   * Layered OVER --bg-elevated rather than replacing it, or a tinted page would
+   * lose the elevation that separates it from the board behind.
+   */
   border: 1px solid var(--canvas-color, var(--separator-opaque));
   border-radius: var(--radius-md);
-  background: var(--bg-elevated);
+  background:
+    linear-gradient(
+      color-mix(in srgb, var(--canvas-color, transparent) 16%, transparent),
+      color-mix(in srgb, var(--canvas-color, transparent) 16%, transparent)
+    ),
+    var(--bg-elevated);
   color: var(--label);
   font-size: var(--text-base);
   overflow: hidden;
@@ -651,6 +670,35 @@
   margin-top: var(--space-1);
   border-top: 1px solid var(--separator);
   border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+/* The arrow-label field. Sized to the menu so it does not stretch it, and
+   given the menu's own ground so it reads as part of the panel. */
+.canvas-menu-input {
+  width: 100%;
+  min-width: 0;
+  padding: var(--space-2) var(--space-3);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-sm);
+  background: var(--bg-app);
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-sm);
+}
+.canvas-menu-input:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+/* The invisible hit target along each arrow. The edge LAYER is
+   pointer-events: none so it never steals a press meant for the board; this
+   opts back in for its STROKE only, so the area enclosed by a curve stays
+   click-through. Fat, because the drawn line is 2px and nobody can hit that. */
+.canvas-edge-hit {
+  stroke: transparent;
+  stroke-width: 14;
+  pointer-events: stroke;
+  cursor: context-menu;
 }
 
 .canvas-menu-colours {

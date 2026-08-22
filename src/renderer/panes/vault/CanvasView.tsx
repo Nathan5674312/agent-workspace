@@ -16,6 +16,7 @@ import {
   MIN_CARD_SIZE,
   type CanvasDoc,
   type CanvasNode,
+  type CanvasEdge,
 } from '../../../shared/canvas.js'
 import type { VaultTreeNode } from '../../../shared/ipc.js'
 import './canvas.css'
@@ -86,12 +87,19 @@ const EDGE_ORIGIN = 5000
 /**
  * How many steps back an undo can go.
  *
- * Bounded because each entry is a whole serialized board and a long editing
- * session would otherwise hold every state it ever passed through. Fifty is far
- * past the point anyone reaches for Ctrl+Z and is a few hundred kilobytes at
- * most for a board of ordinary size.
+ * Fifteen, at Nathan's ask. Each entry is a whole serialized board, so the
+ * depth is what this costs in memory — and past a dozen steps you are no longer
+ * undoing, you are looking for a state you remember, which is what the file's
+ * own history is for.
+ *
+ * Every board change is in reach of it: a drag, a resize, adding or deleting a
+ * page, duplicating, pasting, recolouring, locking, connecting, retexting, the
+ * uniform-size sweep and bring-to-front all write through `persist`, which is
+ * where the snapshot is taken. The one thing outside it is editing a FILE
+ * page's text, because that writes to the note rather than to the board — see
+ * commitFile.
  */
-const UNDO_LIMIT = 50
+const UNDO_LIMIT = 15
 
 /**
  * How close, in world units, Shift reaches to find something to line up with.
@@ -348,6 +356,8 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     wy: number
     /** The page right-clicked, or null for the board itself. */
     id: string | null
+    /** The arrow right-clicked, if the menu was opened on one. */
+    edgeId?: string
   } | null>(null)
   /**
    * The copied page, as SERIALIZED JSON rather than a live node.
@@ -885,6 +895,38 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     // nothing to any other reader of this file.
     if (color === null) delete node.color
     else node.color = color
+    repaint()
+    void persist(doc)
+  }
+
+  /** The arrow the menu was opened on, if it was opened on one. */
+  const menuEdge = () =>
+    menu?.edgeId && doc ? (doc.edges.find((e) => e.id === menu.edgeId) ?? null) : null
+
+  /**
+   * Writes an arrow's label — the condition, in the user's own words.
+   *
+   * The compiler reads this as the condition on that branch, so it is the one
+   * piece of text on a board that changes what running it does. There was no
+   * way to type one: labels authored in Obsidian rendered, but nothing here
+   * could create or change one.
+   */
+  const setEdgeLabel = (edge: CanvasEdge, label: string) => {
+    if (!doc) return
+    const next = label.trim()
+    // Cleared means REMOVED, not empty-string. An empty label is a key that
+    // means nothing to any other reader of the file, and the renderer already
+    // treats absent and blank the same — so the file should not carry both.
+    if (next === '') delete edge.label
+    else edge.label = next
+    repaint()
+    void persist(doc)
+  }
+
+  const removeEdge = (edge: CanvasEdge) => {
+    if (!doc) return
+    const at = doc.edges.indexOf(edge)
+    if (at >= 0) doc.edges.splice(at, 1)
     repaint()
     void persist(doc)
   }
@@ -1823,6 +1865,40 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                     }
                     markerEnd={drawsArrow(edge.toEnd, 'arrow') ? 'url(#canvas-arrow)' : undefined}
                   />
+                  {/**
+                   * A SECOND, INVISIBLE PATH along the same curve, purely to be
+                   * hit. The drawn line is 2px and a 2px pointer target is one
+                   * nobody can reliably hit; this one is fat and transparent.
+                   *
+                   * `pointer-events: stroke` in the stylesheet is doing the
+                   * other half: the edge LAYER is `pointer-events: none` so it
+                   * never steals a press meant for the board, and this element
+                   * opts back in for its stroke alone — not its interior, which
+                   * would make the area between two curves clickable.
+                   *
+                   * Drawn after the visible line so it is the topmost thing
+                   * along that path and wins the hit test.
+                   */}
+                  <path
+                    d={curve.d}
+                    className="canvas-edge-hit"
+                    fill="none"
+                    onContextMenu={(e) => {
+                      e.preventDefault()
+                      // Or the board's own menu opens behind this one.
+                      e.stopPropagation()
+                      if (connect) return
+                      const w = toWorld(e.clientX, e.clientY)
+                      setMenu({
+                        x: e.clientX,
+                        y: e.clientY,
+                        wx: w.x,
+                        wy: w.y,
+                        id: null,
+                        edgeId: edge.id,
+                      })
+                    }}
+                  />
                   {label && (
                     // Midpoint of the CURVE, not of the two anchors — see
                     // edgeCurve. A hand-routed edge still carries its label
@@ -2154,8 +2230,56 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
             el.style.top = `${menu.y}px`
           }}
         >
+          {/**
+           * Arrow menu. An arrow carries the CONDITION on a branch, which is
+           * the one piece of text on a board that changes what running it does
+           * — and until now nothing here could write one. Labels authored in
+           * Obsidian rendered; there was no way to make or change one, and no
+           * way to remove an arrow once drawn.
+           *
+           * The label is an input rather than a menu item opening a dialog: it
+           * is one short string, and a dialog to type six words is a second
+           * click and a second thing to dismiss. Enter commits, Escape leaves
+           * it alone.
+           */}
+          {menuEdge() && (
+            <>
+              <input
+                className="canvas-menu-input"
+                defaultValue={typeof menuEdge()?.label === 'string' ? String(menuEdge()!.label) : ''}
+                autoFocus
+                aria-label="Arrow label"
+                placeholder="Label this arrow"
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault()
+                    const ed = menuEdge()
+                    if (ed) setEdgeLabel(ed, e.currentTarget.value)
+                    setMenu(null)
+                  } else if (e.key === 'Escape') {
+                    // Stopped, or the board's own Escape handling also runs.
+                    e.stopPropagation()
+                    setMenu(null)
+                  }
+                }}
+              />
+              <button
+                type="button"
+                className="canvas-menu-item canvas-menu-item--danger"
+                role="menuitem"
+                onClick={() => {
+                  const ed = menuEdge()
+                  if (ed) removeEdge(ed)
+                  setMenu(null)
+                }}
+              >
+                Delete arrow
+              </button>
+            </>
+          )}
+
           {/* Board menu: the one item that only makes sense on empty space. */}
-          {!menuNode() && (
+          {!menuNode() && !menuEdge() && (
             <button
               type="button"
               className="canvas-menu-item"
@@ -2196,20 +2320,23 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
           </button>
             </>
           )}
-          <button
-            type="button"
-            className="canvas-menu-item"
-            role="menuitem"
-            // Disabled rather than hidden: a menu whose shape changes between
-            // openings is one you have to read every time.
-            disabled={clipboard.current === null}
-            onClick={() => {
-              pasteNode(menu.wx, menu.wy)
-              setMenu(null)
-            }}
-          >
-            Paste
-          </button>
+          {/* Not on an arrow: there is nothing to paste onto a line. */}
+          {!menuEdge() && (
+            <button
+              type="button"
+              className="canvas-menu-item"
+              role="menuitem"
+              // Disabled rather than hidden: a menu whose shape changes between
+              // openings is one you have to read every time.
+              disabled={clipboard.current === null}
+              onClick={() => {
+                pasteNode(menu.wx, menu.wy)
+                setMenu(null)
+              }}
+            >
+              Paste
+            </button>
+          )}
           {menuNode() && (
             <button
               type="button"

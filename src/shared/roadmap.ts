@@ -133,9 +133,9 @@ export const ROADMAP: FeatureGroup[] = [
       },
       {
         label: 'Pipelines an agent can find without being told',
-        status: 'planned',
+        status: 'partial',
         surface: 'ribbon:canvas',
-        note: 'A brief and a run sit hidden beside their board, so today an agent finds them by globbing. That gives paths but not purpose, and opening forty briefs to find the right board is the wrong shape. What is missing is a derived index that says which boards are runnable and what each one is for, self-invalidating in the way a single brief already is.',
+        note: 'The index is a board, not a new file format: `Home.canvas` at the vault root carries a file card per pipeline, and compile() already returns every file card\'s path, so discovery costs no new code and adds no second thing to keep in sync. Proved on 2026-08-21 against a Home board holding two pipeline cards and a four-step maintenance chain — both came back from one compile, the branch conditions intact, the board unchanged on disk. That board is also a pipeline in its own right, whose job is keeping the others honest from the inbox. Still partial for two honest reasons: no Home.canvas ships yet, so there is nothing to find until someone draws one, and `.canvas` files are not graph nodes (list() and graph() index .md only, measured the same day), so a note linking to a board reaches the note but the board is not in the graph.',
       },
     ],
   },

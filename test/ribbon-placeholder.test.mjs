@@ -76,7 +76,10 @@ test('featureForRibbon binds icons to roadmap entries, and only real ones', () =
 
 test('no ribbon: surface points at an id the ribbon does not have', () => {
   const ids = [...src('LeftRibbon.tsx').matchAll(/id: '([a-z]+)'/g)].map((m) => m[1])
-  assert.equal(ids.length, 8, 'expected the eight ribbon views')
+  // Nine since Versions moved off the top strip and into the rail. Still an
+  // EXACT count rather than a floor: the point is that adding or dropping an
+  // icon is a deliberate act that shows up here.
+  assert.equal(ids.length, 9, 'expected the nine ribbon views')
   for (const f of ALL_FEATURES.filter((f) => f.surface?.startsWith('ribbon:'))) {
     const id = f.surface.slice('ribbon:'.length)
     assert.ok(ids.includes(id), `roadmap points at ribbon:${id}, which no icon declares`)

@@ -13,6 +13,7 @@ import {
   Waypoints,
   Frame,
   Calendar,
+  History,
   SquareTerminal,
   Blocks,
   type LucideIcon,
@@ -29,6 +30,12 @@ const VIEWS: { id: string; label: string; Icon: LucideIcon }[] = [
   { id: 'bookmarks', label: 'Bookmarks', Icon: Bookmark },
   { id: 'graph', label: 'Graph view', Icon: Waypoints },
   { id: 'canvas', label: 'Canvas', Icon: Frame },
+  /* Versions used to sit in the top strip. It is about the OPEN NOTE rather
+     than about the vault, and the strip is now the handful of places this user
+     actually works — so it moved here, where the less-reached-for things live.
+     Unlike its neighbours this one opens a MAIN view rather than a sidebar
+     section; see the handler in VaultPane. */
+  { id: 'versions', label: 'Versions', Icon: History },
   { id: 'calendar', label: 'Daily notes', Icon: Calendar },
   { id: 'terminal', label: 'Terminal', Icon: SquareTerminal },
   { id: 'plugins', label: 'Plugins', Icon: Blocks },

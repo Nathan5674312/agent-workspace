@@ -780,7 +780,23 @@ export function VaultPane(): React.ReactElement {
   return (
     <div className="vault-pane">
       <div className="vault-layout" ref={layoutRef}>
-        <LeftRibbon activeView={activeRibbon} onViewChange={setActiveRibbon} />
+        {/**
+         * Versions is the one ribbon entry that opens a MAIN view instead of a
+         * sidebar section, because that is what it is — a panel over the open
+         * note, not a list to browse beside one.
+         *
+         * Without this branch it would land in the `else` below and render the
+         * placeholder panel, which is what every unimplemented ribbon icon
+         * does. Moving it off the top strip and into an icon that never shows
+         * versions would not be moving the feature, it would be deleting it.
+         */}
+        <LeftRibbon
+          activeView={view === 'versions' ? 'versions' : activeRibbon}
+          onViewChange={(id) => {
+            if (id === 'versions') handleViewChange('versions')
+            else setActiveRibbon(id)
+          }}
+        />
 
         <div className="vault-sidebar">
           {activeRibbon === 'files' ? (

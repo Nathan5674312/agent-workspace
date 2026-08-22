@@ -277,21 +277,28 @@ export function MainCanvas({
       </div>
 
       <div className="vault-view-controls">
+        {/**
+         * THE STRIP IS THE PLACES THIS USER ACTUALLY WORKS, not every view the
+         * app has. Canvas leads because that is where the work is right now.
+         *
+         * EDITOR HAS NO BUTTON AND IS STILL REACHABLE. Opening a note from
+         * anywhere — the tree, a wikilink, a bookmark, the nav trail — runs the
+         * `if (openPath) onViewChange('editor')` effect above and brings the
+         * editor forward. A button that only ever showed the note you already
+         * opened was a row of pixels doing nothing.
+         *
+         * VERSIONS MOVED TO THE LEFT RIBBON. It is about the open note rather
+         * than about the vault, and it is reached for rarely enough that it
+         * belongs with the icons.
+         *
+         * No loading state: CanvasView reads its own board from `canvasPath`,
+         * unlike Graph, Database and Inbox which fetch up here first.
+         */}
         <button
-          className={`vault-view-button ${view === 'editor' ? 'active' : ''}`}
-          onClick={() => onViewChange('editor')}
+          className={`vault-view-button ${view === 'canvas' ? 'active' : ''}`}
+          onClick={() => onViewChange('canvas')}
         >
-          Editor
-        </button>
-        {/* Next to Editor because it is about the OPEN NOTE, where Graph,
-            Database and Inbox are about the vault. Nothing is fetched on the
-            click: the panel loads its own list from the note it is given, so
-            this needs no loading state up here. */}
-        <button
-          className={`vault-view-button ${view === 'versions' ? 'active' : ''}`}
-          onClick={() => onViewChange('versions')}
-        >
-          Versions
+          Canvas
         </button>
         <button
           className={`vault-view-button ${view === 'graph' ? 'active' : ''}`}

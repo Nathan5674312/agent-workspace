@@ -266,6 +266,14 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
   const [linkFrom, setLinkFrom] = useState<string | null>(null)
   /** The text card currently open for editing, by id. */
   const [editing, setEditing] = useState<string | null>(null)
+  /**
+   * The open editor's textarea, so a press elsewhere can read what was typed.
+   *
+   * The control is UNCONTROLLED — it holds its own value via `defaultValue`, so
+   * React state does not have the text and the element is the only place it
+   * exists until it is committed.
+   */
+  const editRef = useRef<HTMLTextAreaElement | null>(null)
 
   /**
    * Escape leaves connect mode.
@@ -913,10 +921,48 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     void persist(doc)
   }
 
+  /**
+   * Commits and closes the open editor, if the press that just happened was
+   * somewhere else.
+   *
+   * THE TRAP THIS FIXES. `+ Card` opens the new card straight into editing, and
+   * the textarea stops its own pointer events so selecting text does not drag
+   * the card out from under the cursor. Nothing else closed the editor — commit
+   * was Enter and discard was Escape, both requiring focus to still be IN the
+   * textarea. So a new card could not be moved, could not be re-edited, and did
+   * not respond to a click on any other card. Every `+ Card` left one behind,
+   * and the newest was always the stuck one.
+   *
+   * This is NOT `onBlur`, which review-s2-vault-pane forbids across this pane,
+   * and the distinction is the point rather than a way around the rule. That
+   * rule exists because an edit reaching disk with nobody confirming it is how
+   * work gets silently altered; a blur fires for reasons the user never chose —
+   * a window losing focus, a re-render moving focus. This runs only on a
+   * deliberate press on another card or on the board.
+   *
+   * It is still an implicit save, and that is a real change to "commit is
+   * Enter". It is defensible now in a way it was not when the rule was written:
+   * Ctrl+Z undoes it, so an edit committed by a misclick is one keystroke from
+   * being gone. Escape still discards.
+   */
+  const closeEditor = () => {
+    if (!editing || !doc) return
+    const node = doc.nodes.find((n) => n.id === editing)
+    const el = editRef.current
+    // If either is missing there is nothing to commit, but the editor still has
+    // to close or the card stays stuck — which is the whole bug.
+    if (!node || !el) {
+      setEditing(null)
+      return
+    }
+    commitText(node, el.value)
+  }
+
   const onBackgroundDown = (e: React.PointerEvent) => {
     // Only a press on the board itself pans. A press that started on a card is
     // that card's drag, and it stops propagation below.
     if (e.button !== 0) return
+    closeEditor()
     // A press on empty board clears the selection, which is the one gesture
     // everyone already expects to mean "never mind".
     setSelected(new Set())
@@ -928,6 +974,11 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     if (e.button !== 0) return
     // Without this the board pans at the same time as the card moves.
     e.stopPropagation()
+    // A press on a DIFFERENT card closes the open editor. Pressing the card
+    // being edited is left alone: the textarea stops its own pointer events, so
+    // reaching here at all means the press was on that card's border, which is
+    // the user grabbing the card they are editing rather than leaving it.
+    if (editing && editing !== node.id) closeEditor()
     /**
      * In connect mode a press picks an endpoint and never starts a drag.
      *
@@ -1321,6 +1372,33 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                 else nodeEls.current.delete(n.id)
               }}
               onPointerDown={(e) => onNodeDown(e, n)}
+              /**
+               * ON THE CARD, NOT ON THE TEXT INSIDE IT, and that is the fix
+               * rather than a preference.
+               *
+               * `onNodeDown` calls `setPointerCapture` on this element, and a
+               * captured pointer retargets the click AND the dblclick that
+               * follow to the capture element. So the dblclick fires HERE, on
+               * the card, no matter where inside it the press landed. It was
+               * registered on the inner `.canvas-text` div, which is a child —
+               * and events do not propagate downward, so it never fired at all
+               * and double-click-to-edit simply did nothing. Measured:
+               * `dblclick detail=2 target=canvas-node canvas-node--text`.
+               *
+               * That left `+ Card` as the only way to open an editor, which
+               * meant text already on a card could never be changed.
+               *
+               * Connect mode is excluded because there a press picks an
+               * endpoint, and two picks in quick succession are an ordinary way
+               * to draw an edge — not a request to start typing.
+               */
+              onDoubleClick={() => {
+                // Only `text` nodes are editable. This is also the fallback for
+                // a node type from a later spec version, and turning one of
+                // those into an edited text card would destroy exactly what the
+                // preservation rule protects.
+                if (!connect && n.type === 'text') setEditing(n.id)
+              }}
               data-linking={linkFrom === n.id || undefined}
               data-selected={selected.has(n.id) || undefined}
             >
@@ -1416,6 +1494,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                  */
                 <textarea
                   className="canvas-text-edit"
+                  ref={editRef}
                   defaultValue={typeof n.text === 'string' ? n.text : ''}
                   autoFocus
                   aria-label="Card text"
@@ -1441,16 +1520,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
               ) : (
                 // Text cards show their markdown as written. Rendering it is
                 // the Editor's job and it does not live here yet.
-                <div
-                  className="canvas-text"
-                  onDoubleClick={() => {
-                    // Only `text` nodes are editable. This branch is also the
-                    // fallback for a node type from a later spec version, and
-                    // turning one of those into an edited text card would
-                    // destroy exactly what the preservation rule protects.
-                    if (n.type === 'text') setEditing(n.id)
-                  }}
-                >
+                <div className="canvas-text">
                   {typeof n.text === 'string' ? n.text : ''}
                 </div>
               )}

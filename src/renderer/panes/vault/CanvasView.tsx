@@ -94,6 +94,60 @@ const EDGE_ORIGIN = 5000
 const UNDO_LIMIT = 50
 
 /**
+ * How close, in world units, Shift reaches to find something to line up with.
+ *
+ * Constant rather than a fraction of the zoom: a snap that got greedier as you
+ * zoomed out would grab pages you were not aiming at from across the board.
+ * Roughly a fifth of a page, so it catches a deliberate near-miss and ignores a
+ * page that is simply somewhere else.
+ */
+const SNAP_RANGE = 120
+
+/**
+ * The dot grid's spacing, in world units.
+ *
+ * ONE definition, published to CSS as `--canvas-grid` by applyView(), because
+ * the dots and the snap have to agree exactly. They did not at first: the dots
+ * were a number in the stylesheet and Shift only aligned pages to each other,
+ * so lining a page up with a neighbour that was itself off-grid left both of
+ * them sitting between the dots — visibly wrong, and Nathan reported it as
+ * Shift "breaking".
+ */
+const GRID = 24
+
+/** The nearest dot line to each of a page's own lines, on one axis. */
+const gridLines = (start: number, size: number) =>
+  alignLines(start, size).map((v) => Math.round(v / GRID) * GRID)
+
+/**
+ * The candidate lines a page offers to align against: its two edges and its
+ * centre, on one axis. Aligning left-to-left builds a column, centre-to-centre
+ * centres a caption under a page, and left-to-RIGHT is what puts two pages side
+ * by side touching — all three come up when laying out a board.
+ */
+const alignLines = (start: number, size: number) => [start, start + size / 2, start + size]
+
+/**
+ * The offset that would put `start` on the nearest line, or 0 if nothing is
+ * near enough. Compared against every line each candidate offers, in both
+ * directions, so an edge can meet an edge or a centre.
+ */
+const snapOffset = (start: number, size: number, lines: number[]): number => {
+  let best = 0
+  let bestGap = SNAP_RANGE
+  for (const mine of alignLines(start, size)) {
+    for (const theirs of lines) {
+      const gap = Math.abs(theirs - mine)
+      if (gap < bestGap) {
+        bestGap = gap
+        best = theirs - mine
+      }
+    }
+  }
+  return best
+}
+
+/**
  * Whether an edge end draws an arrowhead, per JSON Canvas 1.0.
  *
  * THE DEFAULTS ARE THE WHOLE POINT, and they are asymmetric: `toEnd` defaults
@@ -280,6 +334,31 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
   const editRef = useRef<HTMLTextAreaElement | null>(null)
 
   /**
+   * The open context menu: where it was summoned, in BOTH coordinate systems.
+   *
+   * Screen coords position the menu, which lives outside the world transform so
+   * it does not scale with the board. World coords are where a Paste lands, so
+   * a pasted page appears where you right-clicked rather than at some remembered
+   * point on a board you have since panned away from.
+   */
+  const [menu, setMenu] = useState<{
+    x: number
+    y: number
+    wx: number
+    wy: number
+    /** The page right-clicked, or null for the board itself. */
+    id: string | null
+  } | null>(null)
+  /**
+   * The copied page, as SERIALIZED JSON rather than a live node.
+   *
+   * A reference would keep pointing at the original, so editing or deleting it
+   * after a copy would change or empty the clipboard. Text is a snapshot, and
+   * it carries every field including ones this app does not know about.
+   */
+  const clipboard = useRef<string | null>(null)
+
+  /**
    * Escape leaves connect mode.
    *
    * Connect mode makes a press pick an endpoint instead of starting a drag, so
@@ -415,7 +494,22 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
      * transform would need a matching origin and would fight the card's own
      * layout. This changes one number and the browser does the rest.
      */
-    w.style.setProperty('--canvas-k', String(k))
+    /**
+     * Written on the SURFACE, not the world, because the surface is the element
+     * that is not transformed — the dot grid is painted there and has to undo
+     * the pan and zoom itself. The world is a child, so anything inside it
+     * still inherits these; the title's counter-scale reads `--canvas-k` from
+     * here.
+     */
+    const s = wrapRef.current
+    if (s) {
+      s.style.setProperty('--canvas-k', String(k))
+      s.style.setProperty('--canvas-tx', String(tx))
+      s.style.setProperty('--canvas-ty', String(ty))
+      // The dots are drawn from the same constant Shift snaps to, so the two
+      // cannot drift apart.
+      s.style.setProperty('--canvas-grid', String(GRID))
+    }
   }, [])
 
   const applyNode = (n: CanvasNode) => {
@@ -726,6 +820,87 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     }
   }
 
+  // ── the page menu ──────────────────────────────────────────────
+  /**
+   * Everything the right-click menu does, and every one of them goes through
+   * `persist`, so every one of them is undoable with Ctrl+Z.
+   */
+  const menuNode = () =>
+    menu?.id && doc ? (doc.nodes.find((n) => n.id === menu.id) ?? null) : null
+
+  const removeNode = (node: CanvasNode) => {
+    if (!doc) return
+    const at = doc.nodes.indexOf(node)
+    if (at >= 0) doc.nodes.splice(at, 1)
+    // The edges that touched it go too — the dangling reference `addEdge`
+    // refuses to create.
+    for (let i = doc.edges.length - 1; i >= 0; i--) {
+      const e = doc.edges[i]
+      if (e.fromNode === node.id || e.toNode === node.id) doc.edges.splice(i, 1)
+    }
+    setSelected(new Set())
+    repaint()
+    void persist(doc)
+  }
+
+  const duplicateNode = (node: CanvasNode) => {
+    if (!doc) return
+    // The spread is the feature, same as Alt+drag: every own key crosses,
+    // including fields from a spec version this app has never heard of.
+    const copy: CanvasNode = {
+      ...node,
+      id: canvasId(),
+      x: Math.round(node.x + DUPLICATE_OFFSET),
+      y: Math.round(node.y + DUPLICATE_OFFSET),
+    }
+    doc.nodes.push(copy)
+    selectNode(copy.id, false)
+    repaint()
+    void persist(doc)
+  }
+
+  const pasteNode = (wx: number, wy: number) => {
+    if (!doc || !clipboard.current) return
+    let copy: CanvasNode
+    try {
+      copy = JSON.parse(clipboard.current) as CanvasNode
+    } catch {
+      return
+    }
+    // A fresh id, or two pages would share one and every edge naming it would
+    // be ambiguous. Centred on where the menu was opened.
+    copy.id = canvasId()
+    copy.x = Math.round(wx - copy.width / 2)
+    copy.y = Math.round(wy - copy.height / 2)
+    doc.nodes.push(copy)
+    selectNode(copy.id, false)
+    repaint()
+    void persist(doc)
+  }
+
+  const setNodeColor = (node: CanvasNode, color: string | null) => {
+    if (!doc) return
+    // Deleted rather than set to '' for no colour: the spec's absent-means-
+    // default is a real state, and an empty string is a value that means
+    // nothing to any other reader of this file.
+    if (color === null) delete node.color
+    else node.color = color
+    repaint()
+    void persist(doc)
+  }
+
+  const toggleLock = (node: CanvasNode) => {
+    if (!doc) return
+    // `locked` is not in JSON Canvas. It rides the spec's index signature, which
+    // is what carries unknown fields through untouched — so Obsidian keeps it
+    // rather than dropping it, and a future spec field of the same name would
+    // mean the same thing anyway.
+    if (node.locked) delete node.locked
+    else node.locked = true
+    repaint()
+    void persist(doc)
+  }
+
   // ── remove and undo ────────────────────────────────────────────
   /**
    * Deletes the selection, and every edge that touched it.
@@ -814,6 +989,12 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
         undo()
         return
       }
+      // Escape closes the page menu before anything else looks at the key.
+      if (e.key === 'Escape' && menu) {
+        e.preventDefault()
+        setMenu(null)
+        return
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
         // Only when something is selected, so a stray Backspace on an empty
         // board is not swallowed from whatever else might want it.
@@ -825,7 +1006,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, editing, selected])
+  }, [doc, editing, selected, menu])
 
   // ── interaction ────────────────────────────────────────────────
   /** Pointer position and view offset at the moment a background pan began. */
@@ -924,12 +1105,16 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
    * being invented here, so a card made in this app is shaped like one Obsidian
    * made — same id form, same default size.
    */
-  const addCard = () => {
-    if (!doc || !wrapRef.current) return
-    // Centre of the viewport, so a new card lands where the user is looking
-    // rather than at the world origin they may have panned far away from.
-    const r = wrapRef.current.getBoundingClientRect()
-    const p = toWorld(r.left + r.width / 2, r.top + r.height / 2)
+  /**
+   * Makes a page centred on a point in WORLD coordinates.
+   *
+   * Split out so the toolbar and "New page here" share one creator: the only
+   * difference between them is where the point comes from, and two copies of
+   * the node shape is how the two drift apart.
+   */
+  const addCardAt = (wx: number, wy: number) => {
+    if (!doc) return
+    const p = { x: wx, y: wy }
     const node: CanvasNode = {
       id: canvasId(),
       type: 'text',
@@ -941,11 +1126,20 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       ...PAGE_SIZE,
     }
     doc.nodes.push(node)
-    // Straight into editing: an empty card with no cursor in it gives the user
-    // nothing to act on and reads as a card that failed to be created.
+    // Straight into editing: an empty page with no cursor in it gives the user
+    // nothing to act on and reads as a page that failed to be created.
     setEditing(node.id)
     repaint()
     void persist(doc)
+  }
+
+  const addCard = () => {
+    if (!wrapRef.current) return
+    // Centre of the viewport, so a new page lands where the user is looking
+    // rather than at the world origin they may have panned far away from.
+    const r = wrapRef.current.getBoundingClientRect()
+    const p = toWorld(r.left + r.width / 2, r.top + r.height / 2)
+    addCardAt(p.x, p.y)
   }
 
   /**
@@ -1095,6 +1289,9 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     // that card's drag, and it stops propagation below.
     if (e.button !== 0) return
     closeEditor()
+    // A press anywhere on the board dismisses the page menu, which is what
+    // every menu on every platform does.
+    setMenu(null)
     // A press on empty board clears the selection, which is the one gesture
     // everyone already expects to mean "never mind".
     setSelected(new Set())
@@ -1106,6 +1303,16 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     if (e.button !== 0) return
     // Without this the board pans at the same time as the card moves.
     e.stopPropagation()
+    /**
+     * A LOCKED page does not move, and stopping here is what locks it: no
+     * drag begins and no selection changes, so it cannot be nudged by a stray
+     * press while you work around it. Propagation is already stopped above, so
+     * the board does not pan out from under the click either.
+     *
+     * Right-click still reaches the menu, which is where Unlock lives — a lock
+     * you cannot undo from the thing you locked is a trap.
+     */
+    if (node.locked) return
     // A press on a DIFFERENT card closes the open editor. Pressing the card
     // being edited is left alone: the textarea stops its own pointer events, so
     // reaching here at all means the press was on that card's border, which is
@@ -1259,8 +1466,42 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       const r = resize.current
       // Rounded and floored for the same reasons as the drag: the spec declares
       // width and height INTEGER, and `toWorld` divides by a fractional scale.
-      r.node.width = Math.max(MIN_CARD_SIZE.width, Math.round(r.w0 + (p.x - r.x0)))
-      r.node.height = Math.max(MIN_CARD_SIZE.height, Math.round(r.h0 + (p.y - r.y0)))
+      let w = Math.max(MIN_CARD_SIZE.width, Math.round(r.w0 + (p.x - r.x0)))
+      let h = Math.max(MIN_CARD_SIZE.height, Math.round(r.h0 + (p.y - r.y0)))
+      /**
+       * SHIFT KEEPS THE PAGE A PAGE, and then lands it on a neighbour's size.
+       *
+       * Two steps in one modifier because they answer the same question — "make
+       * this the right shape" — and either alone leaves the job half done.
+       *
+       * The ratio is taken from PAGE_SIZE rather than from the page's own
+       * starting size, so Shift RESTORES the house proportion on a page that
+       * has already been dragged out of shape rather than preserving the
+       * mistake. Driven by whichever dimension you moved further, so the
+       * gesture follows the direction you actually dragged.
+       *
+       * Then, if another page is within reach of that size, it takes that size
+       * EXACTLY. Two pages that merely look the same size are the thing that
+       * makes a board feel sloppy, and no amount of careful dragging lands on
+       * the same integer twice.
+       */
+      if (e.shiftKey && doc) {
+        const ratio = PAGE_SIZE.width / PAGE_SIZE.height
+        if (Math.abs(w - r.w0) >= Math.abs(h - r.h0)) h = Math.round(w / ratio)
+        else w = Math.round(h * ratio)
+        let bestGap = SNAP_RANGE
+        for (const other of doc.nodes) {
+          if (other === r.node || other.type === 'group') continue
+          const gap = Math.abs(other.width - w) + Math.abs(other.height - h)
+          if (gap < bestGap) {
+            bestGap = gap
+            w = other.width
+            h = other.height
+          }
+        }
+      }
+      r.node.width = w
+      r.node.height = h
       applyNode(r.node)
       // Edges anchor to the card's SIDES, so a resize moves the ends of every
       // line touching it.
@@ -1274,13 +1515,66 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       // `fit()` frames a board — so this wrote seventeen digits of noise into a
       // file the user diffs in git, and Obsidian rewrote it to an integer on
       // its next touch, so the two apps took turns rewriting the same card.
-      drag.current.node.x = Math.round(p.x - drag.current.dx)
-      drag.current.node.y = Math.round(p.y - drag.current.dy)
+      const held = drag.current
+      let x = Math.round(p.x - held.dx)
+      let y = Math.round(p.y - held.dy)
+      /**
+       * SHIFT LINES THE PAGE UP WITH ITS NEIGHBOURS, per axis.
+       *
+       * Each axis snaps independently, which is the point: a page can lock to
+       * one page's left edge while sitting anywhere vertically. Locking both or
+       * neither would make the common case — building a column — a fight.
+       *
+       * Deliberately NOT an axis-lock on the movement itself. Constraining a
+       * drag to horizontal-only is a different feature that helps you move a
+       * page without disturbing the other coordinate; this helps you place it
+       * flush against something, which is what building a structure needs.
+       *
+       * Groups are skipped as targets: a group is a region drawn AROUND pages,
+       * so its edges are wherever it was sized to and are not a line anything
+       * should be flush with.
+       */
+      if (e.shiftKey && doc) {
+        const others = doc.nodes.filter(
+          (n) => n !== held.node && n.type !== 'group' && !held.others.some((o) => o.node === n),
+        )
+        /**
+         * THE DOT GRID IS ALWAYS A CANDIDATE, alongside the other pages.
+         *
+         * Aligning only to pages meant that lining up with a neighbour which
+         * was itself off-grid left both sitting between the dots — the board
+         * looked wrong and the grid looked decorative. With the dots in the
+         * running, whichever line is CLOSER wins: a page you are deliberately
+         * butting against still takes it, and anywhere else you land on a dot.
+         *
+         * A grid line is never further than half a cell away, so this also
+         * means Shift always does something, which is what makes it feel like a
+         * snap rather than an occasional one.
+         */
+        x += snapOffset(x, held.node.width, [
+          ...others.flatMap((n) => alignLines(n.x, n.width)),
+          ...gridLines(x, held.node.width),
+        ])
+        y += snapOffset(y, held.node.height, [
+          ...others.flatMap((n) => alignLines(n.y, n.height)),
+          ...gridLines(y, held.node.height),
+        ])
+      }
+      /**
+       * The snap is applied as a DELTA to the rest of the selection, not
+       * recomputed per page. Snapping each member to its own nearest line would
+       * pull the group apart; the whole selection moves as one object and the
+       * page you grabbed is the one doing the aligning.
+       */
+      const snapX = x - Math.round(p.x - held.dx)
+      const snapY = y - Math.round(p.y - held.dy)
+      held.node.x = x
+      held.node.y = y
       // The rest of the selection travels with it, each from its own offset so
       // the group keeps its shape.
-      for (const other of drag.current.others) {
-        other.node.x = Math.round(p.x - other.dx)
-        other.node.y = Math.round(p.y - other.dy)
+      for (const other of held.others) {
+        other.node.x = Math.round(p.x - other.dx) + snapX
+        other.node.y = Math.round(p.y - other.dy) + snapY
         applyNode(other.node)
       }
       drag.current.moved = true
@@ -1438,6 +1732,19 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
         onPointerCancel={onUp}
         onDragOver={onDragOver}
         onDrop={onDrop}
+        /**
+         * Right-click on the BOARD, which is a different menu from a page's:
+         * paste, and add a page here. Without this, Paste was only reachable by
+         * right-clicking some other page — which is precisely not where you
+         * want the pasted one to land.
+         */
+        onContextMenu={(e) => {
+          e.preventDefault()
+          if (connect || !doc) return
+          setSelected(new Set())
+          const w = toWorld(e.clientX, e.clientY)
+          setMenu({ x: e.clientX, y: e.clientY, wx: w.x, wy: w.y, id: null })
+        }}
         onWheel={onWheel}
         data-tick={tick}
         data-connect={connect || undefined}
@@ -1548,6 +1855,18 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                 else nodeEls.current.delete(n.id)
               }}
               onPointerDown={(e) => onNodeDown(e, n)}
+              /* Right-click opens the page menu. Selecting the page first means
+                 the menu is always acting on something visibly chosen, rather
+                 than on a page the user has to remember they right-clicked. */
+              onContextMenu={(e) => {
+                e.preventDefault()
+                e.stopPropagation()
+                if (connect) return
+                selectNode(n.id, false)
+                const w = toWorld(e.clientX, e.clientY)
+                setMenu({ x: e.clientX, y: e.clientY, wx: w.x, wy: w.y, id: n.id })
+              }}
+              data-locked={n.locked ? '' : undefined}
               /**
                * ON THE CARD, NOT ON THE TEXT INSIDE IT, and that is the fix
                * rather than a preference.
@@ -1633,7 +1952,9 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                * of every card a dead spot in the one mode where the whole card
                * is supposed to be a target.
                */}
-              {!connect && (
+              {/* No grip on a locked page: a lock that stopped the page moving
+                  but let it be resized would only be half a lock. */}
+              {!connect && !n.locked && (
                 <div
                   className="canvas-resize"
                   aria-hidden="true"
@@ -1811,6 +2132,152 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
           ))}
         </div>
       </div>
+
+      {/**
+       * The page menu.
+       *
+       * OUTSIDE the world div on purpose: in it, the menu would be scaled by
+       * the board's zoom and would be unreadable at 25% and enormous at 300%.
+       * Chrome belongs in screen coordinates.
+       *
+       * Positioned through the ref rather than a style prop — review-s2 bans
+       * inline style objects across this pane, and this is the same imperative
+       * write applyNode() already makes for every page's geometry.
+       */}
+      {menu && (
+        <div
+          className="canvas-menu"
+          role="menu"
+          ref={(el) => {
+            if (!el) return
+            el.style.left = `${menu.x}px`
+            el.style.top = `${menu.y}px`
+          }}
+        >
+          {/* Board menu: the one item that only makes sense on empty space. */}
+          {!menuNode() && (
+            <button
+              type="button"
+              className="canvas-menu-item"
+              role="menuitem"
+              onClick={() => {
+                addCardAt(menu.wx, menu.wy)
+                setMenu(null)
+              }}
+            >
+              New page here
+            </button>
+          )}
+          {menuNode() && (
+            <>
+          <button
+            type="button"
+            className="canvas-menu-item"
+            role="menuitem"
+            onClick={() => {
+              const n = menuNode()
+              if (n) duplicateNode(n)
+              setMenu(null)
+            }}
+          >
+            Duplicate
+          </button>
+          <button
+            type="button"
+            className="canvas-menu-item"
+            role="menuitem"
+            onClick={() => {
+              const n = menuNode()
+              if (n) clipboard.current = JSON.stringify(n)
+              setMenu(null)
+            }}
+          >
+            Copy
+          </button>
+            </>
+          )}
+          <button
+            type="button"
+            className="canvas-menu-item"
+            role="menuitem"
+            // Disabled rather than hidden: a menu whose shape changes between
+            // openings is one you have to read every time.
+            disabled={clipboard.current === null}
+            onClick={() => {
+              pasteNode(menu.wx, menu.wy)
+              setMenu(null)
+            }}
+          >
+            Paste
+          </button>
+          {menuNode() && (
+            <button
+              type="button"
+              className="canvas-menu-item"
+              role="menuitem"
+              onClick={() => {
+                const n = menuNode()
+                if (n) toggleLock(n)
+                setMenu(null)
+              }}
+            >
+              {menuNode()?.locked ? 'Unlock' : 'Lock'}
+            </button>
+          )}
+
+          {menuNode() && (
+          <>
+          {/* Swatches rather than a submenu: six colours fit on one row, and a
+              submenu would be a second click for the shortest list in the app.
+              The values are the spec's presets 1-6; canvas.css owns what each
+              one looks like, which is where every other colour decision lives. */}
+          <div className="canvas-menu-colours" role="group" aria-label="Page colour">
+            <button
+              type="button"
+              className="canvas-menu-swatch canvas-menu-swatch--none"
+              aria-label="No colour"
+              title="No colour"
+              onClick={() => {
+                const n = menuNode()
+                if (n) setNodeColor(n, null)
+                setMenu(null)
+              }}
+            />
+            {['1', '2', '3', '4', '5', '6'].map((c) => (
+              <button
+                key={c}
+                type="button"
+                className="canvas-menu-swatch"
+                data-colour={c}
+                aria-label={`Colour ${c}`}
+                title={`Colour ${c}`}
+                onClick={() => {
+                  const n = menuNode()
+                  if (n) setNodeColor(n, c)
+                  setMenu(null)
+                }}
+              />
+            ))}
+          </div>
+
+          {/* Last, and separated, because it is the one that cannot be taken
+              back by clicking the same item again. Ctrl+Z still covers it. */}
+          <button
+            type="button"
+            className="canvas-menu-item canvas-menu-item--danger"
+            role="menuitem"
+            onClick={() => {
+              const n = menuNode()
+              if (n) removeNode(n)
+              setMenu(null)
+            }}
+          >
+            Delete
+          </button>
+          </>
+          )}
+        </div>
+      )}
 
       {/* Announced, because "Saving…" and the save error live here and are
           otherwise silent — a failed save is invisible to anyone not watching

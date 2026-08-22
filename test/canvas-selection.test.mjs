@@ -145,12 +145,18 @@ test('a plain press inside a multi-selection does not collapse it', () => {
 test('dragging one of a selection drags all of it', () => {
   const move = VIEW.slice(VIEW.indexOf('if (drag.current) {'), VIEW.indexOf('if (pan.current) {'))
   assert.ok(move.length > 0, 'the drag branch no longer has the shape this test reads')
-  assert.match(move, /for \(const other of drag\.current\.others\)/, 'only the grabbed page moves')
+  // `held` is `drag.current`, hoisted once so the snap offsets can be computed
+  // from it without re-reading a ref that a re-render may have replaced.
+  assert.match(move, /for \(const other of held\.others\)/, 'only the grabbed page moves')
   // Each page keeps its OWN offset from the pointer, so the group holds its
   // shape and every page rounds to an integer independently. One shared delta
   // rounded once would drift the whole group off the grid together.
   assert.match(move, /other\.node\.x = Math\.round\(p\.x - other\.dx\)/, 'the group does not keep its shape')
   assert.match(move, /other\.node\.y = Math\.round\(p\.y - other\.dy\)/, 'the group does not keep its shape')
+  // A Shift snap is applied to the group as ONE delta. Snapping each member to
+  // its own nearest line would pull the selection apart.
+  assert.match(move, /\+ snapX/, 'the snap is not carried to the rest of the selection')
+  assert.match(move, /\+ snapY/, 'the snap is not carried to the rest of the selection')
 })
 
 test('an Alt+drag duplicate never carries the rest of the selection', () => {

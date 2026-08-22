@@ -47,6 +47,31 @@
      pan or text-select through the gesture. */
   touch-action: none;
   user-select: none;
+
+  /**
+   * A DOT GRID, so pages have something to line up against.
+   *
+   * Painted on the surface rather than the world because the world is inside
+   * `scale(k)` and has no size of its own — a background on a zero-sized
+   * element paints nothing. So the grid undoes the transform by hand instead,
+   * from the three variables applyView() publishes: the spacing is the world
+   * spacing times the zoom, and the offset is the pan. That keeps the dots
+   * pinned to world coordinates, which is the only thing that makes them
+   * useful for alignment — a grid that slid under the pages would be wallpaper.
+   *
+   * `max()` stops the spacing collapsing into noise when the board is zoomed
+   * far out. Past that point the dots stop tracking world coordinates, which
+   * nobody can see at that scale and which beats a grey haze.
+   *
+   * Scoped to `.canvas-surface`, so the dots exist ONLY on a board. Nothing
+   * else in the app gets them.
+   */
+  background-color: var(--material-heavy);
+  background-image: radial-gradient(circle at 1px 1px, var(--separator) 1px, transparent 0);
+  background-size:
+    max(7px, calc(var(--canvas-grid, 24) * 1px * var(--canvas-k, 1)))
+    max(7px, calc(var(--canvas-grid, 24) * 1px * var(--canvas-k, 1)));
+  background-position: calc(var(--canvas-tx, 0) * 1px) calc(var(--canvas-ty, 0) * 1px);
 }
 .canvas-surface:active {
   cursor: grabbing;
@@ -586,6 +611,84 @@
    needs it. */
 .canvas-list-item[data-depth='4'],
 .canvas-list-item[data-depth='5'] { padding-left: calc(var(--space-4) + 3.4rem); }
+
+/* ── the page menu ──────────────────────────────────────────── */
+
+/* Fixed, because the coordinates written onto it are the pointer's — which are
+   viewport coordinates. Absolute would measure from whichever ancestor happened
+   to be positioned and the menu would open somewhere else entirely. */
+.canvas-menu {
+  position: fixed;
+  z-index: 20;
+  min-width: 11rem;
+  padding: var(--space-1);
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-md);
+  background: var(--material-heavy);
+  backdrop-filter: var(--blur-regular);
+  -webkit-backdrop-filter: var(--blur-regular);
+  box-shadow: var(--shadow-raised, 0 8px 24px rgb(0 0 0 / 0.35));
+}
+.canvas-menu-item {
+  padding: var(--space-2) var(--space-3);
+  border-radius: var(--radius-sm);
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+}
+.canvas-menu-item:hover:not(:disabled) {
+  background: var(--fill-hover);
+}
+.canvas-menu-item:disabled {
+  color: var(--label-quaternary);
+}
+.canvas-menu-item--danger {
+  color: var(--danger, var(--label));
+  margin-top: var(--space-1);
+  border-top: 1px solid var(--separator);
+  border-radius: 0 0 var(--radius-sm) var(--radius-sm);
+}
+
+.canvas-menu-colours {
+  display: flex;
+  gap: var(--space-1);
+  padding: var(--space-2) var(--space-3);
+}
+.canvas-menu-swatch {
+  width: 1.15rem;
+  height: 1.15rem;
+  padding: 0;
+  border-radius: 50%;
+  border: 1px solid var(--separator);
+  background: var(--canvas-color-1);
+}
+.canvas-menu-swatch:hover {
+  /* Lifted rather than recoloured: the swatch IS its colour, so any hover tint
+     would be a lie about what you are about to pick. */
+  transform: scale(1.18);
+}
+.canvas-menu-swatch[data-colour='2'] { background: var(--canvas-color-2); }
+.canvas-menu-swatch[data-colour='3'] { background: var(--canvas-color-3); }
+.canvas-menu-swatch[data-colour='4'] { background: var(--canvas-color-4); }
+.canvas-menu-swatch[data-colour='5'] { background: var(--canvas-color-5); }
+.canvas-menu-swatch[data-colour='6'] { background: var(--canvas-color-6); }
+/* "No colour" reads as empty, not as a seventh colour. */
+.canvas-menu-swatch--none {
+  background: transparent;
+  border-style: dashed;
+}
+
+/* A locked page says so, or the only way to discover it is to try to move it
+   and think the app is broken. Dashed, because a solid heavier border is how a
+   coloured page already reads. */
+.canvas-node[data-locked] {
+  border-style: dashed;
+  cursor: default;
+}
 
 /* The heading over boards the root cannot reach. */
 .canvas-list-subhead {

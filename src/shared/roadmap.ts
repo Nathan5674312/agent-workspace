@@ -110,6 +110,36 @@ export const ROADMAP: FeatureGroup[] = [
     ],
   },
   {
+    title: 'Pipelines / canvas',
+    // The third of three lenses, and the group exists to say so. Graph answers
+    // "what is connected to what", Database answers "what shares attributes",
+    // and both hand back FACTS. Canvas is the only one that hands back WORK,
+    // which is why it is the only one that needs somewhere to remember how far
+    // it has got. It was filed under "nice to haves" until 2026-08-21, which
+    // was a straightforward misreading of what it is for.
+    subtitle: 'procedure, where graph is association and database is classification',
+    features: [
+      {
+        label: 'Whiteboard / canvas view',
+        status: 'partial',
+        surface: 'ribbon:canvas',
+        note: 'Boards are stored as JSON Canvas (jsoncanvas.org), the same `.canvas` format Obsidian reads and writes, so a board made here opens there and back. Watched working in a run-through on 2026-08-21: create and open boards, make cards, draw edges, select singly and together, Alt+drag to duplicate, drag a note out of the tree to make a file card, pan, zoom to cursor, and framing. All four fidelity gaps against Obsidian are closed — arrowheads, hand-routed edge sides, edge labels and colours all render as the file describes them. Saves through the same guarded write the editor uses, and fields the view does not render are preserved rather than dropped. Still partial: no delete, no resize, no making a group, and media cards remain blocked by the renderer CSP.',
+      },
+      {
+        label: 'Boards an agent can run',
+        status: 'partial',
+        surface: 'ribbon:canvas',
+        note: 'A board is already a program, so nothing is added to it to make one: an arrow is order, a labelled box is a phase, a file card is material, an edge label is a condition. compile() in shared/pipeline.ts turns a board into an ordered plan without writing one byte back to the .canvas file; brief.ts writes that plan out in a form that explains itself to a reader with no prior knowledge and no SDK; run.ts is the queue, tracking what is done, what is waiting on a person, and what can be worked on now, so a run survives the person who started it going out for the day. All three are pure and framework-free — no Electron, no React, no filesystem — so they outlive the current host. The gap is the last mile: nothing writes a brief or a run to disk yet, and no agent has executed one end to end.',
+      },
+      {
+        label: 'Pipelines an agent can find without being told',
+        status: 'planned',
+        surface: 'ribbon:canvas',
+        note: 'A brief and a run sit hidden beside their board, so today an agent finds them by globbing. That gives paths but not purpose, and opening forty briefs to find the right board is the wrong shape. What is missing is a derived index that says which boards are runnable and what each one is for, self-invalidating in the way a single brief already is.',
+      },
+    ],
+  },
+  {
     title: 'Collaboration',
     features: [
       { label: 'Real-time multiplayer editing', status: 'planned', note: 'Needs a server and a CRDT; the save path is currently last-write-wins behind an mtime guard.' },
@@ -155,12 +185,6 @@ export const ROADMAP: FeatureGroup[] = [
       { label: 'API / plugin ecosystem', status: 'planned', surface: 'ribbon:plugins' },
       { label: 'Web clipper', status: 'planned' },
       { label: 'Version history', status: 'partial', surface: 'Versions tab', note: 'The Versions tab lists every pre-edit copy in .backups/ for the open note, newest first, previews one, and restores it THROUGH save() so the lost-update guard and the backup-before-overwrite still apply. Both on-disk layouts are listed — the new mirrored one and the retired note server\'s flat one. The gap is that it has not been watched running yet: verified by test/versions.test.mjs against the real data layer, not by a human opening the tab. No pruning either — the history is still unbounded.' },
-      {
-        label: 'Whiteboard / canvas view',
-        status: 'partial',
-        surface: 'ribbon:canvas',
-        note: 'Boards are stored as JSON Canvas (jsoncanvas.org), the same `.canvas` format Obsidian reads and writes, so a board made here opens there and back. Built: create and open boards from the ribbon, pan, zoom to cursor, drag cards to rearrange, open a note from its card, and edges rendered as the file describes them. Saves through the same guarded write the editor uses. Not built: making cards or drawing edges inside the app, so today a board is arranged here and authored in Obsidian. Fields this view does not render — groups, colours, edge labels — are preserved on save rather than dropped.',
-      },
       { label: 'Server / client homelab setup', status: 'planned' },
       {
         label: 'Open source or at least open format',

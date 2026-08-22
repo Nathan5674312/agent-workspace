@@ -820,6 +820,17 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     moved: boolean
     /** True when this gesture created the node it is dragging (Alt+drag). */
     created: boolean
+    /**
+     * The REST of the selection, each with its own grab offset.
+     *
+     * Selecting several pages and dragging one moved only the one you had hold
+     * of, which makes a multi-selection something you can look at but not act
+     * on. Every page carries its own offset from the pointer rather than a
+     * shared delta, so the group keeps its shape exactly and each page lands on
+     * integers independently — a shared delta rounded once would drift the
+     * whole group off the grid together.
+     */
+    others: { node: CanvasNode; dx: number; dy: number }[]
   } | null>(null)
 
   /**
@@ -1137,10 +1148,21 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
           })()
         : node
 
-    // Selection follows the press, so a card is selected before any drag of it
-    // begins. The duplicate becomes the selection when there is one — you are
-    // now working on the copy, not the card you copied.
-    selectNode(target.id, e.shiftKey || e.ctrlKey || e.metaKey)
+    /**
+     * Selection follows the press, so a page is selected before any drag of it
+     * begins. The duplicate becomes the selection when there is one — you are
+     * now working on the copy, not the page you copied.
+     *
+     * EXCEPT when the press is a plain one on a page that is ALREADY part of a
+     * multi-selection. `selectNode` with `additive` false replaces the
+     * selection with just that page, which would collapse the group the instant
+     * you reached for it and leave a group drag impossible to start. Keeping
+     * the selection there is what every canvas app does, and it is what makes
+     * grabbing any member of a group drag the whole group.
+     */
+    const additive = e.shiftKey || e.ctrlKey || e.metaKey
+    const inGroup = selected.has(target.id) && selected.size > 1
+    if (additive || !inGroup) selectNode(target.id, additive)
 
     // The grab offset is kept so the card does not jump its centre to the
     // cursor on the first move — the same correction GraphView documents.
@@ -1152,6 +1174,22 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       dy: p.y - target.y,
       moved: false,
       created: target !== node,
+      /**
+       * Read from the selection as it was BEFORE this press, which is the
+       * selection the user made. `selectNode` above schedules a state update
+       * that this render cannot see anyway, and that is the right value: a
+       * plain press on an unselected page replaces the selection, so the group
+       * is only the group when the page pressed was already in one.
+       *
+       * Empty for an Alt+drag. That gesture is dragging a fresh copy, and
+       * duplicating a whole selection is a different feature from moving one.
+       */
+      others:
+        target === node && inGroup && doc
+          ? doc.nodes
+              .filter((other) => other !== target && selected.has(other.id))
+              .map((other) => ({ node: other, dx: p.x - other.x, dy: p.y - other.y }))
+          : [],
     }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
     /**
@@ -1220,6 +1258,13 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       // its next touch, so the two apps took turns rewriting the same card.
       drag.current.node.x = Math.round(p.x - drag.current.dx)
       drag.current.node.y = Math.round(p.y - drag.current.dy)
+      // The rest of the selection travels with it, each from its own offset so
+      // the group keeps its shape.
+      for (const other of drag.current.others) {
+        other.node.x = Math.round(p.x - other.dx)
+        other.node.y = Math.round(p.y - other.dy)
+        applyNode(other.node)
+      }
       drag.current.moved = true
       // The card itself moves without React. The re-render is only for the
       // EDGES, which are JSX and read their endpoints from the node geometry —

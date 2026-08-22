@@ -122,11 +122,44 @@ test('selection lives in state, not on the document', () => {
 })
 
 test('the press decides additive from the real modifier keys', () => {
+  // Named rather than inlined now that group drag reads it twice. The property
+  // is the same one: additive comes from the modifiers actually held, not from
+  // anything remembered.
   assert.match(
     VIEW,
-    /selectNode\(target\.id, e\.shiftKey \|\| e\.ctrlKey \|\| e\.metaKey\)/,
-    'the press does not drive selection',
+    /const additive = e\.shiftKey \|\| e\.ctrlKey \|\| e\.metaKey/,
+    'the press does not read the real modifier keys',
   )
+  assert.match(VIEW, /selectNode\(target\.id, additive\)/, 'the press does not drive selection')
+})
+
+test('a plain press inside a multi-selection does not collapse it', () => {
+  // `selectNode(id, false)` replaces the selection with that one page. Applied
+  // to a page already in a group, it would collapse the group the instant you
+  // reached for it and a group drag could never begin — you would always end up
+  // dragging the single page you happened to grab.
+  assert.match(VIEW, /const inGroup = selected\.has\(target\.id\) && selected\.size > 1/, 'a group press is not detected')
+  assert.match(VIEW, /if \(additive \|\| !inGroup\) selectNode\(target\.id, additive\)/, 'a plain press still collapses a group')
+})
+
+test('dragging one of a selection drags all of it', () => {
+  const move = VIEW.slice(VIEW.indexOf('if (drag.current) {'), VIEW.indexOf('if (pan.current) {'))
+  assert.ok(move.length > 0, 'the drag branch no longer has the shape this test reads')
+  assert.match(move, /for \(const other of drag\.current\.others\)/, 'only the grabbed page moves')
+  // Each page keeps its OWN offset from the pointer, so the group holds its
+  // shape and every page rounds to an integer independently. One shared delta
+  // rounded once would drift the whole group off the grid together.
+  assert.match(move, /other\.node\.x = Math\.round\(p\.x - other\.dx\)/, 'the group does not keep its shape')
+  assert.match(move, /other\.node\.y = Math\.round\(p\.y - other\.dy\)/, 'the group does not keep its shape')
+})
+
+test('an Alt+drag duplicate never carries the rest of the selection', () => {
+  // That gesture drags a fresh copy. Duplicating a whole selection is a
+  // different feature, and doing it by accident would silently double a board.
+  const start = VIEW.indexOf('others:')
+  const others = VIEW.slice(start, VIEW.indexOf('}', VIEW.indexOf(': [],', start)))
+  assert.ok(start >= 0 && others.length > 0, 'the others list no longer has the shape this test reads')
+  assert.match(others, /target === node/, 'a duplicate can drag the whole selection with it')
 })
 
 test('a modifier click on a file card selects instead of opening it', () => {

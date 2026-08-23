@@ -76,6 +76,29 @@ export type Run = {
   startedAt: number
   /** Keyed by step id. A step with no entry has not started. */
   steps: Record<string, StepRecord>
+  /**
+   * When this board next wants looking at, as a timestamp.
+   *
+   * The board says WHEN in prose — "every morning", "after each post" — because
+   * a schedule is a thing the person drawing it should be able to write in
+   * words. Reading that prose needs a model; comparing two numbers does not. So
+   * an agent interprets it ONCE and leaves a timestamp here, and after that any
+   * dumb scheduler can answer "is this due" without loading anything.
+   *
+   * Absent means nobody has said, which is not the same as "never" and is why
+   * this is optional rather than defaulted to zero.
+   */
+  wakeAt?: number
+  /**
+   * Who is working this board, and until when.
+   *
+   * Two agents on one pipeline is the same failure as two agents in one file,
+   * and it is not hypothetical on this machine — there are two Claude sessions
+   * and they have collided before. An EXPIRY rather than a flag, because the
+   * common ending for an agent is not "releases the claim", it is "stops
+   * existing", and a lock nothing can clear is worse than no lock.
+   */
+  claim?: { by: string; until: number }
 }
 
 /**

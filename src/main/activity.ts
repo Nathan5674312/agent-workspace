@@ -56,6 +56,22 @@ const MAX_TAIL = 2 * 1024 * 1024
 
 /** Byte offset already consumed, per transcript path. */
 const offsets = new Map<string, number>()
+/**
+ * Whether the first pass has run.
+ *
+ * This exists because of a bug that only showed up with the app open and agents
+ * working. A file seen for the first time starts at its END, so that opening the
+ * app narrates what is happening NOW instead of replaying a month of history.
+ * That is right for files that already existed — and exactly wrong for one that
+ * did not, because a transcript CREATED after startup is new from its first
+ * byte. Four subagents launched into a running app therefore showed nothing at
+ * all: each of their files was brand new, and every one was skipped as though it
+ * were old history.
+ *
+ * So "first sighting" means two different things depending on when it happens,
+ * and this flag is what tells them apart.
+ */
+let primed = false
 let timer: NodeJS.Timeout | null = null
 
 /**
@@ -151,13 +167,25 @@ function recentTranscripts(now: number): Found[] {
  */
 function readTail(f: Found): string {
   const seen = offsets.get(f.path)
-  if (seen === undefined || seen > f.size) {
+  // A file we have never seen. Before the first pass that means "already
+  // existed", and starting at the end is what stops the app replaying a month
+  // of history on open. AFTER the first pass it means the file was CREATED
+  // while we were watching — a subagent that just started — and every byte of
+  // it is new, so it is read from the beginning.
+  if (seen === undefined) {
+    offsets.set(f.path, primed ? 0 : f.size)
+    if (!primed) return ''
+  } else if (seen > f.size) {
+    // Shrank: rotated or replaced, and the offset now points into different
+    // content. Resume at the end rather than at zero, so a rotated 44 MB file
+    // does not flood the display with a replay.
     offsets.set(f.path, f.size)
     return ''
   }
-  if (seen === f.size) return ''
+  const from0 = offsets.get(f.path)!
+  if (from0 === f.size) return ''
 
-  const from = Math.max(seen, f.size - MAX_TAIL)
+  const from = Math.max(from0, f.size - MAX_TAIL)
   const length = f.size - from
   let fd: number | null = null
   try {
@@ -184,11 +212,16 @@ function readTail(f: Found): string {
  */
 export function poll(now: number = Date.now()): Activity[] {
   const out: Activity[] = []
+  const wasPrimed = primed
   for (const f of recentTranscripts(now)) {
     const tail = readTail(f)
     if (tail === '') continue
     out.push(...parseLines(tail.split('\n').filter(Boolean)))
   }
+  primed = true
+  // The priming pass reports nothing by definition: it exists to record where
+  // every existing file ends, not to narrate what already happened.
+  if (!wasPrimed) return []
   out.sort((a, b) => a.at - b.at)
   return out.length > MAX_PUSH ? out.slice(-MAX_PUSH) : out
 }
@@ -242,4 +275,5 @@ export function current(): Activity[] {
 /** Test seam. */
 export function _resetForTest(): void {
   offsets.clear()
+  primed = false
 }

@@ -1614,7 +1614,20 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
  * panel — the user aims at their text and hits a status display instead.
  */
 .activity {
-  position: absolute;
+  /**
+   * FIXED, not absolute, and this was a real bug rather than a preference.
+   *
+   * The component mounts inside `.pane-corner`, which is itself `position:
+   * fixed` and pinned to the BOTTOM right for the consent surface. `absolute`
+   * resolves against the nearest positioned ancestor, so `top: 0` meant the top
+   * of that corner container — and the panel rendered at y=951 in a 1000px
+   * window, hard against the bottom, underneath the thing it is supposed to sit
+   * opposite. It was in the DOM, visible, and in the wrong corner.
+   *
+   * This panel is anchored to the WINDOW, not to whatever happens to contain it,
+   * so it says so.
+   */
+  position: fixed;
   top: 0;
   right: 0;
   z-index: 5;
@@ -1711,4 +1724,15 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   margin-top: var(--space-2);
   font-size: var(--text-xs);
   color: var(--label-quaternary);
+}
+
+/* Says the list was cut rather than just cutting it. A truncated display that
+   does not admit it was truncated is worse than a shorter one. */
+.activity-more {
+  padding: var(--space-3) var(--space-4);
+  background: var(--bg-elevated);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  font-size: var(--text-xs);
+  color: var(--label-tertiary);
 }

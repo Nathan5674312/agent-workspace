@@ -43,6 +43,20 @@ const IDLE_MS = 90_000
 /** Keep the panel bounded no matter how much arrives. */
 const MAX_KEPT = 400
 
+/**
+ * How many agents get a card, and why there is a limit at all.
+ *
+ * Five concurrent agents produced a 1030px panel in a 1000px window — it ran off
+ * the bottom, and because this surface is `pointer-events: none` by design there
+ * is nothing to scroll it with. Overflow here is not a cosmetic problem, it is
+ * content that cannot be reached by any means.
+ *
+ * Four is what fits. The rest are counted on one line rather than dropped
+ * silently, because "3 more working" is information and a truncated list that
+ * does not say it was truncated is a lie.
+ */
+const MAX_SHOWN = 4
+
 /** A short, stable label for a session id, which is a UUID nobody can read. */
 function shortId(id: string): string {
   return id.slice(0, 4) || 'agent'
@@ -86,19 +100,31 @@ export function AgentActivity(): React.JSX.Element | null {
   // The whole component, gone. Not an empty container, not a collapsed bar.
   if (live.length === 0) return null
 
+  // Busiest-most-recent first, so the ones that fall off the end are the ones
+  // that moved longest ago.
+  const shown = live.slice(0, MAX_SHOWN)
+  const hidden = live.length - shown.length
+
   return (
     <div className="activity" role="status" aria-live="polite" aria-label="Agent activity">
-      {live.map((s) => (
+      {shown.map((s) => (
         <div className="activity-agent" key={s.session}>
           <div className="activity-head">
             <span className="activity-dot" aria-hidden="true" />
-            <span className="activity-who">{place(s.cwd)}</span>
-            <span className="activity-id">{shortId(s.session)}</span>
+            {/* A subagent inherits its PARENT's slug, so every subagent of one
+                session carries the same readable name — four of them showed as
+                four identical labels. For those the short agent id is the only
+                thing that actually distinguishes them, so it becomes the name
+                and the slug is dropped. */}
+            <span className="activity-who">
+              {s.parent ? shortId(s.session) : (s.label ?? place(s.cwd))}
+            </span>
+            <span className="activity-id">{s.parent ? 'sub' : place(s.cwd)}</span>
           </div>
           <div className="activity-now">{describe(s.last)}</div>
           {s.recent.length > 1 && (
             <ol className="activity-trail">
-              {s.recent.slice(1, 4).map((a, i) => (
+              {s.recent.slice(1, 3).map((a, i) => (
                 <li className="activity-trail-item" key={`${a.at}-${i}`}>
                   {describe(a)}
                 </li>
@@ -108,6 +134,11 @@ export function AgentActivity(): React.JSX.Element | null {
           <div className="activity-count">{s.count} steps</div>
         </div>
       ))}
+      {hidden > 0 && (
+        <div className="activity-more">
+          {hidden} more agent{hidden === 1 ? '' : 's'} working
+        </div>
+      )}
     </div>
   )
 }

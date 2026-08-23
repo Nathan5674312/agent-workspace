@@ -198,6 +198,54 @@ test('two agents are kept apart, most recently active first', () => {
   assert.equal(s[1].last.path, 'c.md', 'the newest call for that session was not first')
 })
 
+test('subagents of one session are separate agents, not one', () => {
+  // FOUND BY RUNNING FOUR AND LOOKING, not by reading the code. A subagent
+  // writes its own transcript but inherits its parent's sessionId, so grouping
+  // on that showed four concurrent agents as a single row — which is precisely
+  // the thing the panel exists to show.
+  const sub = (agentId, file) =>
+    line([use('Read', { file_path: file })], {
+      agentId,
+      slug: `name-${agentId}`,
+      sessionId: 'parent-session',
+    })
+  const s = sessions(parseLines([sub('a1', 'x.md'), sub('a2', 'y.md'), sub('a3', 'z.md')]))
+  assert.equal(s.length, 3, 'subagents collapsed into one row again')
+  assert.deepEqual(s.map((x) => x.session).sort(), ['a1', 'a2', 'a3'])
+})
+
+test('a subagent names its parent; a top-level session has none', () => {
+  const [child] = parseLine(
+    line([use('Read', { file_path: 'x.md' })], { agentId: 'a1', sessionId: 'parent' }),
+  )
+  assert.equal(child.session, 'a1')
+  assert.equal(child.parent, 'parent')
+
+  const [top] = parseLine(line([use('Read', { file_path: 'x.md' })]))
+  assert.equal(top.session, 'sess-a')
+  assert.equal(top.parent, undefined)
+})
+
+test('the readable slug is preferred over a UUID, and does not flicker', () => {
+  // The harness already writes a name like "humble-squishing-emerson". It is
+  // free and it is what a person can actually tell apart. Taken from whichever
+  // line carried it, because the newest line often has none.
+  const s = sessions(
+    parseLines([
+      line([use('Read', { file_path: 'a.md' })], {
+        agentId: 'a1',
+        slug: 'humble-squishing-emerson',
+        timestamp: '2026-08-23T09:00:00.000Z',
+      }),
+      line([use('Read', { file_path: 'b.md' })], {
+        agentId: 'a1',
+        timestamp: '2026-08-23T09:01:00.000Z',
+      }),
+    ]),
+  )
+  assert.equal(s[0].label, 'humble-squishing-emerson')
+})
+
 test('recent is capped, because an agent does dozens of calls a minute', () => {
   const many = Array.from({ length: 40 }, (_, i) =>
     line([use('Read', { file_path: `${i}.md` })], {
@@ -217,6 +265,20 @@ test('since() lets a tail resume without re-reporting', () => {
 })
 
 // ------------------------------------------------------------------ the line
+
+test('a windows path is reduced to a filename, not printed whole', () => {
+  // Every fixture path in this file used forward slashes, so the `/`-only split
+  // passed here and failed in the app: the panel printed
+  // `reading C:\Users\Nathan\Desktop\Universal Vault\Transcripts\Roy Lee\...`
+  // across three lines of every card. Found by looking at the rendered panel.
+  const [a] = parseLine(
+    line([use('Read', { file_path: 'C:\\Users\\Nathan\\Desktop\\Universal Vault\\Fate\\Home.md' })]),
+  )
+  assert.equal(describe(a), 'reading Home.md')
+
+  // With a root, it is still just the filename, not the relative path.
+  assert.equal(describe(a, 'C:/Users/Nathan/Desktop/Universal Vault'), 'reading Home.md')
+})
 
 test('the description says the thing, not the category', () => {
   const root = 'C:/Users/Nathan/Desktop/Universal Vault'

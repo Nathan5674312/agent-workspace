@@ -48,8 +48,25 @@ export type Action = 'read' | 'write' | 'search' | 'run' | 'other'
 export type Activity = {
   /** Epoch ms, from the transcript line. */
   at: number
-  /** The session that did it. Two agents on this machine means this matters. */
+  /**
+   * Who did it, and this is NOT simply the session id.
+   *
+   * A subagent writes its own transcript but inherits its PARENT's `sessionId`,
+   * so grouping on that collapses every subagent of one session into a single
+   * row. Four agents launched at once appeared as one, which was found by
+   * running four and looking, not by reading the code. `agentId` is present on
+   * subagent lines and is the real identity; `sessionId` is the fallback for a
+   * top-level session, which has no `agentId`.
+   */
   session: string
+  /** The parent session, when this is a subagent. Absent at top level. */
+  parent?: string
+  /**
+   * The harness's own readable name for the session, like
+   * "humble-squishing-emerson". Far better to put on screen than a UUID, and it
+   * costs nothing because it is already in the file.
+   */
+  label?: string
   /** The working directory that session was launched in. */
   cwd: string
   /** The tool's own name, kept verbatim so an unknown one is still reportable. */
@@ -101,7 +118,15 @@ const ACTIONS: Record<string, Action> = {
  * strings, flags, URLs, variables and anything else an argument can be.
  */
 function programOf(command: string): string {
-  const parts = command.trim().split(/\s+/)
+  // `cd "<somewhere>" && <the actual work>` is how agents open almost every
+  // shell call, so reporting the first program reduced a third of all activity
+  // to the word "cd". The interesting program is the last one in the chain.
+  // Splitting on the separators rather than parsing a shell grammar is enough
+  // here, because the output is one token either way.
+  const segments = command.split(/&&|\|\||;|\|/)
+  const tail = segments[segments.length - 1]?.trim()
+  const chosen = tail && tail !== '' ? tail : command
+  const parts = chosen.trim().split(/\s+/)
   const program = (parts[0] ?? '').split(/[\\/]/).pop() ?? ''
   const next = parts[1] ?? ''
   return /^[a-z][a-z0-9:_-]*$/.test(next) ? `${program} ${next}` : program
@@ -163,8 +188,12 @@ export function parseLine(raw: string): Activity[] {
   if (!Array.isArray(content)) return []
 
   const at = Date.parse(String(line.timestamp ?? ''))
-  const session = typeof line.sessionId === 'string' ? line.sessionId : ''
+  const sessionId = typeof line.sessionId === 'string' ? line.sessionId : ''
+  const agentId = typeof line.agentId === 'string' ? line.agentId : ''
+  // The subagent's own id wins. See the note on `Activity.session`.
+  const session = agentId || sessionId
   const cwd = typeof line.cwd === 'string' ? line.cwd : ''
+  const slug = typeof line.slug === 'string' ? line.slug : ''
 
   const out: Activity[] = []
   for (const block of content) {
@@ -179,6 +208,8 @@ export function parseLine(raw: string): Activity[] {
       tool: b.name,
       action: ACTIONS[b.name] ?? 'other',
     }
+    if (agentId && sessionId) a.parent = sessionId
+    if (slug) a.label = slug
     // Several tools name their target differently, and the alternatives are
     // listed rather than guessed so an unknown key yields no path instead of
     // some other string that happens to sit in the input.
@@ -237,6 +268,10 @@ export function since(items: Activity[], t: number): Activity[] {
  */
 export type SessionState = {
   session: string
+  /** The readable name, when the transcript carried one. */
+  label?: string
+  /** Set when this is a subagent of another session. */
+  parent?: string
   cwd: string
   /** The most recent call. What to put on the first line. */
   last: Activity
@@ -257,13 +292,21 @@ export function sessions(items: Activity[], limit = 5): SessionState[] {
   const out: SessionState[] = []
   for (const [session, list] of by) {
     const ordered = [...list].sort((x, y) => y.at - x.at)
-    out.push({
+    const state: SessionState = {
       session,
       cwd: ordered[0].cwd,
       last: ordered[0],
       recent: ordered.slice(0, limit),
       count: ordered.length,
-    })
+    }
+    // Taken from whichever line carried them rather than from the newest, since
+    // an attachment line can carry the slug while the tool call next to it does
+    // not, and a name that flickers is worse than no name.
+    const named = ordered.find((a) => a.label)
+    if (named?.label) state.label = named.label
+    const child = ordered.find((a) => a.parent)
+    if (child?.parent) state.parent = child.parent
+    out.push(state)
   }
   // Busiest-most-recent first: whoever moved last is who a person looking at
   // the screen right now is most likely asking about.
@@ -279,7 +322,12 @@ export function sessions(items: Activity[], limit = 5): SessionState[] {
  */
 export function describe(a: Activity, root?: string): string {
   const shown = a.path ? (root ? (relativeTo(a.path, root) ?? a.path) : a.path) : undefined
-  const name = shown ? (shown.split('/').pop() ?? shown) : undefined
+  // Split on BOTH separators. A transcript records `C:\Users\...\Note.md`, and
+  // splitting on `/` alone left that whole string intact — so the panel showed
+  // the full absolute path of every file instead of its name, three lines deep
+  // per card. Caught by looking at the rendered panel, not by a unit test,
+  // because every fixture path in the test used forward slashes.
+  const name = shown ? (shown.split(/[\\/]/).pop() || shown) : undefined
   switch (a.action) {
     case 'read':
       return name ? `reading ${name}` : 'reading'

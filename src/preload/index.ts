@@ -1,5 +1,5 @@
 import { contextBridge, ipcRenderer } from 'electron'
-import { CH, EV, type Api } from '../shared/ipc.js'
+import { CH, EV, type Api, type Activity } from '../shared/ipc.js'
 
 /**
  * The ONLY bridge between renderer and main. Nothing else crosses.
@@ -33,6 +33,10 @@ const api: Api = {
     mkdir: (path) => ipcRenderer.invoke(CH.vaultMkdir, path),
     move: (from, to) => ipcRenderer.invoke(CH.vaultMove, from, to),
     undoMove: (id) => ipcRenderer.invoke(CH.vaultUndoMove, id),
+  },
+  agents: {
+    activity: () => ipcRenderer.invoke(CH.agentActivity),
+    onActivity: (cb) => on<[Activity[]]>(EV.agentActivity, cb),
   },
   terminal: {
     processes: () => ipcRenderer.invoke(CH.terminalProcesses),

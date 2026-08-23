@@ -391,6 +391,15 @@ export type NetworkTrust = {
 // ------------------------------------------------------------------- channels
 
 /** invoke/handle — request/response. */
+/**
+ * One tool call an agent made, read out of the harness-written transcript.
+ *
+ * Re-exported from `shared/transcript.ts` so the renderer and preload get the
+ * type without importing the parser, which is main-side work.
+ */
+import type { Activity } from './transcript.js'
+export type { Activity }
+
 export const CH = {
   vaultTree: 'vault:tree',
   vaultList: 'vault:list',
@@ -413,6 +422,7 @@ export const CH = {
   cornerItems: 'corner:items',
   cornerDecide: 'corner:decide',
   cornerDismiss: 'corner:dismiss',
+  agentActivity: 'agents:activity',
   networkTrust: 'network:trust',
   networkTrustCurrent: 'network:trust-current',
 
@@ -441,6 +451,7 @@ export const EV = {
   claudeSessionUpdate: 'claude:session-update',
   cornerPush: 'corner:push',
   cornerResolved: 'corner:resolved',
+  agentActivity: 'agents:activity',
   networkChanged: 'network:changed',
 } as const
 
@@ -506,6 +517,19 @@ export type Api = {
     /** Marks the CURRENT network trusted/untrusted. Human action only. */
     trust(trusted: boolean): Promise<NetworkTrust>
     onChanged(cb: (t: NetworkTrust) => void): () => void
+  }
+  agents: {
+    /**
+     * What agents have done recently, oldest first.
+     *
+     * Read out of Claude Code's own transcripts, which the harness writes, so
+     * this shows what an agent DID rather than what it reported doing. Empty
+     * when nothing is running, and the surface showing it should not exist at
+     * all in that case.
+     */
+    activity(): Promise<Activity[]>
+    /** New activity as it happens. Returns its own unsubscribe. */
+    onActivity(cb: (items: Activity[]) => void): () => void
   }
   terminal: {
     /** Live agent processes, one per running session. */

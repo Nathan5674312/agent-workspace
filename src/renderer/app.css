@@ -1598,3 +1598,117 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
 @media (prefers-reduced-transparency: reduce) {
   .db-cal-note { outline: 1px solid var(--separator-opaque); }
 }
+
+/* ══ AGENT ACTIVITY — top right, ambient ══════════════════ */
+
+/**
+ * The counterpart to the agent corner, and deliberately its opposite.
+ *
+ * Bottom right blocks and asks; this never does. It is also placed, sized and
+ * toned to be READ PAST rather than read: a person working should be able to
+ * see that something is happening without their eye being pulled off the note.
+ * It is not a notification, it is peripheral vision.
+ *
+ * `pointer-events: none` is the load-bearing line. There is nothing to click
+ * here, and a panel floating over a note that swallows clicks is worse than no
+ * panel — the user aims at their text and hits a status display instead.
+ */
+.activity {
+  position: absolute;
+  top: 0;
+  right: 0;
+  z-index: 5;
+  margin: var(--space-5);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-3);
+  max-width: 17rem;
+  pointer-events: none;
+}
+
+.activity-agent {
+  padding: var(--space-4);
+  background: var(--bg-elevated);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+  /* Arrives from the corner it lives in, like the consent card does, so the two
+     surfaces feel like one system rather than two bolted-on panels. */
+  animation: activity-in 260ms cubic-bezier(0.16, 1, 0.3, 1);
+  transform-origin: top right;
+}
+
+@keyframes activity-in {
+  from { opacity: 0; transform: scale(0.96); filter: blur(2px); }
+  to   { opacity: 1; transform: scale(1); filter: blur(0); }
+}
+
+.activity-head {
+  display: flex;
+  align-items: center;
+  gap: var(--space-2);
+}
+
+/**
+ * The one moving thing, and it earns it: motion is the only channel that says
+ * "right now" without a second colour. The graph learned the hard way that a
+ * third tone reads as noise rather than as hierarchy, so nothing here is
+ * distinguished by hue.
+ */
+.activity-dot {
+  width: 0.4rem;
+  height: 0.4rem;
+  border-radius: 50%;
+  background: var(--label-secondary);
+  animation: activity-pulse 1.8s ease-in-out infinite;
+  flex: none;
+}
+
+@keyframes activity-pulse {
+  0%, 100% { opacity: 0.25; }
+  50%      { opacity: 1; }
+}
+
+.activity-who {
+  font-size: var(--text-xs);
+  color: var(--label);
+  font-weight: 500;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.activity-id {
+  font-size: var(--text-xs);
+  color: var(--label-quaternary);
+  font-family: var(--font-mono);
+  margin-left: auto;
+  flex: none;
+}
+
+.activity-now {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--label);
+  overflow-wrap: anywhere;
+}
+
+/* The trail is history, and history is context rather than news — so it sits
+   below the current line and well down the tonal ramp. */
+.activity-trail {
+  list-style: none;
+  margin: var(--space-2) 0 0;
+  padding: 0;
+}
+
+.activity-trail-item {
+  font-size: var(--text-xs);
+  color: var(--label-tertiary);
+  overflow-wrap: anywhere;
+  line-height: 1.5;
+}
+
+.activity-count {
+  margin-top: var(--space-2);
+  font-size: var(--text-xs);
+  color: var(--label-quaternary);
+}

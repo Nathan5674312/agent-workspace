@@ -1,6 +1,7 @@
 import { app, BrowserWindow, shell } from 'electron'
 import { join } from 'node:path'
 import { registerIpc } from './ipc.js'
+import * as activity from './activity.js'
 import { checkRoots } from './vault.js'
 import { applySettings, setRootMismatch } from './settings.js'
 import { killAll } from './supervisor.js'
@@ -72,6 +73,10 @@ void app.whenReady().then(() => {
   // restart. Synchronous by design — it is one small file read.
   applySettings()
   registerIpc()
+  // Tail agent transcripts. Started here rather than on first window so a
+  // window opening mid-run sees what is happening now instead of a blank
+  // surface until the next tool call.
+  activity.start()
   createWindow()
   // Diagnostic only, and deliberately not awaited: it scans the vault, and a
   // slow or unreachable disk must never hold up the window. Warns once at boot

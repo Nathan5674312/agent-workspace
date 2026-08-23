@@ -6,6 +6,7 @@ import * as corner from './corner.js'
 import * as network from './network.js'
 import * as settings from './settings.js'
 import * as terminal from './terminal.js'
+import * as activity from './activity.js'
 
 /**
  * True only for the window's top-level frame.
@@ -84,6 +85,10 @@ export function registerIpc(): void {
   // original is trashed and journalled so vault:undo-move can put it back.
   handle(CH.vaultMove, (from: string, to: string) => vault.move(from, to, USER))
   handle(CH.vaultUndoMove, (id: string) => vault.undoMove(id, USER))
+
+  // Read-only and user-originated: the renderer is asking what it may already
+  // see on screen. Nothing here can act, so there is nothing to gate.
+  handle(CH.agentActivity, () => activity.current())
 
   corner.register(handle)
   network.register(handle)

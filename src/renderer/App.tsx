@@ -1,5 +1,6 @@
 import { VaultPane } from './panes/vault/VaultPane.js'
 import { AgentCorner } from './panes/corner/AgentCorner.js'
+import { AgentActivity } from './panes/corner/AgentActivity.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import { LoadingScreen } from './LoadingScreen.js'
 
@@ -26,6 +27,7 @@ export function App(): React.ReactElement {
       </section>
       <section className="pane-corner">
         <ErrorBoundary name="agent corner">
+          <AgentActivity />
           <AgentCorner />
         </ErrorBoundary>
       </section>

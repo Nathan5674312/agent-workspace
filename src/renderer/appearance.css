@@ -96,3 +96,11 @@
 :root[data-artwork='off'] {
   --canvas-art: none;
 }
+
+/* The activity panel's pulse and entrance, both suppressed. The dot is the only
+   thing on screen that moves continuously, so it is the first thing a person
+   who asked for less motion should stop seeing. */
+:root[data-motion='reduced'] .activity-agent,
+:root[data-motion='reduced'] .activity-dot {
+  animation: none;
+}

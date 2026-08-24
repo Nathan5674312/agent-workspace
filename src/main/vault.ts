@@ -45,6 +45,7 @@ import {
   writeFileSync,
 } from 'node:fs'
 import { randomUUID } from 'node:crypto'
+import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, relative, resolve, sep } from 'node:path'
 import type {
   Actor,
@@ -62,10 +63,26 @@ import { parseFrontmatter, parseList, type VaultNoteMeta } from '../shared/notem
  * The vault root on disk. Every read and every write in this file is resolved
  * against it, and nothing may resolve outside it — see `resolveInVault()`. Kept
  * overridable so tests can point at a scratch dir.
+ *
+ * THE FALLBACK MUST NOT NAME A REAL PERSON'S MACHINE. It used to be the literal
+ * `C:\Users\Nathan\Desktop\Universal Vault`, which is correct on exactly one
+ * computer; every packaged install pointed at a folder its user does not have.
+ * That is invisible in dev, because in dev it exists.
+ *
+ * `homedir()` and not Electron's `app.getPath('documents')`, which would be the
+ * locale-correct answer: this module imports NO electron, and five test files
+ * import it under plain `node --test`, where there is no Electron runtime to
+ * ask. A default that breaks the suite to gain a translated folder name is a
+ * bad trade — and the settings picker is the real answer for anyone whose notes
+ * live elsewhere.
+ *
+ * The folder is not created here and probably does not exist. That is already a
+ * handled state, not a crash: `checkRoots()` stats this path at boot and returns
+ * a message the settings modal shows, telling the user to pick their folder.
+ * Creating a directory as a side effect of importing a module would be worse.
  */
 let VAULT_DIR =
-  process.env.AGENT_WORKSPACE_VAULT_DIR ||
-  'C:\\Users\\Nathan\\Desktop\\Universal Vault'
+  process.env.AGENT_WORKSPACE_VAULT_DIR || resolve(homedir(), 'Documents', 'Fate')
 
 /** For tests only: override the vault directory used by `tree()`. */
 export function _setVaultDirForTest(dir: string) {

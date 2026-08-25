@@ -26,7 +26,9 @@ import './fixtures/ts-hooks.mjs'
 import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 
-const { facets, facetKeys, dateFromName, hubThreshold } = await import('../src/shared/facets.ts')
+const { facets, facetKeys, dateFromName, hubThreshold, neighbourhoods } = await import(
+  '../src/shared/facets.ts'
+)
 
 /** Most tests do not care about the graph; this is a note with no links. */
 const alone = { neighbours: [], degrees: [] }
@@ -192,6 +194,51 @@ test('every facet can explain itself', () => {
   for (const f of all) {
     assert.ok(f.why && f.why.length > 20, `${f.kind}:${f.value} has no explanation`)
     assert.ok(f.value !== '', `${f.kind} has an empty value`)
+  }
+})
+
+// -------------------------------------------------- the whole vault at once
+
+test('neighbourhoods builds an undirected, deduplicated adjacency', () => {
+  // Same rule the graph draws by: a note linking to another three times is one
+  // neighbour, and both ends see each other.
+  const { hoods } = neighbourhoods(
+    ['a.md', 'b.md', 'c.md'],
+    [
+      { from: 'a.md', to: 'b.md' },
+      { from: 'a.md', to: 'b.md' },
+      { from: 'c.md', to: 'a.md' },
+    ],
+  )
+  assert.deepEqual(hoods.get('a.md').neighbours.sort(), ['b.md', 'c.md'])
+  assert.deepEqual(hoods.get('b.md').neighbours, ['a.md'])
+  assert.deepEqual(hoods.get('c.md').neighbours, ['a.md'])
+})
+
+test('the hub threshold is computed once for the whole set, not per note', () => {
+  // The reason this function exists. facets() defaults hubAt to
+  // hubThreshold(degrees), which sorts the entire array — calling it per row is
+  // 465 sorts of a 465-element array to produce one unchanging number.
+  const paths = Array.from({ length: 20 }, (_, i) => `n${i}.md`)
+  const links = paths.slice(1).map((p) => ({ from: 'n0.md', to: p }))
+  const { hoods, hubAt } = neighbourhoods(paths, links)
+  assert.equal(hubAt, hubThreshold([...hoods.values()][0].degrees))
+  // And passing it explicitly gives the same answer as letting it default.
+  const hood = hoods.get('n0.md')
+  assert.deepEqual(facetKeys(facets('n0.md', hood, hubAt)), facetKeys(facets('n0.md', hood)))
+})
+
+test('an edge naming a note outside the set still counts for the end inside it', () => {
+  // A link out of the vault says something about the note that made it.
+  // Dropping it would understate that note's degree and could cost it `hub`.
+  const { hoods } = neighbourhoods(['a.md'], [{ from: 'a.md', to: 'somewhere-else.md' }])
+  assert.deepEqual(hoods.get('a.md').neighbours, ['somewhere-else.md'])
+})
+
+test('no links at all makes every note an orphan rather than throwing', () => {
+  const { hoods, hubAt } = neighbourhoods(['a.md', 'b.md'], [])
+  for (const p of ['a.md', 'b.md']) {
+    assert.ok(facetKeys(facets(p, hoods.get(p), hubAt)).includes('shape:orphan'))
   }
 })
 

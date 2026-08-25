@@ -157,6 +157,22 @@ export function MainCanvas({
     } finally {
       setLoadingNotes(false)
     }
+    /**
+     * The graph too, for derived facets — but SEPARATELY and after.
+     *
+     * Not awaited alongside the notes, and its failure is not the table's
+     * failure. Facets are an extra column; the database is a working view
+     * without them, so a graph that will not build must degrade that column
+     * rather than take the whole table down with an error nobody can act on.
+     * Skipped entirely if the graph is already loaded, since the graph view and
+     * this share one copy and it is memoised in main for 30 seconds anyway.
+     */
+    if (graph) return
+    try {
+      setGraph(await getGraph())
+    } catch {
+      /* the facet column degrades to folder and date, which need no graph */
+    }
   }
 
   /**
@@ -386,6 +402,7 @@ export function MainCanvas({
         ) : view === 'database' ? (
           <DatabaseView
             notes={notes}
+            graph={graph}
             loading={loadingNotes}
             error={notesError}
             onOpenNote={async (path) => {

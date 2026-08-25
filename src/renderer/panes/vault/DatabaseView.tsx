@@ -28,6 +28,8 @@ import {
   type TypeFamily,
   type VaultNoteMeta,
 } from '../../../shared/notemeta.js'
+import { facets, facetKeys, neighbourhoods } from '../../../shared/facets.js'
+import type { VaultGraph } from '../../../shared/ipc.js'
 import { SelectMenu } from './SelectMenu.js'
 
 /**
@@ -89,7 +91,7 @@ const VIEW_MODES: { key: ViewMode; label: string; Icon: LucideIcon; built: boole
 
 type SortKey = 'title' | 'area' | 'type' | 'status' | 'updated' | 'links' | 'backlinks'
 type GroupKey =
-  | 'area' | 'family' | 'type' | 'status' | 'tag' | 'folder' | 'month' | 'linked' | 'none'
+  | 'area' | 'family' | 'type' | 'status' | 'tag' | 'facet' | 'folder' | 'month' | 'linked' | 'none'
 
 const GROUPS: { key: GroupKey; label: string }[] = [
   { key: 'area', label: 'Area' },
@@ -97,6 +99,9 @@ const GROUPS: { key: GroupKey; label: string }[] = [
   { key: 'type', label: 'Type' },
   { key: 'status', label: 'Status' },
   { key: 'tag', label: 'Tag' },
+  // Derived, not written. Grouping by this is the only way to see a facet that
+  // nobody typed — which is the entire point of having them.
+  { key: 'facet', label: 'Facet' },
   { key: 'folder', label: 'Folder' },
   { key: 'month', label: 'Month' },
   { key: 'linked', label: 'How linked' },
@@ -137,12 +142,15 @@ function linkBucket(backlinks: number): string {
  * silently answers a question the user did not ask. Tags are for grouping and
  * filtering — both of which they do, above.
  */
-const COLUMNS: { key: SortKey | 'tags'; label: string; className: string; sort: boolean }[] = [
+const COLUMNS: { key: SortKey | 'tags' | 'facets'; label: string; className: string; sort: boolean }[] = [
   { key: 'title', label: 'Name', className: 'db-col-title', sort: true },
   { key: 'area', label: 'Area', className: 'db-col-area', sort: true },
   { key: 'type', label: 'Type', className: 'db-col-type', sort: true },
   { key: 'status', label: 'Status', className: 'db-col-status', sort: true },
   { key: 'tags', label: 'Tags', className: 'db-col-tags', sort: false },
+  // Not sortable: a facet list has no order a column header could promise, the
+  // same reason Tags is not sortable either.
+  { key: 'facets', label: 'Facets', className: 'db-col-tags', sort: false },
   // The relation pair. Two columns rather than one signed number because the
   // two directions answer different questions — "what does this note draw on"
   // and "what depends on it" — and a hub is interesting for having a large
@@ -186,7 +194,11 @@ function field(n: VaultNoteMeta, key: SortKey): string {
  * the toolbar comes from the filtered rows and not from summing the groups —
  * under Tag those two numbers legitimately differ.
  */
-function groupValues(n: VaultNoteMeta, key: GroupKey): string[] {
+function groupValues(
+  n: VaultNoteMeta,
+  key: GroupKey,
+  facetsOf: (path: string) => string[],
+): string[] {
   switch (key) {
     case 'area': return [areaOf(n)]
     case 'family': {
@@ -196,6 +208,12 @@ function groupValues(n: VaultNoteMeta, key: GroupKey): string[] {
     case 'type': return [n.type]
     case 'status': return [n.status]
     case 'tag': return n.tags.length ? n.tags : ['']
+    // Multi-valued like tags, and for the same reason: a note sits in several
+    // folders' worth of ancestry and can be both dated and a hub.
+    case 'facet': {
+      const f = facetsOf(n.path)
+      return f.length ? f : ['']
+    }
     case 'folder': return [n.folder]
     case 'month': return [monthOf(n.updated)]
     case 'linked': return [linkBucket(n.backlinks)]
@@ -241,12 +259,21 @@ function TypeChip({ type }: { type: string }) {
  */
 const TAG_CAP = 2
 
-function TagList({ tags, blank = true }: { tags: string[]; blank?: boolean }) {
+function TagList({
+  tags,
+  blank = true,
+  title,
+}: {
+  tags: string[]
+  blank?: boolean
+  /** Overrides the default hover text, which is just the values joined. */
+  title?: string
+}) {
   if (!tags.length) return blank ? <span className="db-blank">{NONE}</span> : null
   const head = tags.slice(0, TAG_CAP)
   const rest = tags.length - head.length
   return (
-    <span className="db-tags" title={tags.join(', ')}>
+    <span className="db-tags" title={title ?? tags.join(', ')}>
       {head.map((t) => (
         <span key={t} className="db-tag db-tag-muted">
           {t}
@@ -557,6 +584,15 @@ function GalleryView({
 
 export interface DatabaseViewProps {
   notes: VaultNoteMeta[] | null
+  /**
+   * The link graph, for derived facets.
+   *
+   * Optional because the database is useful without it: absent, every note
+   * still has its folder and date facets and simply has no `shape` or `about`,
+   * which are the two that need to know about neighbours. A missing graph
+   * degrades the column, it does not empty the view.
+   */
+  graph?: VaultGraph | null
   loading: boolean
   error: string | null
   onOpenNote: (path: string) => void
@@ -564,6 +600,7 @@ export interface DatabaseViewProps {
 
 export function DatabaseView({
   notes,
+  graph,
   loading,
   error,
   onOpenNote,
@@ -579,6 +616,47 @@ export function DatabaseView({
   // Changing the grouping rebuilds every section, so collapse state from the
   // old grouping names nothing. Kept, it silently hides sections in the new one.
   useEffect(() => setCollapsed(new Set()), [groupBy])
+
+  /**
+   * Every note's derived facets, computed once per (notes, graph) pair.
+   *
+   * ONCE is the point. `facets()` defaults its hub threshold to
+   * `hubThreshold(hood.degrees)`, which sorts the whole degree array — calling
+   * it per row means 465 sorts of a 465-element array to produce one number
+   * that is identical every time. `neighbourhoods()` computes it alongside the
+   * adjacency map and it is passed in.
+   *
+   * Nothing here is written anywhere. These are recomputed from the paths and
+   * the graph on every render that changes either, which is what lets them
+   * never be stale: move a note and its facets moved with it.
+   */
+  const facetIndex = useMemo(() => {
+    const empty = new Map<string, { keys: string[]; why: string }>()
+    if (!notes) return empty
+    const paths = notes.map((n) => n.path)
+    // A missing graph is not an error. Folder and date facets need no
+    // neighbours at all, so the column degrades to those rather than emptying.
+    const links = graph?.links ?? []
+    const { hoods, hubAt } = neighbourhoods(paths, links)
+    const out = new Map<string, { keys: string[]; why: string }>()
+    for (const path of paths) {
+      const hood = hoods.get(path) ?? { neighbours: [], degrees: [] }
+      const f = facets(path, hood, hubAt)
+      // Each line leads with the facet itself, then its reason.
+      //
+      // TAG_CAP is 2 and its comment promises "the full list is in the cell's
+      // title" — a promise a title carrying only prose would quietly break, since
+      // a note with four facets shows two and a "+2". Leading with the key keeps
+      // that contract AND explains each one, which is the thing a value nobody
+      // typed has to be able to do.
+      const lines = f.map((x) => `${x.kind}:${x.value} — ${x.why}`)
+      out.set(path, { keys: facetKeys(f), why: lines.join('\n\n') })
+    }
+    return out
+  }, [notes, graph])
+
+  const facetsOf = (path: string): string[] => facetIndex.get(path)?.keys ?? []
+  const facetWhy = (path: string): string => facetIndex.get(path)?.why ?? ''
 
   const { groups, shown } = useMemo(() => {
     if (!notes) return { groups: [], shown: 0 }
@@ -614,7 +692,7 @@ export function DatabaseView({
 
     const by = new Map<string, VaultNoteMeta[]>()
     for (const n of rows) {
-      for (const raw of groupValues(n, groupBy)) {
+      for (const raw of groupValues(n, groupBy, facetsOf)) {
         const k = raw || NONE
         const bucket = by.get(k)
         if (bucket) bucket.push(n)
@@ -867,6 +945,13 @@ export function DatabaseView({
                       </td>
                       <td className="db-col-tags">
                         <TagList tags={n.tags} />
+                      </td>
+                      {/* The hover text is every facet's own `why`, not the
+                          values again. A derived value a person did not type
+                          has to be able to say where it came from, or it is
+                          indistinguishable from one that was invented. */}
+                      <td className="db-col-tags">
+                        <TagList tags={facetsOf(n.path)} title={facetWhy(n.path)} />
                       </td>
                       {/* Zero renders as the em-dash every other empty cell
                           uses, not as "0". A note with no links has no

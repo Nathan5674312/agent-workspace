@@ -121,7 +121,11 @@ export function hubThreshold(degrees: number[]): number {
  * and makes the ones that matter harder to see. Only `orphan` and `hub` are
  * emitted, and only when true.
  */
-export function facets(path: string, hood: Neighbourhood): Facet[] {
+export function facets(
+  path: string,
+  hood: Neighbourhood,
+  hubAt: number = hubThreshold(hood.degrees),
+): Facet[] {
   const out: Facet[] = []
 
   for (const dir of ancestors(path)) {
@@ -149,7 +153,7 @@ export function facets(path: string, hood: Neighbourhood): Facet[] {
       why: 'Nothing links to this note and it links to nothing. It is only reachable by remembering it exists.',
     })
   } else {
-    const cut = hubThreshold(hood.degrees)
+    const cut = hubAt
     if (degree >= cut) {
       out.push({
         kind: 'shape',
@@ -223,4 +227,39 @@ function dominantFolder(
 /** Facets as `kind:value` strings, for matching against a filter. */
 export function facetKeys(f: Facet[]): string[] {
   return f.map((x) => `${x.kind}:${x.value}`)
+}
+
+/**
+ * Every note's neighbourhood, built once from the whole graph.
+ *
+ * `facets()` defaults `hubAt` to `hubThreshold(hood.degrees)`, which sorts the
+ * entire degree array. That is fine for one note and quadratic-with-a-log for a
+ * whole vault — 465 notes means 465 sorts of a 465-element array to produce one
+ * number that is identical every time. Callers rendering a table want the
+ * threshold computed once, so this returns it alongside the map.
+ *
+ * Links are taken as `{from, to}` rather than as the app's `VaultLink` so this
+ * module stays free of the IPC contract; it needs two strings and nothing else.
+ *
+ * Edges naming a path that is not in `paths` are counted for the end that IS
+ * known. A link out of the vault still says something about the note that made
+ * it, and dropping it would understate that note's degree.
+ */
+export function neighbourhoods(
+  paths: string[],
+  links: { from: string; to: string }[],
+): { hoods: Map<string, Neighbourhood>; hubAt: number } {
+  const adjacency = new Map<string, Set<string>>(paths.map((p) => [p, new Set<string>()]))
+  for (const l of links) {
+    adjacency.get(l.from)?.add(l.to)
+    adjacency.get(l.to)?.add(l.from)
+  }
+  // Undirected and deduplicated: a note linking to another three times is one
+  // neighbour, which is the same rule the graph view draws by.
+  const degrees = paths.map((p) => adjacency.get(p)?.size ?? 0)
+  const hubAt = hubThreshold(degrees)
+  const hoods = new Map<string, Neighbourhood>(
+    paths.map((p) => [p, { neighbours: [...(adjacency.get(p) ?? [])], degrees }]),
+  )
+  return { hoods, hubAt }
 }

@@ -104,3 +104,11 @@
 :root[data-motion='reduced'] .activity-dot {
   animation: none;
 }
+
+/* The map's travel and its pulse. Both are continuous, which is exactly what
+   someone asking for less motion is asking to stop; the map still reads,
+   because the walked edge stays lit and the current node stays larger. */
+:root[data-motion='reduced'] .activity-map-edge--walked,
+:root[data-motion='reduced'] .activity-map-node--current {
+  animation: none;
+}

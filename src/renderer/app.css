@@ -1798,3 +1798,89 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   font-size: var(--text-xs);
   color: var(--label-tertiary);
 }
+
+/**
+ * THE MINI MAP — where an agent has been, on the graph it walked.
+ *
+ * Monochrome, like everything else. `tokens.css` §4b has no accent hue and the
+ * graph view already learned the harder version of this lesson: it tried a
+ * focus tone plus a separate neighbour tone and found that at dot size a viewer
+ * reads three shades as noise rather than as hierarchy. So there is ONE lit
+ * tone here, and the current node is distinguished by being larger and by
+ * moving, not by being a different colour.
+ */
+.activity-map {
+  display: block;
+  width: 100%;
+  height: 4.5rem;
+  margin-top: var(--space-3);
+  /* HIDDEN, because the frame is a camera. Context notes deliberately fall
+     outside the framed box — that is what being zoomed in on the visited ones
+     means — and `visible` would let them spill across the card's text. */
+  overflow: hidden;
+}
+
+/* A link the vault actually has, but that the agent did not walk. Present so
+   the map reads as a piece of the graph rather than as a bare chain. */
+.activity-map-edge {
+  stroke: var(--label-quaternary);
+  stroke-width: 1;
+  fill: none;
+}
+
+/**
+ * A link the agent walked, with the travel running along it.
+ *
+ * The dash offset animating along the line IS the travel — movement in the
+ * direction of the edge, which is what "it uses the connections" means when
+ * the thing moving is a read rather than a cursor.
+ */
+.activity-map-edge--walked {
+  stroke: var(--accent);
+  stroke-width: 1.6;
+  stroke-dasharray: 5 5;
+  animation: activity-map-flow 1.4s linear infinite;
+}
+
+@keyframes activity-map-flow {
+  to { stroke-dashoffset: -10; }
+}
+
+/**
+ * A move with no link behind it.
+ *
+ * Dotted and dim on purpose: the agent really went from one note to the other,
+ * so the map would be wrong to hide it — and the vault has no edge there, so
+ * the map would be lying to draw one. Different enough that it cannot be
+ * mistaken for a connection.
+ */
+.activity-map-jump {
+  stroke: var(--label-quaternary);
+  stroke-width: 1;
+  stroke-dasharray: 1 4;
+  stroke-linecap: round;
+  opacity: 0.7;
+}
+
+/* Context: a note the graph put nearby, which the agent has not been to. Small
+   and dim, because it is there to give the visited ones a place to sit. */
+.activity-map-node {
+  fill: var(--label-quaternary);
+}
+
+/* Somewhere the agent has actually been. */
+.activity-map-node--visited {
+  fill: var(--label);
+}
+
+/* Where it is NOW. Larger, lit, and the only thing with a glow — a halo on
+   every node would light the whole card and say nothing. */
+.activity-map-node--current {
+  fill: var(--accent);
+  animation: activity-map-here 1.8s ease-in-out infinite;
+}
+
+@keyframes activity-map-here {
+  0%, 100% { opacity: 0.55; }
+  50%      { opacity: 1; }
+}

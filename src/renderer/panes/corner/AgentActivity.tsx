@@ -29,6 +29,8 @@
 import { useEffect, useMemo, useState } from 'react'
 import type { Activity } from '../../../shared/ipc.js'
 import { sessions, describe, where } from '../../../shared/transcript.js'
+import { trail, type Trail } from '../../../shared/agentTrail.js'
+import type { VaultGraph } from '../../../shared/ipc.js'
 
 /**
  * How long a session stays on screen after its last tool call.
@@ -101,12 +103,118 @@ function installLabel(source: string | undefined): string | null {
   return source.replace(/^\.claude-?/, '') || source
 }
 
+/**
+ * The vault's graph, framed on where the agent is.
+ *
+ * An SVG on a unit viewBox, so the geometry stays in `agentTrail.ts` where a
+ * test can reach it and this only turns numbers into shapes. Nothing here
+ * decides WHETHER to draw — a null trail means the agent is not in the vault,
+ * and the caller renders nothing at all rather than an empty frame.
+ *
+ * TWO KINDS OF LINE, and the difference is the point. A solid edge is a link
+ * the vault actually has. A dotted jump is a move the agent really made between
+ * two notes with no link between them — it happened, so hiding it would lose
+ * the walk, but drawing it as an edge would claim a connection that is not
+ * there. The map is allowed to be sparse; it is not allowed to lie.
+ *
+ * THREE tiers of node, and they are size-and-brightness rather than three
+ * colours. The graph view already learned that the hard way: it tried a focus
+ * tone plus a separate neighbour tone and found that at dot size a viewer reads
+ * three shades as noise rather than as hierarchy. So context is small and dim,
+ * visited is larger and lit, and the current one is largest and the only thing
+ * that moves.
+ */
+/**
+ * The drawing box, in SVG units.
+ *
+ * WIDE, and that is a fix rather than a preference. A square `viewBox` inside a
+ * box four times wider than it is tall gets letterboxed by the default
+ * `preserveAspectRatio` — the picture shrinks to fit the HEIGHT and sits in a
+ * column down the middle with the width unused. Matching the box's proportions
+ * keeps the nodes circular (which `preserveAspectRatio="none"` would not) and
+ * lets the walk actually spread out.
+ */
+const MAP_W = 240
+const MAP_H = 70
+
+function TrailMap({ map }: { map: Trail }) {
+  const at = (id: string) => map.nodes.find((n) => n.id === id)
+  const current = map.nodes.find((n) => n.current)
+  return (
+    <svg
+      className="activity-map"
+      viewBox={`0 0 ${MAP_W} ${MAP_H}`}
+      role="img"
+      aria-label={`Reading ${current?.label ?? 'the vault'}, ${map.nodes.length} notes visited`}
+    >
+      {map.jumps.map((j) => {
+        const a = at(j.from)
+        const b = at(j.to)
+        if (!a || !b) return null
+        return (
+          <line
+            key={`j-${j.from}-${j.to}`}
+            className="activity-map-jump"
+            x1={a.x * MAP_W}
+            y1={a.y * MAP_H}
+            x2={b.x * MAP_W}
+            y2={b.y * MAP_H}
+          />
+        )
+      })}
+      {map.edges.map((e) => {
+        const a = at(e.from)
+        const b = at(e.to)
+        if (!a || !b) return null
+        return (
+          <line
+            key={`e-${e.from}-${e.to}`}
+            className={`activity-map-edge${e.travelled ? ' activity-map-edge--walked' : ''}`}
+            x1={a.x * MAP_W}
+            y1={a.y * MAP_H}
+            x2={b.x * MAP_W}
+            y2={b.y * MAP_H}
+          />
+        )
+      })}
+      {map.nodes.map((n) => (
+        <circle
+          key={n.id}
+          className={
+            'activity-map-node' +
+            (n.visited ? ' activity-map-node--visited' : '') +
+            (n.current ? ' activity-map-node--current' : '')
+          }
+          cx={n.x * MAP_W}
+          cy={n.y * MAP_H}
+          r={n.current ? 5.5 : n.visited ? 4 : 2.5}
+        >
+          <title>{n.id}</title>
+        </circle>
+      ))}
+    </svg>
+  )
+}
+
 export function AgentActivity(): React.JSX.Element | null {
   const [items, setItems] = useState<Activity[]>([])
   // Re-render on a timer as well as on new activity, so a session that has gone
   // quiet actually disappears. Without it the last agent to stop would stay on
   // screen until something else happened, which is exactly when nothing will.
   const [now, setNow] = useState(() => Date.now())
+  /**
+   * The vault graph and its root, for the mini map.
+   *
+   * Fetched LAZILY — only once an agent has actually done something. An idle
+   * app should not build a graph index for a panel that is not on screen, and
+   * this surface does not exist at all when nothing is happening.
+   *
+   * Fetched ONCE. The graph is memoised in main for 30 seconds anyway, and a
+   * note added mid-session costs the map one node rather than being worth a
+   * poll. Failure is silent and total: no graph means no map, which is the same
+   * thing the map says about an agent working outside the vault.
+   */
+  const [vault, setVault] = useState<{ graph: VaultGraph; root: string } | null>(null)
 
   useEffect(() => {
     let live = true
@@ -124,6 +232,25 @@ export function AgentActivity(): React.JSX.Element | null {
       clearInterval(tick)
     }
   }, [])
+
+  useEffect(() => {
+    if (vault || items.length === 0) return
+    let live = true
+    void (async () => {
+      try {
+        const [graph, settings] = await Promise.all([
+          window.api.vault.graph(),
+          window.api.settings.get(),
+        ])
+        if (live) setVault({ graph, root: settings.vaultDir })
+      } catch {
+        /* no map. The panel is still the panel. */
+      }
+    })()
+    return () => {
+      live = false
+    }
+  }, [items.length, vault])
 
   const live = useMemo(
     () => sessions(items.filter((a) => now - a.at < IDLE_MS)),
@@ -179,6 +306,18 @@ export function AgentActivity(): React.JSX.Element | null {
               ))}
             </ol>
           )}
+          {/* The map, when there is one. `trail` returns null for an agent
+              that has not been in the vault inside the window — which covers
+              both "never came here" and "came here, left, still working". */}
+          {(() => {
+            // The session's FULL retained history, not `s.recent` — that is
+            // capped at five for the text lines, and five tool calls is often
+            // four shell commands and one read, which would draw a map of one
+            // node. `trail` does its own windowing by time.
+            const mine = items.filter((a) => a.session === s.session)
+            const map = vault ? trail(mine, vault.graph, vault.root, now) : null
+            return map ? <TrailMap map={map} /> : null
+          })()}
           <div className="activity-count">{s.count} steps</div>
         </div>
       ))}

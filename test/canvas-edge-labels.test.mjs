@@ -17,7 +17,9 @@ import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { readSource } from './fixtures/source.mjs'
 
-const { parseCanvas, serializeCanvas } = await import('../src/shared/canvas.ts')
+const { parseCanvas, serializeCanvas, edgeControlPoints, edgeCurve } = await import(
+  '../src/shared/canvas.ts'
+)
 
 const VIEW = readSource('CanvasView.tsx')
 
@@ -76,36 +78,37 @@ test('the label sits at the midpoint of the line that was actually drawn', () =>
   // property this test is named for is unchanged; the formula it pinned is not.
   assert.match(VIEW, /x=\{curve\.mid\.x\}/, 'label x is not the drawn midpoint')
   assert.match(VIEW, /y=\{curve\.mid\.y\}/, 'label y is not the drawn midpoint')
-  assert.match(VIEW, /3 \* c1\.x \+ 3 \* c2\.x/, 'the midpoint ignores the control points')
 })
 
-test('the curve midpoint formula really is the point at t=0.5', () => {
-  // The shortcut (P0 + 3C1 + 3C2 + P3) / 8 is only correct for a CUBIC at
-  // exactly t=0.5. Checked against de Casteljau rather than restating the
-  // algebra, so a wrong constant in the view cannot be matched by a wrong
-  // constant here. A regex over the source cannot see an arithmetic error.
+test('the label rides the curve, and is not the straight midpoint', () => {
+  // Checked against the real exported function rather than a regex, and against
+  // de Casteljau on the real control points rather than restated algebra — so a
+  // wrong constant in the source cannot be matched by a wrong constant here.
   const lerp = (p, q, t) => ({ x: p.x + (q.x - p.x) * t, y: p.y + (q.y - p.y) * t })
-  const deCasteljau = (p0, c1, c2, p3, t) => {
-    const a = lerp(p0, c1, t)
-    const b = lerp(c1, c2, t)
-    const c = lerp(c2, p3, t)
-    return lerp(lerp(a, b, t), lerp(b, c, t), t)
+  const deCasteljau = (pts, t) => {
+    let cur = pts
+    while (cur.length > 1) {
+      const next = []
+      for (let i = 0; i < cur.length - 1; i++) next.push(lerp(cur[i], cur[i + 1], t))
+      cur = next
+    }
+    return cur[0]
   }
-  // Deliberately asymmetric, so a formula that only works for a symmetric
-  // curve — the easy thing to get away with — fails here.
-  const p0 = { x: 10, y: 20 }
-  const c1 = { x: 90, y: 20 }
-  const c2 = { x: 140, y: 300 }
-  const p3 = { x: 400, y: 260 }
-  const shortcut = {
-    x: (p0.x + 3 * c1.x + 3 * c2.x + p3.x) / 8,
-    y: (p0.y + 3 * c1.y + 3 * c2.y + p3.y) / 8,
-  }
-  const exact = deCasteljau(p0, c1, c2, p3, 0.5)
-  assert.ok(Math.abs(shortcut.x - exact.x) < 1e-9, `x ${shortcut.x} != ${exact.x}`)
-  assert.ok(Math.abs(shortcut.y - exact.y) < 1e-9, `y ${shortcut.y} != ${exact.y}`)
-  // And it is NOT the straight midpoint, which is what the old formula used.
-  const straight = { x: (p0.x + p3.x) / 2, y: (p0.y + p3.y) / 2 }
+  // Deliberately asymmetric — right side out, TOP side in. A facing left/right
+  // pair is symmetric and its t=0.5 point genuinely is the straight midpoint,
+  // so that arrangement cannot tell a correct formula from a lazy one.
+  const a = { x: 0, y: 0, width: 100, height: 100 }
+  const b = { x: 400, y: 300, width: 100, height: 100 }
+  const from = { x: 100, y: 50 }
+  const to = { x: 450, y: 300 }
+
+  const P = edgeControlPoints(a, from, b, to)
+  const exact = deCasteljau(P, 0.5)
+  const { mid } = edgeCurve(a, from, b, to, 0)
+  assert.ok(Math.abs(mid.x - exact.x) < 1e-9, `x ${mid.x} != ${exact.x}`)
+  assert.ok(Math.abs(mid.y - exact.y) < 1e-9, `y ${mid.y} != ${exact.y}`)
+
+  const straight = { x: (from.x + to.x) / 2, y: (from.y + to.y) / 2 }
   assert.ok(
     Math.hypot(straight.x - exact.x, straight.y - exact.y) > 1,
     'the fixture cannot tell the curve midpoint from the straight one',
@@ -113,15 +116,21 @@ test('the curve midpoint formula really is the point at t=0.5', () => {
 })
 
 test('an edge leaves a card perpendicular to the side it attaches to', () => {
-  // The whole reason for the curve. A control point pulled straight out along
-  // the side's own normal is what makes the line read as plugged into the card
-  // rather than laid across the board.
-  assert.match(VIEW, /const outward = /, 'the side normal is not derived')
-  assert.match(VIEW, /from\.x \+ da\.x \* pull/, 'the first control point ignores the side')
-  assert.match(VIEW, /to\.x \+ db\.x \* pull/, 'the second control point ignores the side')
-  // Clamped, or a distant pair gets a handle so long the curve swings outside
-  // both cards.
-  assert.match(VIEW, /Math\.min\(Math\.max\(/, 'the handle length is unclamped')
+  // The whole reason for the curve. The lead-out runs along the side's own
+  // normal, which is what makes the line read as plugged into the card rather
+  // than laid across the board. Asserted on the geometry, not on the source.
+  const a = { x: 0, y: 0, width: 100, height: 100 }
+  const b = { x: 400, y: 300, width: 100, height: 100 }
+  const from = { x: 100, y: 50 } // right side of a
+  const to = { x: 450, y: 300 } // top side of b
+
+  const P = edgeControlPoints(a, from, b, to)
+  // Leaving `a` through its right side: straight out along +x, no y drift.
+  assert.ok(P[1].x > P[0].x, 'the lead-out does not leave the right side outward')
+  assert.equal(P[1].y, P[0].y, 'the lead-out drifts off the side normal')
+  // Arriving at `b` through its top side: the run into it is straight along -y.
+  assert.ok(P[4].y < P[5].y, 'the lead-in does not approach the top side from above')
+  assert.equal(P[4].x, P[5].x, 'the lead-in drifts off the side normal')
 })
 
 test('a curved edge is stroked, not filled', () => {

@@ -69,6 +69,14 @@ export type Activity = {
   label?: string
   /** The working directory that session was launched in. */
   cwd: string
+  /**
+   * Which Claude Code installation this came from: the config directory's own
+   * name, like `.claude` or `.claude-nathanielyoungal`.
+   *
+   * Stamped by `parseLines` from the path the transcript was found at, because
+   * it is not written inside the file. Absent when the caller did not say.
+   */
+  source?: string
   /** The tool's own name, kept verbatim so an unknown one is still reportable. */
   tool: string
   action: Action
@@ -227,9 +235,25 @@ export function parseLine(raw: string): Activity[] {
   return out
 }
 
-/** Every tool call across many lines, oldest first. */
-export function parseLines(lines: string[]): Activity[] {
-  return lines.flatMap(parseLine)
+/**
+ * Every tool call across many lines, oldest first.
+ *
+ * `source` names the INSTALLATION the lines came from, and it is a parameter
+ * rather than something parsed out because it is not in the file — it is the
+ * config directory the transcript was found under, which only the caller
+ * holding the path knows.
+ *
+ * It matters here more than it would on most machines. `activity.ts` scans
+ * `~/.claude` and every `~/.claude-*`, because this machine deliberately runs
+ * two Claude Code accounts with two config directories. Without this field both
+ * arrive as an undifferentiated list of agents, and the single most useful
+ * question a person watching can ask — which of my two installations is doing
+ * that — has no answer on screen.
+ */
+export function parseLines(lines: string[], source?: string): Activity[] {
+  const out = lines.flatMap(parseLine)
+  if (source !== undefined && source !== '') for (const a of out) a.source = source
+  return out
 }
 
 /**
@@ -254,6 +278,51 @@ export function relativeTo(path: string, root: string): string | null {
   return p.slice(r.length + 1)
 }
 
+/**
+ * The shortest rendering of a path that still says WHERE.
+ *
+ * THE BUG THIS FIXES, because it is a good example of one fix quietly undoing
+ * another. `describe` has always taken a `root`, and used it to compute a
+ * relative path — and then threw that away, because the next line reduced
+ * whatever it had to a bare filename:
+ *
+ *     const name = shown.split(/[\\/]/).pop()
+ *
+ * That line was itself a fix, for a real defect: the panel was rendering
+ * `C:\Users\Nathan\...\Note.md` in full, three wrapped lines per card. Clamping
+ * to the basename cured the symptom and made the `root` parameter dead code —
+ * every caller passing a root got exactly what a caller passing none got. The
+ * only caller stopped passing one, which is how it went unnoticed.
+ *
+ * Both requirements are real and they are not in conflict once separated:
+ * a path must be SHORT, and it must say more than a filename. `guides.ts` does
+ * not tell you which of four files with that name is being written; the full
+ * absolute path does, at the cost of the layout.
+ *
+ * So: relative to the agent's own working directory when it is inside it, which
+ * is short AND located — `src/shared/guides.ts`. Outside it, the last few
+ * segments behind an ellipsis, so a file somewhere else is still placed without
+ * unrolling somebody's home directory across the screen.
+ *
+ * `segments` is how many of those tail segments to keep. Two for a file, which
+ * is enough to say which folder it is in. The activity panel passes three for a
+ * WORKING DIRECTORY, where the extra one is what separates two checkouts of the
+ * same repo — and it calls this rather than owning a second copy of the rule,
+ * because the last time the view held its own path arithmetic the tests could
+ * only grep for it.
+ */
+export function where(path: string, root?: string, segments = 2): string {
+  const rel = root ? relativeTo(path, root) : null
+  // '' means the path IS the root — a tool called on the directory itself.
+  if (rel !== null && rel !== '') return rel
+  // Split on BOTH separators. A transcript records `C:\Users\...\Note.md`, and
+  // splitting on `/` alone leaves that whole string intact — which is precisely
+  // how the full-path-on-screen defect happened.
+  const parts = path.split(/[\\/]/).filter(Boolean)
+  if (parts.length <= segments) return parts.join('/') || path
+  return `…/${parts.slice(-segments).join('/')}`
+}
+
 /** Only what happened at or after `t`. For tailing without re-reporting. */
 export function since(items: Activity[], t: number): Activity[] {
   return items.filter((a) => a.at >= t)
@@ -272,6 +341,8 @@ export type SessionState = {
   label?: string
   /** Set when this is a subagent of another session. */
   parent?: string
+  /** Which installation it belongs to. See `Activity.source`. */
+  source?: string
   cwd: string
   /** The most recent call. What to put on the first line. */
   last: Activity
@@ -306,6 +377,8 @@ export function sessions(items: Activity[], limit = 5): SessionState[] {
     if (named?.label) state.label = named.label
     const child = ordered.find((a) => a.parent)
     if (child?.parent) state.parent = child.parent
+    const from = ordered.find((a) => a.source)
+    if (from?.source) state.source = from.source
     out.push(state)
   }
   // Busiest-most-recent first: whoever moved last is who a person looking at
@@ -321,13 +394,7 @@ export function sessions(items: Activity[], limit = 5): SessionState[] {
  * announcing that a question exists.
  */
 export function describe(a: Activity, root?: string): string {
-  const shown = a.path ? (root ? (relativeTo(a.path, root) ?? a.path) : a.path) : undefined
-  // Split on BOTH separators. A transcript records `C:\Users\...\Note.md`, and
-  // splitting on `/` alone left that whole string intact — so the panel showed
-  // the full absolute path of every file instead of its name, three lines deep
-  // per card. Caught by looking at the rendered panel, not by a unit test,
-  // because every fixture path in the test used forward slashes.
-  const name = shown ? (shown.split(/[\\/]/).pop() || shown) : undefined
+  const name = a.path ? where(a.path, root) : undefined
   switch (a.action) {
     case 'read':
       return name ? `reading ${name}` : 'reading'

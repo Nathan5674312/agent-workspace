@@ -98,7 +98,13 @@ function configDirs(): string[] {
   return [...found]
 }
 
-type Found = { path: string; mtime: number; size: number }
+/**
+ * `cfg` is the config directory this transcript was found under, carried
+ * because the walk is the only place that knows it — by the time a line is
+ * parsed the path is gone, and two installations' agents are otherwise
+ * indistinguishable on screen. See `Activity.source`.
+ */
+type Found = { path: string; mtime: number; size: number; cfg: string }
 
 /**
  * Recently-written transcripts across every config directory.
@@ -111,10 +117,12 @@ type Found = { path: string; mtime: number; size: number }
  */
 function recentTranscripts(now: number): Found[] {
   const out: Found[] = []
-  const consider = (p: string): void => {
+  const consider = (p: string, cfg: string): void => {
     try {
       const s = statSync(p)
-      if (s.isFile() && now - s.mtimeMs < RECENT_MS) out.push({ path: p, mtime: s.mtimeMs, size: s.size })
+      if (s.isFile() && now - s.mtimeMs < RECENT_MS) {
+        out.push({ path: p, mtime: s.mtimeMs, size: s.size, cfg })
+      }
     } catch {
       /* vanished between readdir and stat */
     }
@@ -137,12 +145,12 @@ function recentTranscripts(now: number): Found[] {
         continue
       }
       for (const e of entries) {
-        if (e.isFile() && e.name.endsWith('.jsonl')) consider(join(dir, e.name))
+        if (e.isFile() && e.name.endsWith('.jsonl')) consider(join(dir, e.name), cfg)
         else if (e.isDirectory()) {
           const subs = join(dir, e.name, 'subagents')
           try {
             for (const s of readdirSync(subs)) {
-              if (s.endsWith('.jsonl')) consider(join(subs, s))
+              if (s.endsWith('.jsonl')) consider(join(subs, s), cfg)
             }
           } catch {
             /* no subagents for this session */
@@ -216,7 +224,11 @@ export function poll(now: number = Date.now()): Activity[] {
   for (const f of recentTranscripts(now)) {
     const tail = readTail(f)
     if (tail === '') continue
-    out.push(...parseLines(tail.split('\n').filter(Boolean)))
+    // The config directory's own name, not its full path: `.claude` or
+    // `.claude-nathanielyoungal`. The rest is the user's home directory, which
+    // is identical for every installation and so distinguishes nothing.
+    const source = f.cfg.replace(/[\\/]+$/, '').split(/[\\/]/).pop() ?? f.cfg
+    out.push(...parseLines(tail.split('\n').filter(Boolean), source))
   }
   primed = true
   // The priming pass reports nothing by definition: it exists to record where

@@ -44,11 +44,17 @@ export type VaultTreeNode = {
    * `canvas` is a SEPARATE kind from `note`, not a note with a different
    * extension, and the distinction is load-bearing in two places.
    *
-   * `buildIndex` collects `kind === 'note'` to decide what to read, parse for
-   * frontmatter and resolve wikilinks in. A `.canvas` file is JSON: indexed as
-   * a note it would contribute a garbage row to the database view and its
-   * quoted text could resolve as links. Giving it its own kind means both
-   * skip it by construction rather than by a second extension check.
+   * `buildIndex` collects `kind === 'note'` to decide what to READ, parse for
+   * frontmatter and resolve wikilinks in. A `.canvas` file is JSON, so reading
+   * it as a note would let every quoted string on a card resolve as a link.
+   * Giving it its own kind means it skips the read by construction rather than
+   * by a second extension check.
+   *
+   * It is still INDEXED, which is a different question and was conflated with
+   * that one until now. A board is a node in the graph and a row in the
+   * database, sharing the `text: false` path with images — see `scan()`. Being
+   * excluded outright is what made the vault's pipelines the one kind of file
+   * the graph could not draw.
    *
    * `file` is anything that is NOT text: an image, an archive, an executable.
    * These are listed and indexed as rows — a folder of photographs should show

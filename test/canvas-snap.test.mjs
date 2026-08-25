@@ -2,12 +2,20 @@
  * Shift-to-align, and Shift-to-keep-the-shape.
  *
  * `alignLines` and `snapOffset` are the arithmetic behind holding Shift while
- * dragging a page. They live in CanvasView because nothing else needs them, so
- * these tests re-declare them from the same constants rather than importing —
- * a regex over the source cannot tell whether the maths is right, and getting a
- * snap subtly wrong is invisible until a board will not line up.
+ * dragging a page. They used to live in CanvasView because nothing else needed
+ * them, and this file re-declared them from the same constants — a regex over
+ * the source cannot tell whether the maths is right, and getting a snap subtly
+ * wrong is invisible until a board will not line up.
  *
- * The wiring that calls them is pinned in canvas-selection.test.mjs.
+ * They moved to `shared/guides.ts` when the guide lines landed, because drawing
+ * a guide means knowing WHICH line was matched and not merely by how much. So
+ * these tests import the real thing now, and the re-declaration is gone. The
+ * constants stay pinned to the view by the two regex assertions below: the view
+ * still owns GRID (it publishes it to CSS so the dots and the snap cannot
+ * disagree) and SNAP_RANGE, and passes both in.
+ *
+ * The wiring that calls them is pinned in canvas-selection.test.mjs, and the
+ * guides themselves in canvas-guides.test.mjs.
  */
 import './fixtures/ts-hooks.mjs'
 import { test } from 'node:test'
@@ -16,23 +24,13 @@ import { readSource } from './fixtures/source.mjs'
 
 const VIEW = readSource('CanvasView.tsx')
 
+const { alignLines, snapOffset: rawSnapOffset, gridLines: rawGridLines } = await import(
+  '../src/shared/guides.ts'
+)
+
 /** Kept in step with the view by the assertion below, not by hand. */
 const SNAP_RANGE = 120
-const alignLines = (start, size) => [start, start + size / 2, start + size]
-const snapOffset = (start, size, lines) => {
-  let best = 0
-  let bestGap = SNAP_RANGE
-  for (const mine of alignLines(start, size)) {
-    for (const theirs of lines) {
-      const gap = Math.abs(theirs - mine)
-      if (gap < bestGap) {
-        bestGap = gap
-        best = theirs - mine
-      }
-    }
-  }
-  return best
-}
+const snapOffset = (start, size, lines) => rawSnapOffset(start, size, lines, SNAP_RANGE)
 
 test('the range these tests assume is the range the view uses', () => {
   // Without this the whole file can pass against a view that snaps at a
@@ -102,7 +100,7 @@ test('the resize ratio comes from the house page, not the page being dragged', (
 // ------------------------------------------------------------------- grid
 
 const GRID = 24
-const gridLines = (start, size) => alignLines(start, size).map((v) => Math.round(v / GRID) * GRID)
+const gridLines = (start, size) => rawGridLines(start, size, GRID)
 
 test('the grid spacing these tests assume is the one the view uses', () => {
   assert.match(VIEW, new RegExp(`const GRID = ${GRID}\\b`), 'GRID drifted')
@@ -130,7 +128,22 @@ test('a grid line is never more than half a cell away', () => {
   }
 })
 
-test('a nearer page edge beats the grid', () => {
+/**
+ * THE TWO TESTS BELOW ARE ABOUT THE PRIMITIVE, not about what the board does.
+ *
+ * `snapOffset` throws every candidate into one contest decided on distance, and
+ * that is still exactly what it does. What changed when guides landed is the
+ * layer ABOVE it: `guideSnap` now gives a card line priority over the grid
+ * inside CARD_PRIORITY, and only falls back to this combined contest when no
+ * card relationship is within reach.
+ *
+ * It had to. A grid line is never further than half a cell, so under the
+ * combined contest alone a card edge won only by being closer than twelve, and
+ * four of six representative drags produced no guide at all — see CARD_PRIORITY
+ * in shared/guides.ts for the measurements. The composite rule is pinned in
+ * canvas-guides.test.mjs; these two keep the primitive honest.
+ */
+test('the primitive lets a nearer page edge beat the grid', () => {
   // Butting one page against another must still win, or deliberate placement
   // would be overruled by the grid every time.
   const pageEdge = 103
@@ -139,9 +152,11 @@ test('a nearer page edge beats the grid', () => {
   assert.equal(withGrid, 2, 'the grid overruled a closer page edge')
 })
 
-test('the grid wins when the page edge is the further of the two', () => {
+test('the primitive lets the grid win when the page edge is further', () => {
   const start = 100
-  // Page edge 14 away, grid 4 away.
+  // Page edge 14 away, grid 4 away. Note that `guideSnap` would NOT return this
+  // — 14 is inside CARD_PRIORITY, so the composite takes the page edge. This is
+  // the contest in isolation.
   const off = snapOffset(start, 200, [114, ...gridLines(start, 200)])
   assert.equal(off, -4)
 })

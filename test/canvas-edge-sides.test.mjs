@@ -21,7 +21,9 @@ import { test } from 'node:test'
 import { strict as assert } from 'node:assert'
 import { readSource } from './fixtures/source.mjs'
 
-const { parseCanvas, serializeCanvas, edgeAnchor } = await import('../src/shared/canvas.ts')
+const { parseCanvas, serializeCanvas, edgeAnchor, sidePoint } = await import(
+  '../src/shared/canvas.ts'
+)
 
 const VIEW = readSource('CanvasView.tsx')
 
@@ -79,16 +81,31 @@ test('a stated side wins over the derived one, per end', () => {
   // field; passing `derived` wholesale would re-derive an anchor the user set.
   assert.match(
     VIEW,
-    /anchorOn\(a, edge\.fromSide, derived\.from\)/,
+    /sidePoint\(a, edge\.fromSide, derived\.from\)/,
     'the source end ignores fromSide',
   )
-  assert.match(VIEW, /anchorOn\(b, edge\.toSide, derived\.to\)/, 'the target end ignores toSide')
+  assert.match(VIEW, /sidePoint\(b, edge\.toSide, derived\.to\)/, 'the target end ignores toSide')
 })
 
 test('an absent or unusable side falls back instead of throwing', () => {
   // A board that is slightly wrong should still draw. Obsidian leaves odd
   // values behind, and a canvas that renders nothing is worse than one that
   // renders an edge in the derived place.
-  assert.match(VIEW, /point \? point\(node\) : derived/, 'an unknown side does not fall back')
-  assert.match(VIEW, /SIDE_POINT/, 'the four side midpoints are not defined')
+  //
+  // Called for real rather than grepped: `sidePoint` moved to shared/canvas.ts
+  // when the edge geometry did, and a regex over the view could no longer see
+  // it — nor could it ever have seen whether the fallback actually worked.
+  const derived = { x: -1, y: -1 }
+  const node = { x: 0, y: 0, width: 100, height: 100 }
+
+  // The four the spec names resolve to their own side midpoints.
+  assert.deepEqual(sidePoint(node, 'top', derived), { x: 50, y: 0 })
+  assert.deepEqual(sidePoint(node, 'right', derived), { x: 100, y: 50 })
+  assert.deepEqual(sidePoint(node, 'bottom', derived), { x: 50, y: 100 })
+  assert.deepEqual(sidePoint(node, 'left', derived), { x: 0, y: 50 })
+
+  // Everything else falls back to the geometry, and none of it throws.
+  for (const junk of [undefined, null, '', 'sideways', 'TOP', 3, {}, [], true]) {
+    assert.deepEqual(sidePoint(node, junk, derived), derived, `${JSON.stringify(junk)} did not fall back`)
+  }
 })

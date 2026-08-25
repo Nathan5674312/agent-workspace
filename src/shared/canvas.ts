@@ -204,12 +204,27 @@ export const CANVAS_DROP_MIME = 'application/x-agent-workspace-note'
 /**
  * The board every other board hangs from.
  *
- * Convention rather than configuration: the board called `Main.canvas` is the
+ * Convention rather than configuration: the board called `Home.canvas` is the
  * root, and the pipelines it links to nest under it. Nothing to set up and
  * obvious from the vault alone, which is the point — the hierarchy has to be
  * legible to someone reading the folder without this app.
+ *
+ * It was `Main.canvas` until 2026-08-24, and the rename is the whole reason to
+ * write this down. THREE OTHER PLACES ALREADY SAID HOME: the board sitting at
+ * the vault root, the roadmap entry describing this feature, and the
+ * `run-a-board` skill, which tells every agent on the machine to start at
+ * `Home.canvas`. Only this constant said Main, so the app headed the user's
+ * real index board "No Main.canvas yet" while an agent following the skill
+ * opened it and found the pipeline. Two names for one convention is precisely
+ * the second thing to keep in sync that a board-as-index exists to avoid, and
+ * the one with a single dissenter is the one that moves.
+ *
+ * It also lines up with `Home.md`, which is already the note the vault hangs
+ * from — `pickRoot` in main/vault.ts measures reachability from it, and
+ * INDEX_NAMES elects it as a folder's hub. Same word for the same idea in both
+ * halves of the vault.
  */
-export const ROOT_BOARD = 'Main.canvas'
+export const ROOT_BOARD = 'Home.canvas'
 
 export type BoardRef = { path: string; name: string }
 export type BoardRow = BoardRef & { depth: number; reachable: boolean }
@@ -245,7 +260,7 @@ export function boardTree(
   root: string = ROOT_BOARD,
 ): BoardRow[] {
   // Compared case-insensitively throughout: this runs on Windows, where
-  // `main.canvas` and `Main.canvas` are the same file.
+  // `home.canvas` and `Home.canvas` are the same file.
   const byPath = new Map(boards.map((b) => [b.path.toLowerCase(), b]))
   const wanted = root.toLowerCase()
   const rootBoard =
@@ -317,4 +332,292 @@ export function edgeAnchor(
   return dy >= 0
     ? { from: { x: ac.x, y: a.y + a.height }, to: { x: bc.x, y: b.y } }
     : { from: { x: ac.x, y: a.y }, to: { x: bc.x, y: b.y + b.height } }
+}
+
+/* ── edge geometry ──────────────────────────────────────────────
+   Lives here rather than in CanvasView because it is pure arithmetic over
+   numbers, and this module is the one `node --test` imports directly. While it
+   sat in the view the only thing any test could do was grep the source for the
+   text of an expression, which passes whether or not the maths is right. */
+
+export type CanvasPoint = { x: number; y: number }
+
+/** A box's four side midpoints, in world units. */
+const SIDE_POINT = {
+  top: (n: CanvasBox) => ({ x: n.x + n.width / 2, y: n.y }),
+  right: (n: CanvasBox) => ({ x: n.x + n.width, y: n.y + n.height / 2 }),
+  bottom: (n: CanvasBox) => ({ x: n.x + n.width / 2, y: n.y + n.height }),
+  left: (n: CanvasBox) => ({ x: n.x, y: n.y + n.height / 2 }),
+} as const
+
+export type CanvasBox = { x: number; y: number; width: number; height: number }
+
+/** The side midpoint named by `side`, or `derived` when it names none. */
+export function sidePoint(
+  node: CanvasBox,
+  side: unknown,
+  derived: CanvasPoint,
+): CanvasPoint {
+  const point = typeof side === 'string' ? SIDE_POINT[side as keyof typeof SIDE_POINT] : undefined
+  return point ? point(node) : derived
+}
+
+/**
+ * Which side of a card an anchor sits on, as an outward unit vector.
+ *
+ * Derived from the geometry rather than read off `fromSide`/`toSide`, because
+ * those are OPTIONAL — most edges omit them and let `edgeAnchor` derive the
+ * nearest pair. Measuring which of the four edges the point actually lies on
+ * covers both cases with one rule.
+ */
+export function outward(node: CanvasBox, p: CanvasPoint): CanvasPoint {
+  const toLeft = Math.abs(p.x - node.x)
+  const toRight = Math.abs(p.x - (node.x + node.width))
+  const toTop = Math.abs(p.y - node.y)
+  const toBottom = Math.abs(p.y - (node.y + node.height))
+  const nearest = Math.min(toLeft, toRight, toTop, toBottom)
+  if (nearest === toLeft) return { x: -1, y: 0 }
+  if (nearest === toRight) return { x: 1, y: 0 }
+  if (nearest === toTop) return { x: 0, y: -1 }
+  return { x: 0, y: 1 }
+}
+
+/**
+ * How far an edge reaches straight out of a card before it starts to turn.
+ *
+ * DIRECTION-AWARE, which the old `dist * 0.4` was not. The distance between two
+ * anchors says nothing about how hard the curve has to work: two cards facing
+ * each other across a gap need almost no lead-out, and two cards whose chosen
+ * sides face AWAY from each other need a long one or the curve doubles back
+ * through the card it just left. The old rule gave both the same handle and the
+ * second case kinked.
+ *
+ * `align` is the cosine between this side's outward normal and the straight
+ * line to the other anchor: +1 pointing right at it, -1 pointing directly away.
+ * The reach shrinks as the sides face each other and grows as they turn away.
+ *
+ * The floor collapses with the gap rather than sitting at a constant, or two
+ * cards nearly touching would get a 24-unit bulge out of an 8-unit gap.
+ */
+function reach(normal: CanvasPoint, p: CanvasPoint, other: CanvasPoint): number {
+  const gap = Math.hypot(other.x - p.x, other.y - p.y)
+  if (gap === 0) return 0
+  const align = (normal.x * (other.x - p.x) + normal.y * (other.y - p.y)) / gap
+  const floor = Math.min(24, gap * 0.6)
+  return Math.min(Math.max(gap * (0.45 - 0.22 * align), floor), 200)
+}
+
+/**
+ * Where the inner control point sits along the flat run, as a fraction of it.
+ *
+ * TWO THIRDS IS APPLE'S NUMBER, lifted off the shape this whole quintic is an
+ * argument about. A continuous (`.continuous`, squircle) corner on iOS is not a
+ * superellipse despite the folklore; it is three cubic Béziers per corner with
+ * hand-fitted coefficients, reverse engineered from `UIBezierPath` and published
+ * by PaintCode. Measuring inward from the corner vertex in units of the corner
+ * radius, the first of those three segments runs
+ *
+ *     P0 = (1.52866471, 0)   P1 = (1.08849323, 0)   P2 = (0.86840689, 0)
+ *
+ * All three sit on the straight edge, y = 0. That is the SAME TRICK as this
+ * file's: collinear P0, P1, P2 forces k = 0 where the curve meets the flat, so
+ * the corner leaves the edge with no curvature step. Apple solved the identical
+ * problem and reached for the identical device.
+ *
+ * Their spacing is what is borrowed here:
+ *
+ *     |P0 P1| / |P0 P2| = 0.44017148 / 0.66025782 = 0.66666...
+ *
+ * which is 2/3 to within 1 part in a million — inside the quantisation noise
+ * already visible in Apple's own figures, whose mirror pairs disagree in the
+ * seventh decimal (1.52866471 against 1.52866483). The third segment of the same
+ * corner gives 0.44017184 / 0.66025782, the same two thirds again.
+ *
+ * MEASURED HERE BEFORE IT WAS ADOPTED, because a constant that is right for a
+ * 90-degree corner is not automatically right for an arrow between two boxes.
+ * Sweeping the split from 0.40 to 0.90 over this file's own test cases and
+ * integrating total curvature variation — the standard fairness measure, and the
+ * thing an eye reads as "expensive" — the minimum for the diagonal case falls at
+ * s = 0.635, where the variation is 9.14237. Two thirds scores 9.14875, four
+ * tenths of a percent off an optimum found by brute force. The old 0.45 scored
+ * 9.505, and on the long diagonal case its peak curvature was 103.7 against 65.7
+ * for two thirds, over half as much again.
+ *
+ * So this is not cargo cult. Apple's ratio and the numerically fair ratio are
+ * the same ratio, and the one with a source is the one worth writing down.
+ */
+export const FLAT_SPLIT = 2 / 3
+
+/**
+ * The six control points of the quintic an edge is drawn as.
+ *
+ * WHY A QUINTIC AND NOT THE CUBIC THIS REPLACED — the reason is curvature
+ * continuity, and it is the same argument Apple makes about a rounded corner.
+ *
+ * A rectangle rounded with a circular arc is G1: position and tangent match
+ * where the straight edge meets the arc, so there is no visible corner. But
+ * CURVATURE jumps from 0 to 1/r at that point, instantaneously. The eye reads
+ * that discontinuity as a pinch even though nothing is bent. A squircle — a
+ * superellipse, which is what an iPhone's corner actually is — ramps curvature
+ * up from zero instead, so there is no moment where it snaps. Same tangent,
+ * different second derivative, and the second derivative is the part you feel.
+ *
+ * The old cubic here had exactly the circular-arc problem. Its control points
+ * were `anchor + normal * pull`, which sets the TANGENT perpendicular to the
+ * card but leaves curvature at the anchor free — and generally non-zero. So
+ * every edge left its card already bending, and met the arrowhead (a straight
+ * object) with a curvature step. On a board of connected pages that reads as
+ * the lines being slightly wrong everywhere without it being obvious why.
+ *
+ * A cubic CANNOT fix this. Curvature at t=0 of a degree-n Bézier is
+ *
+ *     k(0) = (n-1)/n * |(P1-P0) x (P2-P1)| / |P1-P0|^3
+ *
+ * so k(0) = 0 requires P0, P1, P2 to be collinear. On a cubic that spends three
+ * of the four control points on one end and leaves nothing to shape the middle
+ * with — the curve degenerates to very nearly a straight line. Degree five is
+ * the first degree with enough freedom: three points at each end, collinear
+ * along that end's outward normal, which pins BOTH the tangent (perpendicular
+ * to the side) and the curvature (zero) at each anchor, and still leaves the
+ * two interior spans to carry the turn.
+ *
+ * So every edge now leaves its card perfectly straight, bends through the
+ * middle, and straightens again before it reaches the arrowhead. Curvature
+ * starts at zero, peaks once, returns to zero.
+ *
+ * FLAT_SPLIT splits the collinear run so P1 sits inside P2 rather than on top of
+ * it. Any value in (0,1) gives zero curvature — collinearity is what matters,
+ * not the spacing — so the value is free, and it was 0.45 by taste until the
+ * constant below replaced it with Apple's.
+ *
+ * Exported so the test can assert the collinearity directly, as an exact cross
+ * product on the control points, rather than differentiating the curve
+ * numerically and comparing against a tolerance.
+ */
+export function edgeControlPoints(
+  a: CanvasBox,
+  from: CanvasPoint,
+  b: CanvasBox,
+  to: CanvasPoint,
+): CanvasPoint[] {
+  const da = outward(a, from)
+  const db = outward(b, to)
+  const ra = reach(da, from, to)
+  const rb = reach(db, to, from)
+  return [
+    from,
+    { x: from.x + da.x * ra * FLAT_SPLIT, y: from.y + da.y * ra * FLAT_SPLIT },
+    { x: from.x + da.x * ra, y: from.y + da.y * ra },
+    { x: to.x + db.x * rb, y: to.y + db.y * rb },
+    { x: to.x + db.x * rb * FLAT_SPLIT, y: to.y + db.y * rb * FLAT_SPLIT },
+    to,
+  ]
+}
+
+/**
+ * A quintic Bézier and its first derivative at `t`.
+ *
+ * The derivative is the hodograph: a degree-4 Bézier over the forward
+ * differences of the control points, scaled by the degree. Written out rather
+ * than looped with binomials because six terms is shorter than the machinery
+ * that would generate them.
+ */
+function quinticAt(P: CanvasPoint[], t: number): { p: CanvasPoint; d: CanvasPoint } {
+  const u = 1 - t
+  const b = [
+    u * u * u * u * u,
+    5 * u * u * u * u * t,
+    10 * u * u * u * t * t,
+    10 * u * u * t * t * t,
+    5 * u * t * t * t * t,
+    t * t * t * t * t,
+  ]
+  const h = [u * u * u * u, 4 * u * u * u * t, 6 * u * u * t * t, 4 * u * t * t * t, t * t * t * t]
+  let px = 0
+  let py = 0
+  let dx = 0
+  let dy = 0
+  for (let i = 0; i < 6; i++) {
+    px += b[i] * P[i].x
+    py += b[i] * P[i].y
+  }
+  for (let i = 0; i < 5; i++) {
+    dx += h[i] * 5 * (P[i + 1].x - P[i].x)
+    dy += h[i] * 5 * (P[i + 1].y - P[i].y)
+  }
+  return { p: { x: px, y: py }, d: { x: dx, y: dy } }
+}
+
+/**
+ * How many cubic pieces the quintic is emitted as.
+ *
+ * SVG has no quintic command — `C` is the highest degree a path can state — so
+ * the curve is split into spans and each span is written as the cubic that
+ * matches its position AND tangent at both ends (a Hermite segment). That is an
+ * approximation, and the honest numbers are these: the error falls off as the
+ * fourth power of the span count, and `canvas-edge-curvature.test.mjs` measures
+ * it directly rather than taking the asymptotics on trust.
+ *
+ * Measured worst case across every case in canvas-edge-curvature.test.mjs, as a
+ * fraction of the edge's own length: 1.1e-3 at six spans, 3.8e-4 at eight,
+ * 7.8e-5 at twelve, 2.5e-5 at sixteen. The worst case is always the U-turn,
+ * where both anchors sit on sides facing away from the other card.
+ *
+ * SIXTEEN. This was six between 2026-08-21 and 2026-08-24, on an argument that
+ * did not survive being re-measured. The comment standing here quoted "2.4e-4 at
+ * six spans, 8.4e-5 at twelve, 2.7e-5 at sixteen" and called the U-turn the
+ * worst case throughout. The twelve and sixteen figures ARE the U-turn. The six
+ * figure is not: it is the facing-across-a-gap case, and the U-turn at six spans
+ * is 1.1e-3, nearly five times worse. Mixing the best case at one span count
+ * with the worst at the others is what made six look free, and every conclusion
+ * drawn from it — including "there is no zoom at which the difference is on
+ * screen" — was reasoning about a number that belonged to a different edge.
+ *
+ * The cost of being wrong in this direction is nothing: an edge is a path string
+ * built a few dozen times per board, not the 653-edge force graph, which does
+ * its own drawing and never calls this. Sixteen is the smallest count in the
+ * table above that meets the test's 5e-5 bound, and that bound is itself derived
+ * from K_MAX rather than tuned until it passed.
+ *
+ * The G2 property bought above is a property of the ENDPOINTS, where the
+ * Hermite segments match the quintic exactly. The flat ends are therefore exact
+ * rather than approximated, and no span count could erode them.
+ */
+const EDGE_SPANS = 16
+
+/**
+ * The `d` of the path an edge is drawn as, plus the point its label sits on.
+ *
+ * `origin` shifts every coordinate, because the SVG layer this is drawn into is
+ * a fixed box centred on the world origin and world coordinates are routinely
+ * negative.
+ */
+export function edgeCurve(
+  a: CanvasBox,
+  from: CanvasPoint,
+  b: CanvasBox,
+  to: CanvasPoint,
+  origin: number,
+): { d: string; mid: CanvasPoint } {
+  const P = edgeControlPoints(a, from, b, to)
+  const step = 1 / EDGE_SPANS
+  let start = quinticAt(P, 0)
+  let d = `M ${start.p.x + origin} ${start.p.y + origin}`
+  for (let i = 1; i <= EDGE_SPANS; i++) {
+    const end = quinticAt(P, i * step)
+    const c1 = {
+      x: start.p.x + (start.d.x * step) / 3,
+      y: start.p.y + (start.d.y * step) / 3,
+    }
+    const c2 = { x: end.p.x - (end.d.x * step) / 3, y: end.p.y - (end.d.y * step) / 3 }
+    d +=
+      ` C ${c1.x + origin} ${c1.y + origin}, ${c2.x + origin} ${c2.y + origin},` +
+      ` ${end.p.x + origin} ${end.p.y + origin}`
+    start = end
+  }
+  // The label rides the curve at t=0.5. The straight midpoint of the two
+  // anchors is not on a curved line, so a label placed there floats off the
+  // edge it belongs to.
+  const mid = quinticAt(P, 0.5).p
+  return { d, mid: { x: mid.x + origin, y: mid.y + origin } }
 }

@@ -31,6 +31,7 @@
  * `node --test` runs this file directly.
  */
 import type { CanvasDoc, CanvasNode, CanvasEdge } from './canvas.js'
+import { isCanvasPath } from './canvas.js'
 
 /** The compiled form's schema version. Written into every plan. */
 export const PLAN_VERSION = 1
@@ -286,4 +287,39 @@ export function compile(doc: CanvasDoc): Plan {
     problems,
     runnable: steps.length > 0 && stuck.length === 0 && entry.length > 0,
   }
+}
+
+/**
+ * THE PIPELINES AN INDEX BOARD POINTS AT.
+ *
+ * How an agent gets from "there is a vault" to "here are the runnable boards"
+ * without anybody telling it. It opens the root board, compiles it, and calls
+ * this. That is the whole mechanism.
+ *
+ * THE INDEX IS A BOARD, NOT A MANIFEST, and everything good about this follows
+ * from that one refusal. A `pipelines.json` beside the boards would be a second
+ * thing to keep in sync, and the first time someone renamed a board in Obsidian
+ * it would be wrong with no way to notice. A board pointing at boards cannot go
+ * out of date, because it IS the thing being described — the same claim
+ * `compile` rests on, applied one level up. The sidebar already nests boards
+ * this way (`boardTree`), so this is the agent-side reading of a hierarchy the
+ * user can already see and already edits by dragging.
+ *
+ * Nothing new is authored to be listed here. A `file` card pointing at a
+ * `.canvas` is what a person draws when they mean "and then that pipeline", and
+ * it renders as an ordinary card in both this app and Obsidian.
+ *
+ * `Step`s rather than paths, in board order, because the arrows around those
+ * cards mean what they always mean: `after`, `before` and `conditions` say
+ * which pipeline runs when, and an index board is allowed to be a sequence
+ * rather than a bare list. A caller that only wants the paths takes `.file`.
+ *
+ * NOT RECURSIVE, deliberately. A pipeline that indexes further pipelines is one
+ * more compile by a caller that wants it, and doing it here would need this
+ * module to read files — which would cost it the purity that lets a CLI agent,
+ * the app and the test all get the same answer. `boardTree` is where the
+ * recursive form already lives, with the cycle guard it needs.
+ */
+export function pipelines(plan: Plan): Step[] {
+  return plan.steps.filter((s) => s.file !== undefined && isCanvasPath(s.file))
 }

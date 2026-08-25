@@ -28,7 +28,7 @@
  */
 import { useEffect, useMemo, useState } from 'react'
 import type { Activity } from '../../../shared/ipc.js'
-import { sessions, describe } from '../../../shared/transcript.js'
+import { sessions, describe, where } from '../../../shared/transcript.js'
 
 /**
  * How long a session stays on screen after its last tool call.
@@ -66,6 +66,39 @@ function shortId(id: string): string {
 function place(cwd: string): string {
   const parts = cwd.replace(/\\/g, '/').replace(/\/+$/, '').split('/')
   return parts[parts.length - 1] || cwd
+}
+
+/**
+ * How many trailing segments of the working directory to show.
+ *
+ * The panel is 17rem wide and cannot hold `C:/Users/Nathan/Desktop/agent-workspace`
+ * on one line at any font size worth reading. The head of that string is also
+ * the part that distinguishes nothing — every agent on the machine shares it.
+ * Three segments is what fits and what separates two checkouts of the same
+ * repo, which is the case this exists to disambiguate.
+ */
+const CWD_SEGMENTS = 3
+
+/**
+ * The working directory, trimmed from the LEFT so the meaningful tail survives.
+ *
+ * `where` with no root and a wider segment count, rather than a second copy of
+ * the same string arithmetic living in the view where no test can reach it.
+ */
+const cwdLabel = (cwd: string): string => where(cwd, undefined, CWD_SEGMENTS)
+
+/**
+ * The installation an agent belongs to, shortened for a badge.
+ *
+ * `.claude` is the default one and gets no badge at all — a label every agent
+ * would carry is not a label, it is furniture. Only a NON-default config
+ * directory is worth naming, which on this machine is the second account, and
+ * that is exactly the case where "which of my two installations is that" is a
+ * question somebody is actually asking.
+ */
+function installLabel(source: string | undefined): string | null {
+  if (!source || source === '.claude') return null
+  return source.replace(/^\.claude-?/, '') || source
 }
 
 export function AgentActivity(): React.JSX.Element | null {
@@ -119,14 +152,29 @@ export function AgentActivity(): React.JSX.Element | null {
             <span className="activity-who">
               {s.parent ? shortId(s.session) : (s.label ?? place(s.cwd))}
             </span>
-            <span className="activity-id">{s.parent ? 'sub' : place(s.cwd)}</span>
+            {/* The installation, when it is not the default one. See
+                installLabel — a badge every agent carries says nothing. */}
+            {installLabel(s.source) && (
+              <span className="activity-install">{installLabel(s.source)}</span>
+            )}
+            <span className="activity-id">{s.parent ? 'sub' : shortId(s.session)}</span>
           </div>
-          <div className="activity-now">{describe(s.last)}</div>
+          {/* WHERE, on its own line. This used to be the last folder segment
+              tucked in the corner of the head, which is ambiguous the moment
+              two agents work in folders that share a name — the common case on
+              a machine with more than one checkout. */}
+          <div className="activity-where" title={s.cwd}>
+            {cwdLabel(s.cwd)}
+          </div>
+          {/* Paths are resolved against the agent's OWN cwd, so a file reads as
+              `src/shared/guides.ts` rather than as a bare filename that could
+              be any of four, or an absolute path that wraps three lines. */}
+          <div className="activity-now">{describe(s.last, s.cwd)}</div>
           {s.recent.length > 1 && (
             <ol className="activity-trail">
               {s.recent.slice(1, 3).map((a, i) => (
                 <li className="activity-trail-item" key={`${a.at}-${i}`}>
-                  {describe(a)}
+                  {describe(a, s.cwd)}
                 </li>
               ))}
             </ol>

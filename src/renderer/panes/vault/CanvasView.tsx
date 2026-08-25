@@ -6,6 +6,8 @@ import {
   emptyCanvas,
   fileNodeTitle,
   edgeAnchor,
+  edgeCurve,
+  sidePoint,
   canvasId,
   CANVAS_DROP_MIME,
   boardTree,
@@ -18,7 +20,9 @@ import {
   type CanvasNode,
   type CanvasEdge,
 } from '../../../shared/canvas.js'
+import { guideSnap, guideLine, type Guide } from '../../../shared/guides.js'
 import type { VaultTreeNode } from '../../../shared/ipc.js'
+import { NameDialog } from './NameDialog.js'
 import './canvas.css'
 
 /**
@@ -51,6 +55,20 @@ const K_MIN = 0.1
 const K_MAX = 3
 /** Padding around the content when framing a board on open. */
 const FIT_PAD = 64
+
+/**
+ * The breathing room a new group leaves around the pages it is meant to hold.
+ * Matches the gap `Uniform size` leaves between two pages, so a pair dropped
+ * into a fresh group sits centred rather than pressed against one wall.
+ */
+const GROUP_PAD = 48
+
+/**
+ * A link card's height. One line of URL plus the padding around it — a link is
+ * not a document and giving it a page's height leaves an acre of empty card
+ * under a single line of text.
+ */
+const LINK_HEIGHT = 72
 
 /**
  * How far a duplicate lands from its original, in world units.
@@ -123,37 +141,12 @@ const SNAP_RANGE = 120
  */
 const GRID = 24
 
-/** The nearest dot line to each of a page's own lines, on one axis. */
-const gridLines = (start: number, size: number) =>
-  alignLines(start, size).map((v) => Math.round(v / GRID) * GRID)
-
-/**
- * The candidate lines a page offers to align against: its two edges and its
- * centre, on one axis. Aligning left-to-left builds a column, centre-to-centre
- * centres a caption under a page, and left-to-RIGHT is what puts two pages side
- * by side touching — all three come up when laying out a board.
- */
-const alignLines = (start: number, size: number) => [start, start + size / 2, start + size]
-
-/**
- * The offset that would put `start` on the nearest line, or 0 if nothing is
- * near enough. Compared against every line each candidate offers, in both
- * directions, so an edge can meet an edge or a centre.
- */
-const snapOffset = (start: number, size: number, lines: number[]): number => {
-  let best = 0
-  let bestGap = SNAP_RANGE
-  for (const mine of alignLines(start, size)) {
-    for (const theirs of lines) {
-      const gap = Math.abs(theirs - mine)
-      if (gap < bestGap) {
-        bestGap = gap
-        best = theirs - mine
-      }
-    }
-  }
-  return best
-}
+/* `alignLines`, `gridLines` and the snap itself moved to `shared/guides.ts`.
+   They are unchanged — same candidate lines, same tie-breaking, same range —
+   but they now also report WHICH line was matched, which is what lets the view
+   draw a guide for it. GRID and SNAP_RANGE stay here because this file owns
+   them: GRID is published to CSS above so the dots and the snap cannot
+   disagree, and a second copy of that number is exactly how they would. */
 
 /**
  * Whether an edge end draws an arrowhead, per JSON Canvas 1.0.
@@ -172,14 +165,6 @@ const snapOffset = (start: number, size: number, lines: number[]): number => {
 const drawsArrow = (end: unknown, fallback: 'arrow' | 'none'): boolean =>
   (end === undefined ? fallback : end) === 'arrow'
 
-/** The midpoint of each side of a node's box, in world units. */
-const SIDE_POINT = {
-  top: (n: CanvasNode) => ({ x: n.x + n.width / 2, y: n.y }),
-  right: (n: CanvasNode) => ({ x: n.x + n.width, y: n.y + n.height / 2 }),
-  bottom: (n: CanvasNode) => ({ x: n.x + n.width / 2, y: n.y + n.height }),
-  left: (n: CanvasNode) => ({ x: n.x, y: n.y + n.height / 2 }),
-} as const
-
 /**
  * Where one end of an edge attaches: the side the FILE names, or the derived
  * fallback when it names none.
@@ -194,79 +179,11 @@ const SIDE_POINT = {
  * `unknown` in, because nothing validates these on the way through
  * `parseCanvas`. A side that is not one of the four falls back rather than
  * throwing: a board that is slightly wrong should still draw.
- */
-const anchorOn = (
-  node: CanvasNode,
-  side: unknown,
-  derived: { x: number; y: number },
-): { x: number; y: number } => {
-  const point = typeof side === 'string' ? SIDE_POINT[side as keyof typeof SIDE_POINT] : undefined
-  return point ? point(node) : derived
-}
-
-/**
- * Which side of a card an anchor sits on, as an outward unit vector.
  *
- * Derived from the geometry rather than read off `fromSide`/`toSide`, because
- * those are OPTIONAL — most edges omit them and let `edgeAnchor` derive the
- * nearest pair. Measuring which of the four edges the point actually lies on
- * covers both cases with one rule, and a stated side has already been turned
- * into a point by `anchorOn` before this sees it.
+ * The geometry itself lives in `shared/canvas.ts` — see `sidePoint`, `outward`
+ * and `edgeCurve` there, and the note at the top of that section on why.
  */
-const outward = (node: CanvasNode, p: { x: number; y: number }) => {
-  const toLeft = Math.abs(p.x - node.x)
-  const toRight = Math.abs(p.x - (node.x + node.width))
-  const toTop = Math.abs(p.y - node.y)
-  const toBottom = Math.abs(p.y - (node.y + node.height))
-  const nearest = Math.min(toLeft, toRight, toTop, toBottom)
-  if (nearest === toLeft) return { x: -1, y: 0 }
-  if (nearest === toRight) return { x: 1, y: 0 }
-  if (nearest === toTop) return { x: 0, y: -1 }
-  return { x: 0, y: 1 }
-}
-
-/**
- * The control points of the curve an edge is drawn as.
- *
- * A STRAIGHT LINE BETWEEN TWO ANCHORS IS THE THING THAT LOOKED WRONG. It leaves
- * a card at whatever angle the other card happens to be at, so it reads as a
- * line laid over the board rather than as a cable plugged into a side. Pulling
- * each control point straight out from its own side makes the curve leave
- * perpendicular and turn on its way, which is what every diagram tool does and
- * what makes the connection read as belonging to the card.
- *
- * The handle length scales with the distance so near cards get a gentle bend
- * rather than a loop, and is clamped so far cards do not get a handle so long
- * the curve swings out past both of them.
- */
-const edgeCurve = (
-  a: CanvasNode,
-  from: { x: number; y: number },
-  b: CanvasNode,
-  to: { x: number; y: number },
-) => {
-  const da = outward(a, from)
-  const db = outward(b, to)
-  const pull = Math.min(Math.max(Math.hypot(to.x - from.x, to.y - from.y) * 0.4, 24), 160)
-  const c1 = { x: from.x + da.x * pull, y: from.y + da.y * pull }
-  const c2 = { x: to.x + db.x * pull, y: to.y + db.y * pull }
-  const o = EDGE_ORIGIN
-  return {
-    d:
-      `M ${from.x + o} ${from.y + o} ` +
-      `C ${c1.x + o} ${c1.y + o}, ${c2.x + o} ${c2.y + o}, ${to.x + o} ${to.y + o}`,
-    /**
-     * The curve's own midpoint, for the label. The straight midpoint of the two
-     * anchors is NOT on a curved line, so a label placed there floats off the
-     * edge it belongs to. This is the cubic evaluated at t=0.5, which reduces
-     * to (P0 + 3C1 + 3C2 + P3) / 8.
-     */
-    mid: {
-      x: (from.x + 3 * c1.x + 3 * c2.x + to.x) / 8 + o,
-      y: (from.y + 3 * c1.y + 3 * c2.y + to.y) / 8 + o,
-    },
-  }
-}
+// (the geometry itself is `sidePoint` in shared/canvas.ts, called directly)
 
 /**
  * A JSON Canvas `color` as a CSS value, or null when there is nothing to paint.
@@ -405,6 +322,33 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
    * would put this app's transient state into a document Obsidian also writes.
    */
   const [selected, setSelected] = useState<ReadonlySet<string>>(new Set())
+
+  /**
+   * The selected ARROW, if any. Also pure UI, never written to the file.
+   *
+   * Its own state rather than a member of `selected`, and not because ids might
+   * collide. An arrow and a card are not alternatives in a list — Delete has to
+   * mean one specific thing, and a single set holding both kinds would leave
+   * "delete the selection" ambiguous the moment a board had one of each. Only
+   * one of the two can be selected at a time, which each setter enforces by
+   * clearing the other.
+   *
+   * WHY THIS EXISTS AT ALL: `removeEdge` and its "Delete arrow" menu item have
+   * been here for a while, reachable only by right-clicking a two-pixel line.
+   * Nathan asked how to delete an arrow, which is the answer to whether that is
+   * discoverable. Clicking a thing and pressing Delete is what everyone already
+   * tries first; the menu stays for the people who look there.
+   */
+  const [selectedEdge, setSelectedEdge] = useState<string | null>(null)
+
+  /**
+   * Whether a middle-button pan is in flight, purely so the cursor can say so.
+   *
+   * State, unlike the pan offsets themselves, which live in a ref and are
+   * written straight to the DOM. This one has to reach the stylesheet, and it
+   * changes twice per gesture rather than once per frame.
+   */
+  const [panning, setPanning] = useState(false)
 
   /**
    * The save path's own state, in refs, because a save is asynchronous and
@@ -593,6 +537,11 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     mtimeRef.current = 0
     setEditing(null)
     setSelected(new Set())
+    // An edge id is only meaningful inside the board that holds it. Carried
+    // across a board switch it would either match nothing or, worse, collide
+    // with an unrelated edge and put a selection ring on a line the user never
+    // touched — and Delete would then take that one.
+    setSelectedEdge(null)
     // A pending endpoint is the sharpest case: picked on the old board, it
     // would pair with a click on the new one and write an edge whose source
     // does not exist in the file it lands in. Connect MODE is left alone —
@@ -1037,7 +986,28 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
         setMenu(null)
         return
       }
+      // Then it drops a selected arrow, on the same "never mind" reading that
+      // a press on empty board already has.
+      if (e.key === 'Escape' && selectedEdge) {
+        e.preventDefault()
+        setSelectedEdge(null)
+        return
+      }
       if (e.key === 'Delete' || e.key === 'Backspace') {
+        /**
+         * An arrow first, because selecting one clears the card selection and
+         * vice versa — only one of the two can be set, so the order is about
+         * readability rather than precedence.
+         */
+        if (selectedEdge) {
+          const edge = doc.edges.find((x) => x.id === selectedEdge)
+          setSelectedEdge(null)
+          if (edge) {
+            e.preventDefault()
+            removeEdge(edge)
+          }
+          return
+        }
         // Only when something is selected, so a stray Backspace on an empty
         // board is not swallowed from whatever else might want it.
         if (selected.size === 0) return
@@ -1048,11 +1018,53 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [doc, editing, selected, menu])
+  }, [doc, editing, selected, selectedEdge, menu])
 
   // ── interaction ────────────────────────────────────────────────
   /** Pointer position and view offset at the moment a background pan began. */
   const pan = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
+  /** Open while the "+ Link" dialog is asking for a URL. */
+  const [linkPrompt, setLinkPrompt] = useState(false)
+
+  /**
+   * The marquee, while one is being swept. World units, and the two corners are
+   * kept as-pressed rather than normalised so a sweep up-and-left works — the
+   * rectangle is normalised once, where it is used.
+   */
+  const marquee = useRef<{ x0: number; y0: number; x1: number; y1: number } | null>(null)
+  /** The same rectangle, for painting it. Null when no sweep is in progress. */
+  const [marqueeBox, setMarqueeBox] = useState<{
+    x: number
+    y: number
+    width: number
+    height: number
+  } | null>(null)
+
+  /**
+   * The alignment and spacing lines shown during a shift-drag.
+   *
+   * State, because they are rendered elements rather than a transform that can
+   * be written straight to the DOM the way a card's position is.
+   *
+   * GUARDED BY A KEY, and that guard is not premature. This runs on every
+   * `mousemove` of a drag, and the guides are usually IDENTICAL between two
+   * consecutive moves — you cross a snap line once and then stay locked to it
+   * for as long as you keep dragging. Setting state unconditionally would
+   * re-render the whole board on every mouse event, including the boards with
+   * no edges, which today do not re-render during a drag at all. Comparing a
+   * short string is cheaper than the render it avoids.
+   */
+  const [guides, setGuides] = useState<Guide[]>([])
+  const guideKey = useRef('')
+  const showGuides = useCallback((next: Guide[]) => {
+    const key = next
+      .map((g) => `${g.kind}${g.axis}${g.at}${g.from}${g.to}`)
+      .join('|')
+    if (key === guideKey.current) return
+    guideKey.current = key
+    setGuides(next)
+  }, [])
+
   /** The card being dragged, and where inside it the grab landed, in world units. */
   const drag = useRef<{
     node: CanvasNode
@@ -1176,12 +1188,133 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
   }
 
   const addCard = () => {
-    if (!wrapRef.current) return
-    // Centre of the viewport, so a new page lands where the user is looking
-    // rather than at the world origin they may have panned far away from.
-    const r = wrapRef.current.getBoundingClientRect()
-    const p = toWorld(r.left + r.width / 2, r.top + r.height / 2)
-    addCardAt(p.x, p.y)
+    const p = viewportCentre()
+    if (p) addCardAt(p.x, p.y)
+  }
+
+  /**
+   * The centre of what the user is currently looking at, in world units.
+   *
+   * Pulled out of `addCard` because every creator needs it and each one
+   * recomputing it is how they drift onto different origins.
+   */
+  const viewportCentre = () => {
+    const r = wrapRef.current?.getBoundingClientRect()
+    if (!r) return null
+    return toWorld(r.left + r.width / 2, r.top + r.height / 2)
+  }
+
+  /**
+   * A GROUP, which is the fourth JSON Canvas node type and the one this app
+   * could render but never make.
+   *
+   * A board that holds a whole business is a board that needs regions — this
+   * area is clients, that one is Q3 — and until now the only way to draw one was
+   * to author it in Obsidian and come back. That is the same defect as an edge
+   * that renders but cannot be drawn, which `Connect` already fixed.
+   *
+   * Sized to hold something rather than to be a marker: a group you have to
+   * resize before it contains anything is a group you resize every single time.
+   * Two pages wide and one and a bit tall, so a pair of pages side by side drops
+   * straight in.
+   *
+   * `label` is set here rather than left absent so the group is nameable the
+   * moment it exists — an unnamed dashed rectangle gives the rename field in the
+   * menu nothing to show, and reads as a stray box.
+   */
+  const addGroupAt = (wx: number, wy: number) => {
+    if (!doc) return
+    const width = PAGE_SIZE.width * 2 + GROUP_PAD * 3
+    const height = PAGE_SIZE.height + GROUP_PAD * 2
+    const node: CanvasNode = {
+      id: canvasId(),
+      type: 'group',
+      label: 'New group',
+      x: Math.round(wx - width / 2),
+      y: Math.round(wy - height / 2),
+      width,
+      height,
+    }
+    /**
+     * PUSHED, like every other thing this view creates.
+     *
+     * This was `unshift` for one revision, on the theory that a new group would
+     * otherwise cover older ones. That reasoning was backwards and it shipped a
+     * group you could not touch: two groups both sit at `z-index: 0`, so
+     * document order decides hit testing, and first-in-document means painted
+     * UNDERNEATH. Verified in the running app — a group created inside an
+     * existing one came back selected, looked like it was yours, and handed
+     * every click to the group behind it, including the right-click that
+     * renames it.
+     *
+     * Cards are unaffected either way: they are `z-index: 1`, so a group can
+     * never cover one.
+     */
+    doc.nodes.push(node)
+    selectNode(node.id, false)
+    repaint()
+    void persist(doc)
+  }
+
+  /**
+   * A LINK card — a URL on the board.
+   *
+   * `link` is the third of the four node types. It has rendered since the view
+   * was written (see the `n.type === 'link'` arm below) and nothing has ever
+   * been able to create one, so a board could show a URL only if Obsidian put it
+   * there. For a board meant to hold a business that is a real gap: the supplier
+   * portal, the Stripe dashboard and the shared drive are all URLs.
+   *
+   * The URL is asked for up front rather than created empty and edited in place.
+   * A link card with no URL renders as nothing at all — the render arm requires
+   * `n.url` — so an empty one would be an invisible node you cannot click to
+   * fix.
+   *
+   * VIA NameDialog, NOT `window.prompt`. Prompt exists on `window` in Electron,
+   * type-checks, greps clean, and throws `prompt() is not supported.` the moment
+   * it is called. `no-window-prompt.test.mjs` pins that across this pane.
+   */
+  const addLink = (url: string) => {
+    const p = viewportCentre()
+    if (!doc || !p) return
+    const node: CanvasNode = {
+      id: canvasId(),
+      type: 'link',
+      url,
+      x: Math.round(p.x - PAGE_SIZE.width / 2),
+      y: Math.round(p.y - LINK_HEIGHT / 2),
+      width: PAGE_SIZE.width,
+      // A link is one line of text, not a document. Given a page's height it
+      // would be an acre of empty card under a single URL.
+      height: LINK_HEIGHT,
+    }
+    doc.nodes.push(node)
+    selectNode(node.id, false)
+    repaint()
+    void persist(doc)
+  }
+
+  const addGroup = () => {
+    const p = viewportCentre()
+    if (p) addGroupAt(p.x, p.y)
+  }
+
+  /**
+   * Writes a group's name.
+   *
+   * Clearing it REMOVES the key rather than storing an empty string, which is
+   * the rule the arrow label already follows: the renderer treats absent and
+   * blank the same, so a file carrying both is a file with two spellings of one
+   * state.
+   */
+  const setGroupLabel = (node: CanvasNode, label: string) => {
+    if (!doc) return
+    const next = label.trim()
+    if (next === (typeof node.label === 'string' ? node.label : '')) return
+    if (next === '') delete node.label
+    else node.label = next
+    repaint()
+    void persist(doc)
   }
 
   /**
@@ -1327,24 +1460,93 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
   }
 
   const onBackgroundDown = (e: React.PointerEvent) => {
+    /**
+     * MIDDLE-DRAG PANS FROM ANYWHERE, INCLUDING FROM ON TOP OF A CARD.
+     *
+     * Left-drag already pans the board, but only from the background — a press
+     * that lands on a card is that card's drag. On a dense board there is
+     * frequently no background within reach, and the only way to move the view
+     * was to find a gap or to reach for the scroll wheel. Middle-drag is the
+     * gesture every other canvas answers to for exactly this, and it is
+     * unambiguous: nothing else on this surface uses the middle button, so it
+     * can pan regardless of what is underneath without stealing a meaning.
+     *
+     * It works over a card for free rather than by special-casing one:
+     * `onNodeDown` returns on any non-left button BEFORE it stops propagation,
+     * so a middle press on a card arrives here by bubbling.
+     *
+     * `preventDefault` because Chromium's middle-click autoscroll would
+     * otherwise start its own competing scroll gesture on Windows.
+     *
+     * The selection is deliberately NOT cleared. Panning is looking, not
+     * editing, and losing a multi-card selection because you moved the view to
+     * see where you were dropping it would be its own small disaster.
+     */
+    if (e.button === 1) {
+      e.preventDefault()
+      ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+      pan.current = { x: e.clientX, y: e.clientY, tx: view.current.tx, ty: view.current.ty }
+      setPanning(true)
+      return
+    }
     // Only a press on the board itself pans. A press that started on a card is
     // that card's drag, and it stops propagation below.
     if (e.button !== 0) return
     closeEditor()
+    setSelectedEdge(null)
     // A press anywhere on the board dismisses the page menu, which is what
     // every menu on every platform does.
     setMenu(null)
     // A press on empty board clears the selection, which is the one gesture
     // everyone already expects to mean "never mind".
     setSelected(new Set())
-    pan.current = { x: e.clientX, y: e.clientY, tx: view.current.tx, ty: view.current.ty }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
+
+    /**
+     * SHIFT SWEEPS A SELECTION; a plain drag still pans.
+     *
+     * The other way round is what Figma and Obsidian do — drag selects, space
+     * or middle-drag pans — and it is the wrong change to make here. Drag-to-pan
+     * is this board's established gesture, `canvas-cursor.test.mjs` pins the
+     * grab cursor that advertises it, and silently swapping the meaning of the
+     * one gesture every existing user already has in their hands would break
+     * every board on the machine to match a convention from a different app.
+     *
+     * So the sweep goes on the modifier. Shift is already "and this one too" for
+     * a click, which makes "and all of these" the same idea drawn out into a
+     * rectangle rather than a second unrelated meaning for the key.
+     */
+    if (e.shiftKey) {
+      const p = toWorld(e.clientX, e.clientY)
+      marquee.current = { x0: p.x, y0: p.y, x1: p.x, y1: p.y }
+      setMarqueeBox({ x: p.x, y: p.y, width: 0, height: 0 })
+      return
+    }
+    pan.current = { x: e.clientX, y: e.clientY, tx: view.current.tx, ty: view.current.ty }
   }
 
+  /**
+   * The swept rectangle, normalised so it is valid whichever way it was drawn.
+   * A sweep that ends above and left of where it started has a negative width,
+   * and every intersection test below would silently match nothing.
+   */
+  const marqueeRect = (m: { x0: number; y0: number; x1: number; y1: number }) => ({
+    x: Math.min(m.x0, m.x1),
+    y: Math.min(m.y0, m.y1),
+    width: Math.abs(m.x1 - m.x0),
+    height: Math.abs(m.y1 - m.y0),
+  })
+
   const onNodeDown = (e: React.PointerEvent, node: CanvasNode) => {
+    // Any other button falls through to the surface, which is what lets a
+    // middle-drag pan from on top of a card. Returning BEFORE stopping
+    // propagation is load-bearing, not incidental.
     if (e.button !== 0) return
     // Without this the board pans at the same time as the card moves.
     e.stopPropagation()
+    // A card and an arrow are alternative selections: taking one drops the
+    // other, so Delete always has exactly one meaning.
+    setSelectedEdge(null)
     /**
      * A LOCKED page does not move, and stopping here is what locks it: no
      * drag begins and no selection changes, so it cannot be nudged by a stray
@@ -1592,15 +1794,24 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
          * A grid line is never further than half a cell away, so this also
          * means Shift always does something, which is what makes it feel like a
          * snap rather than an occasional one.
+         *
+         * The arithmetic moved to `shared/guides.ts` unchanged — same lines,
+         * same tie-breaking — because it now has to report WHICH line it
+         * matched so the view can draw it, and because a test can import it
+         * there instead of re-declaring it from the same constants.
          */
-        x += snapOffset(x, held.node.width, [
-          ...others.flatMap((n) => alignLines(n.x, n.width)),
-          ...gridLines(x, held.node.width),
-        ])
-        y += snapOffset(y, held.node.height, [
-          ...others.flatMap((n) => alignLines(n.y, n.height)),
-          ...gridLines(y, held.node.height),
-        ])
+        const snap = guideSnap(
+          { x, y, width: held.node.width, height: held.node.height },
+          others,
+          { grid: GRID, range: SNAP_RANGE },
+        )
+        x += snap.dx
+        y += snap.dy
+        showGuides(snap.guides)
+      } else if (guideKey.current !== '') {
+        // Shift let go mid-drag. The lines have to go with it, or they sit
+        // there claiming a relationship that is no longer being enforced.
+        showGuides([])
       }
       /**
        * The snap is applied as a DELTA to the rest of the selection, not
@@ -1627,6 +1838,16 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       if (doc && doc.edges.length > 0) repaint()
       return
     }
+    if (marquee.current) {
+      const p = toWorld(e.clientX, e.clientY)
+      marquee.current.x1 = p.x
+      marquee.current.y1 = p.y
+      // State, unlike the pan above, because the rectangle is a rendered
+      // element rather than a transform written straight to the DOM. One small
+      // box per frame; the cards are untouched and do not re-layout.
+      setMarqueeBox(marqueeRect(marquee.current))
+      return
+    }
     if (pan.current) {
       // Straight to the element. No state, so no render.
       view.current.tx = pan.current.tx + (e.clientX - pan.current.x)
@@ -1648,6 +1869,47 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
   const draggedLast = useRef(false)
 
   const onUp = () => {
+    // Unconditionally, and before any of the branches below return early. A
+    // guide describes a snap that is being applied RIGHT NOW; once the pointer
+    // is up nothing is being enforced, and a line left on the board would be
+    // claiming a relationship that is no longer live.
+    showGuides([])
+    // Same reasoning for the pan cursor: the gesture is over whichever branch
+    // below claims the event, and a grabbing hand left on screen is a lie.
+    setPanning(false)
+    /**
+     * A finished sweep selects what it TOUCHED, not what it fully enclosed.
+     *
+     * Enclosure is the stricter rule and the wrong one on a board of
+     * page-shaped cards: a page is 612x792, so selecting three of them by
+     * enclosure means sweeping a rectangle bigger than all three put together,
+     * which at any useful zoom is a sweep off the edge of the screen. Touching
+     * is what a user means by dragging across a row of cards.
+     *
+     * Groups are excluded. A group is a region drawn AROUND cards, so any sweep
+     * that touches its members touches it too, and every marquee would silently
+     * pick up the box behind the things you were aiming at — then a drag would
+     * move the region and its contents together.
+     */
+    if (marquee.current) {
+      const r = marqueeRect(marquee.current)
+      marquee.current = null
+      setMarqueeBox(null)
+      if (doc) {
+        const hit = doc.nodes.filter(
+          (n) =>
+            n.type !== 'group' &&
+            n.x < r.x + r.width &&
+            n.x + n.width > r.x &&
+            n.y < r.y + r.height &&
+            n.y + n.height > r.y,
+        )
+        // A sweep that caught nothing leaves the selection cleared, which
+        // `onBackgroundDown` already did. It must not be treated as a cancel.
+        setSelected(new Set(hit.map((n) => n.id)))
+      }
+      return
+    }
     // Saved on RELEASE, like the drag: a resize emits a pointer event per frame
     // and writing the file at that rate would take a backup copy each time.
     if (resize.current) {
@@ -1737,6 +1999,25 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
         <button type="button" className="canvas-tool" onClick={addCard}>
           + Page
         </button>
+        {/* The other two node types the spec has and this board could only ever
+            render. A group is a region you draw around work; a link is a URL.
+            Both were authorable in Obsidian and nowhere here. */}
+        <button
+          type="button"
+          className="canvas-tool"
+          onClick={addGroup}
+          title="Draw a labelled region around a part of the board"
+        >
+          + Box
+        </button>
+        <button
+          type="button"
+          className="canvas-tool"
+          onClick={() => setLinkPrompt(true)}
+          title="Put a URL on the board"
+        >
+          + Link
+        </button>
         <button
           type="button"
           className="canvas-tool"
@@ -1790,6 +2071,8 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
         onWheel={onWheel}
         data-tick={tick}
         data-connect={connect || undefined}
+        data-marquee={marqueeBox ? '' : undefined}
+        data-panning={panning || undefined}
       >
         {/* The transform is written by applyView(), never rendered. */}
         <div className="canvas-world" ref={worldRef}>
@@ -1832,8 +2115,8 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
               // Derived first, then each end overridden only if the file names
               // a side for it. See anchorOn.
               const derived = edgeAnchor(a, b)
-              const from = anchorOn(a, edge.fromSide, derived.from)
-              const to = anchorOn(b, edge.toSide, derived.to)
+              const from = sidePoint(a, edge.fromSide, derived.from)
+              const to = sidePoint(b, edge.toSide, derived.to)
               /**
                * A label is only drawn when there is one to draw.
                *
@@ -1844,10 +2127,15 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                * nothing rather than an empty halo.
                */
               const label = typeof edge.label === 'string' ? edge.label.trim() : ''
-              const curve = edgeCurve(a, from, b, to)
+              const curve = edgeCurve(a, from, b, to, EDGE_ORIGIN)
               return (
                 <g
                   key={edge.id}
+                  className="canvas-edge-group"
+                  /* The arrowhead fills with `context-stroke`, so marking the
+                     GROUP is what lets a selected arrow and its head change
+                     together without a second rule for the marker. */
+                  data-selected={selectedEdge === edge.id || undefined}
                   /* Set on the GROUP so the line, its arrowheads (which fill
                      with context-stroke) and the label all inherit one value. */
                   ref={(el) => {
@@ -1883,6 +2171,17 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                     d={curve.d}
                     className="canvas-edge-hit"
                     fill="none"
+                    onPointerDown={(e) => {
+                      if (e.button !== 0) return
+                      if (connect) return
+                      // Or the board beneath treats this as a press on empty
+                      // space, clears the selection this is about to make, and
+                      // starts panning under the arrow.
+                      e.stopPropagation()
+                      setSelectedEdge(edge.id)
+                      setSelected(new Set())
+                      setMenu(null)
+                    }}
                     onContextMenu={(e) => {
                       e.preventDefault()
                       // Or the board's own menu opens behind this one.
@@ -1914,6 +2213,64 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                       {label}
                     </text>
                   )}
+                </g>
+              )
+            })}
+            {/**
+             * THE GUIDES, drawn last so they sit above the edges.
+             *
+             * In the edge layer rather than a layer of their own: it is already
+             * an SVG in world coordinates with the same EDGE_ORIGIN shift, and
+             * a second one would be a second thing to keep aligned with the
+             * board's transform. Empty except during a shift-drag.
+             *
+             * `at`/`from`/`to` are perpendicular to each other — see the Guide
+             * type. An `x` alignment is a shared x drawn as a VERTICAL line.
+             */}
+            {guides.map((g, i) => {
+              const { x1, y1, x2, y2 } = guideLine(g)
+              if (g.kind === 'align') {
+                return (
+                  <line
+                    key={`align-${i}`}
+                    className="canvas-guide"
+                    x1={x1 + EDGE_ORIGIN}
+                    y1={y1 + EDGE_ORIGIN}
+                    x2={x2 + EDGE_ORIGIN}
+                    y2={y2 + EDGE_ORIGIN}
+                  />
+                )
+              }
+              // A gap tick runs ALONG its axis, with a serif at each end so it
+              // reads as a measurement rather than as another alignment line.
+              const horizontal = g.axis === 'x'
+              const cap = 5
+              return (
+                <g key={`gap-${i}`} className="canvas-guide-gap">
+                  <line x1={x1 + EDGE_ORIGIN} y1={y1 + EDGE_ORIGIN} x2={x2 + EDGE_ORIGIN} y2={y2 + EDGE_ORIGIN} />
+                  <line
+                    x1={x1 + EDGE_ORIGIN - (horizontal ? 0 : cap)}
+                    y1={y1 + EDGE_ORIGIN - (horizontal ? cap : 0)}
+                    x2={x1 + EDGE_ORIGIN + (horizontal ? 0 : cap)}
+                    y2={y1 + EDGE_ORIGIN + (horizontal ? cap : 0)}
+                  />
+                  <line
+                    x1={x2 + EDGE_ORIGIN - (horizontal ? 0 : cap)}
+                    y1={y2 + EDGE_ORIGIN - (horizontal ? cap : 0)}
+                    x2={x2 + EDGE_ORIGIN + (horizontal ? 0 : cap)}
+                    y2={y2 + EDGE_ORIGIN + (horizontal ? cap : 0)}
+                  />
+                  {/* The number, so "these two gaps are equal" is a claim the
+                      user can check rather than take on trust. */}
+                  <text
+                    className="canvas-guide-size"
+                    x={(x1 + x2) / 2 + EDGE_ORIGIN}
+                    y={(y1 + y2) / 2 + EDGE_ORIGIN - (horizontal ? 8 : 0)}
+                    textAnchor="middle"
+                    dominantBaseline={horizontal ? 'auto' : 'middle'}
+                  >
+                    {g.size}
+                  </text>
                 </g>
               )
             })}
@@ -2206,6 +2563,34 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
               )}
             </div>
           ))}
+          {/**
+           * The marquee, INSIDE the world so it pans and zooms with the cards it
+           * is being swept across. Drawn in screen space it would drift off the
+           * cards the moment the board moved under it.
+           *
+           * Positioned through the REF, not a style prop. review-s2-vault-pane
+           * bans inline style objects across this pane so that presentation
+           * stays in the stylesheet, and this is the same imperative write
+           * `applyNode()` already makes for every page's geometry — four numbers
+           * that no stylesheet rule could express, because they are "wherever
+           * the pointer has got to".
+           *
+           * `aria-hidden` because it is the visible half of a gesture the user
+           * is making right now, not information.
+           */}
+          {marqueeBox && (
+            <div
+              className="canvas-marquee"
+              aria-hidden="true"
+              ref={(el) => {
+                if (!el) return
+                el.style.left = `${marqueeBox.x}px`
+                el.style.top = `${marqueeBox.y}px`
+                el.style.width = `${marqueeBox.width}px`
+                el.style.height = `${marqueeBox.height}px`
+              }}
+            />
+          )}
         </div>
       </div>
 
@@ -2276,6 +2661,39 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                 Delete arrow
               </button>
             </>
+          )}
+
+          {/**
+           * A GROUP'S NAME, on the same reasoning as the arrow label above: it
+           * is one short string, and the label is the entire point of a group —
+           * an unnamed dashed rectangle says nothing about the region it draws.
+           * Until now it could only be written in Obsidian.
+           *
+           * Shown only for a group. Every other node type has its own text
+           * already, edited on the card rather than in a menu.
+           */}
+          {menuNode()?.type === 'group' && (
+            <input
+              className="canvas-menu-input"
+              defaultValue={
+                typeof menuNode()?.label === 'string' ? String(menuNode()!.label) : ''
+              }
+              autoFocus
+              aria-label="Group name"
+              placeholder="Name this group"
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  e.preventDefault()
+                  const n = menuNode()
+                  if (n) setGroupLabel(n, e.currentTarget.value)
+                  setMenu(null)
+                } else if (e.key === 'Escape') {
+                  // Stopped, or the board's own Escape handling also runs.
+                  e.stopPropagation()
+                  setMenu(null)
+                }
+              }}
+            />
           )}
 
           {/* Board menu: the one item that only makes sense on empty space. */}
@@ -2432,6 +2850,50 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
         {saving && <span className="canvas-info-saving">Saving…</span>}
         {error && doc && <span className="canvas-info-error">{error}</span>}
       </div>
+
+      {/**
+       * The URL field for "+ Link". A real <dialog> rather than window.prompt,
+       * which is present on `window` in Electron, type-checks, and throws the
+       * moment it is called — see NameDialog's own header, and
+       * no-window-prompt.test.mjs, which pins it across this pane.
+       */}
+      <NameDialog
+        isOpen={linkPrompt}
+        title="Add a link"
+        label="URL to put on the board"
+        placeholder="https://"
+        confirmLabel="Add link"
+        /**
+         * Validated BEFORE the card exists, because a link card renders only
+         * when `n.url` is set — so a card created from junk would be an
+         * invisible node that cannot be clicked to fix or delete.
+         *
+         * `new URL()` is the parser the platform already ships; a regex here
+         * would be a worse one. The protocol allowlist is the real check: a
+         * `javascript:` or `file:` URL is a live hazard in a renderer with node
+         * integration, and this board is a document other people's files can
+         * reach.
+         */
+        validate={(value) => {
+          const raw = value.trim()
+          if (raw === '') return 'Enter a URL.'
+          let parsed: URL
+          try {
+            parsed = new URL(raw)
+          } catch {
+            return 'That is not a URL. Include the scheme, e.g. https://example.com'
+          }
+          if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+            return 'Only http:// and https:// links can go on a board.'
+          }
+          return null
+        }}
+        onSubmit={(value) => {
+          setLinkPrompt(false)
+          addLink(value.trim())
+        }}
+        onCancel={() => setLinkPrompt(false)}
+      />
     </div>
   )
 }

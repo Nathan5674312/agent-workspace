@@ -91,8 +91,12 @@ test('colour is applied through setProperty, never an inline style object', () =
 
 test('every element that can carry a colour falls back when it has none', () => {
   for (const rule of [
-    /border: 1px solid var\(--canvas-color, var\(--separator-opaque\)\)/,
-    /border-color: var\(--canvas-color, var\(--label-quaternary\)\)/,
+    // This pins the FALLBACK — what the test is actually about — rather than the
+    // literal `1px` it used to spell out. A card with no colour must still have
+    // an edge. The card's edge is an inset shadow rather than a border because
+    // Chromium truncates border-width to whole pixels and the board scales.
+    /box-shadow: inset 0 0 0 var\(--canvas-edge\) var\(--canvas-color, var\(--separator-opaque\)\)/,
+    /border: var\(--canvas-edge\) dashed var\(--canvas-color, var\(--label-quaternary\)\)/,
     /stroke: var\(--canvas-color, var\(--label-tertiary\)\)/,
     /fill: var\(--canvas-color, var\(--label-secondary\)\)/,
   ]) {
@@ -100,12 +104,40 @@ test('every element that can carry a colour falls back when it has none', () => 
   }
 })
 
-test('all six presets are defined, in one place', () => {
-  // The palette is monochrome by decision (tokens.css §4b) and only three hues
-  // existed. Keeping all six in one block is what makes that decision one edit
-  // to revisit rather than a hunt.
+test('both colour strokes cancel the board zoom, so neither outruns the other', () => {
+  // The defect this closes: the spine cancelled zoom and the border did not, so
+  // at 20% the border was a fifth of a pixel and gone while the spine stayed —
+  // a card whose colour changed character with how far you had zoomed out.
+  assert.match(CSS, /--canvas-edge: min\(calc\(1px \/ var\(--canvas-k, 1\)\), \d+px\)/)
+  assert.match(CSS, /--canvas-spine: min\(calc\(3px \/ var\(--canvas-k, 1\)\), \d+px\)/)
+  assert.match(CSS, /width: var\(--canvas-spine\)/, 'the spine stopped using the shared width')
+})
+
+test('all six presets are defined in one place, and derived rather than borrowed', () => {
   for (const n of [1, 2, 3, 4, 5, 6]) {
-    assert.match(CSS, new RegExp(`--canvas-color-${n}:`), `preset ${n} is undefined`)
+    assert.match(CSS, new RegExp(`--canvas-color-${n}: #[0-9a-f]{6};`), `preset ${n} is not a literal`)
   }
-  assert.match(CSS, /PROVISIONAL/, 'the palette decision is not flagged as unsettled')
+
+  /**
+   * NO PRESET MAY BORROW A SEMANTIC TOKEN. 1/2/4 used to be --danger,
+   * --warning and --success, which was a category error: those tokens mean
+   * something in this app and a red CARD does not mean danger. It also dragged
+   * their wildly different lightnesses into what was supposed to be one set.
+   */
+  for (const token of ['--danger', '--warning', '--success']) {
+    assert.doesNotMatch(
+      CSS,
+      new RegExp(`--canvas-color-\\d: var\\(${token}\\)`),
+      `a preset borrows ${token}, which means something else in this app`,
+    )
+  }
+
+  // Each one records the oklch it came from, so the next person can see the set
+  // was derived at one lightness and one chroma rather than eyeballed.
+  const derivations = [...CSS.matchAll(/--canvas-color-\d: #[0-9a-f]{6}; \/\* \w+\s+oklch\((0\.\d+) (0\.\d+)\s+\d+\) \*\//g)]
+  assert.equal(derivations.length, 6, 'not every preset records its oklch derivation')
+  const lightnesses = new Set(derivations.map((m) => m[1]))
+  const chromas = new Set(derivations.map((m) => m[2]))
+  assert.equal(lightnesses.size, 1, `the set spans ${lightnesses.size} lightnesses, so it is not one set`)
+  assert.equal(chromas.size, 1, `the set spans ${chromas.size} chromas, so it is not one set`)
 })

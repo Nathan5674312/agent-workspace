@@ -1540,12 +1540,29 @@ async function scan(): Promise<{ note: VaultNoteMeta; names: string[] }[]> {
   const { readFile, stat } = await import('node:fs/promises')
   const { join } = await import('node:path')
 
-  // Both kinds: a `file` becomes a row with no text, so a folder of images is
-  // a list of images rather than an empty database. Only `note` is read.
+  /**
+   * All three kinds: a `file` becomes a row with no text, so a folder of images
+   * is a list of images rather than an empty database. Only `note` is READ.
+   *
+   * `canvas` joins on the `text: false` side, and the split between "indexed"
+   * and "read" is the whole reason it can. A board was excluded outright until
+   * now, which meant a note saying [[Home.canvas]] resolved to nothing and the
+   * board it named was not a node in the graph — the vault's pipelines were the
+   * one kind of file the graph could not show, while the app's own sidebar
+   * nests boards under each other. Indexing without reading gives the node and
+   * the wikilink target while keeping the reason it was excluded: `.canvas` is
+   * JSON, and parsing it for links would turn every quoted string on a card
+   * into an edge. `text: false` means it is never read, so it never can.
+   *
+   * It registers under its FULL filename (`titleOf` only strips `.md`), so
+   * [[Home.canvas]] finds the board and [[Home]] still means `Home.md`. A board
+   * cannot shadow the note that shares its stem — which matters here, because
+   * `Home.md` is what `pickRoot` measures reachability from.
+   */
   const paths: { path: string; text: boolean }[] = []
   const collect = (n: VaultTreeNode): void => {
     if (n.kind === 'note') paths.push({ path: n.path, text: true })
-    else if (n.kind === 'file') paths.push({ path: n.path, text: false })
+    else if (n.kind === 'file' || n.kind === 'canvas') paths.push({ path: n.path, text: false })
     n.children?.forEach(collect)
   }
   collect(await tree())

@@ -10,7 +10,25 @@ import type { VaultLink, VaultTreeNode } from '../../../shared/ipc.js'
  * this pane MUST agree on what a wikilink is — they disagreed before, and the
  * graph drew edges the editor's Links list did not list.
  */
-export { parseWikilinks } from '../../../shared/wikilink.ts'
+export { parseWikilinkRefs, parseWikilinks } from '../../../shared/wikilink.ts'
+export type { WikilinkRef } from '../../../shared/wikilink.ts'
+
+/**
+ * Block references travel with the link parser for the same reason: resolving
+ * `[[Note#^id]]` is half a parse of the LINK and half a parse of the NOTE, and
+ * the two halves disagreeing is the same class of bug the note above describes.
+ * The main process does not need these yet — resolution happens against the
+ * text the pane already holds — but the module is in `shared/` so that when
+ * something in main does, it cannot be a second implementation.
+ */
+export {
+  anchorLine,
+  blockIdRefusal,
+  blockIds,
+  ensureBlockId,
+  lineOfOffset,
+  lineRange,
+} from '../../../shared/blockref.ts'
 
 /**
  * Every folder path in the tree, in vault order, root first.

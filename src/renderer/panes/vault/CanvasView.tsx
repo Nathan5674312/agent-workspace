@@ -16,11 +16,13 @@ import {
   type BoardRow,
   PAGE_SIZE,
   MIN_CARD_SIZE,
+  groupMembers,
+  groupFit,
   type CanvasDoc,
   type CanvasNode,
   type CanvasEdge,
 } from '../../../shared/canvas.js'
-import { guideSnap, guideLine, type Guide } from '../../../shared/guides.js'
+import { guideSnap, guideLine, type Guide, type GuideBox } from '../../../shared/guides.js'
 import type { VaultTreeNode } from '../../../shared/ipc.js'
 import { NameDialog } from './NameDialog.js'
 import './canvas.css'
@@ -62,6 +64,30 @@ const FIT_PAD = 64
  * into a fresh group sits centred rather than pressed against one wall.
  */
 const GROUP_PAD = 48
+
+/**
+ * A group's INTERIOR: the region a page inside it is meant to occupy.
+ *
+ * This is the box a group contributes to the snap, and it is emphatically NOT
+ * the group itself. The old rule dropped groups from the contest entirely, on
+ * reasoning that was half right — a group's OUTER edge is wherever someone
+ * dragged the handle to, and a page sitting flush against it would be touching
+ * the outline, which is not a relationship anyone wants. But that left a group
+ * offering nothing at all, so a page dropped into one landed wherever the
+ * pointer let go and the board read as pages floating loose inside a rectangle.
+ *
+ * Inset by the same GROUP_PAD a new group is built from, the edges become the
+ * lines pages ARE meant to sit on, and the centre line becomes "centred in this
+ * group" — which is the thing a phase of a pipeline usually wants.
+ */
+const groupInterior = (g: { x: number; y: number; width: number; height: number }): GuideBox => ({
+  x: g.x + GROUP_PAD,
+  y: g.y + GROUP_PAD,
+  // A group narrower than its own padding is degenerate rather than impossible;
+  // clamping keeps its centre line meaningful instead of inverting the box.
+  width: Math.max(0, g.width - GROUP_PAD * 2),
+  height: Math.max(0, g.height - GROUP_PAD * 2),
+})
 
 /**
  * A link card's height. One line of URL plus the padding around it — a link is
@@ -477,6 +503,43 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     // runs for every node after every render, so a colour cannot be missed by
     // whichever code path caused the re-render.
     applyColor(el, n.color)
+  }
+
+  /**
+   * EVERY GROUP HUGS WHAT IT HOLDS, after a gesture that could have changed it.
+   *
+   * Called on release rather than per frame. A group re-fitting sixty times a
+   * second while you drag would make the box breathe under the pointer, and the
+   * only moment the answer matters is the one where you let go.
+   *
+   * `skip` is the load-bearing argument. A group the user just dragged or
+   * resized THEMSELVES must be left exactly where they put it: fitting it would
+   * pull it straight back onto its contents, and the box would read as refusing
+   * to move. So direct manipulation of a group wins, and the fit only ever
+   * answers for what happened to the pages.
+   *
+   * Mutates in place and reports whether anything moved, so the caller can
+   * decide about the write — this runs on gestures that may not have changed a
+   * group at all, and persisting regardless would take a backup copy of the
+   * file for a drag that shifted one page inside a box it already fitted.
+   */
+  const fitGroups = (d: CanvasDoc, skip: ReadonlySet<CanvasNode>): boolean => {
+    let changed = false
+    for (const g of d.nodes) {
+      if (g.type !== 'group' || skip.has(g)) continue
+      const box = groupFit(groupMembers(g, d.nodes), GROUP_PAD)
+      if (!box) continue
+      if (box.x === g.x && box.y === g.y && box.width === g.width && box.height === g.height) {
+        continue
+      }
+      g.x = box.x
+      g.y = box.y
+      g.width = box.width
+      g.height = box.height
+      applyNode(g)
+      changed = true
+    }
+    return changed
   }
 
   /**
@@ -920,6 +983,11 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     // arm a second Delete that removes nothing.
     setSelected(new Set())
     setEditing(null)
+    // Nothing to skip: the deletion removed pages, and every group left is one
+    // the user did not touch, so each should close over the gap. A group whose
+    // last page was just deleted is empty and `groupFit` leaves it alone — an
+    // emptied phase of a pipeline stays on the board to be refilled.
+    fitGroups(doc, new Set())
     repaint()
     void persist(doc)
   }
@@ -1763,7 +1831,17 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       let x = Math.round(p.x - held.dx)
       let y = Math.round(p.y - held.dy)
       /**
-       * SHIFT LINES THE PAGE UP WITH ITS NEIGHBOURS, per axis.
+       * PAGES LINE UP WITH THEIR NEIGHBOURS BY DEFAULT, per axis.
+       *
+       * This used to be held behind Shift, and the honest verdict on that is
+       * that a snap nobody knows to ask for is a snap nobody gets: the board
+       * read as pages floating loose, because in practice every drag was a free
+       * drag. The alignment engine was already good — edges, centres, equal
+       * spacing, the dot grid, all of it drawn while you drag — it was just
+       * never running. So the modifier is INVERTED: aligning is what dragging
+       * does, and Shift is the escape hatch for the deliberate off-grid
+       * placement, which is the rarer intention and the one worth having to ask
+       * for. Same gesture as every design tool that got here first.
        *
        * Each axis snaps independently, which is the point: a page can lock to
        * one page's left edge while sitting anywhere vertically. Locking both or
@@ -1774,14 +1852,15 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
        * page without disturbing the other coordinate; this helps you place it
        * flush against something, which is what building a structure needs.
        *
-       * Groups are skipped as targets: a group is a region drawn AROUND pages,
-       * so its edges are wherever it was sized to and are not a line anything
-       * should be flush with.
+       * Groups take part now, as their INTERIOR rather than their outline —
+       * see `groupInterior`. Dropping them entirely was what left a page inside
+       * a group with nothing to line up against, which is most of why a group
+       * looked like a rectangle with its contents scattered in it.
        */
-      if (e.shiftKey && doc) {
-        const others = doc.nodes.filter(
-          (n) => n !== held.node && n.type !== 'group' && !held.others.some((o) => o.node === n),
-        )
+      if (doc && !e.shiftKey) {
+        const others: GuideBox[] = doc.nodes
+          .filter((n) => n !== held.node && !held.others.some((o) => o.node === n))
+          .map((n) => (n.type === 'group' ? groupInterior(n) : n))
         /**
          * THE DOT GRID IS ALWAYS A CANDIDATE, alongside the other pages.
          *
@@ -1809,7 +1888,8 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
         y += snap.dy
         showGuides(snap.guides)
       } else if (guideKey.current !== '') {
-        // Shift let go mid-drag. The lines have to go with it, or they sit
+        // Shift taken UP mid-drag, which now means alignment was switched off
+        // rather than on. The lines have to go with it either way, or they sit
         // there claiming a relationship that is no longer being enforced.
         showGuides([])
       }
@@ -1917,7 +1997,13 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       resize.current = null
       // Only when the size actually changed. A press on the grip that never
       // travelled is not an edit and must not write the file.
-      if (doc && (r.node.width !== r.w0 || r.node.height !== r.h0)) void persist(doc)
+      if (doc && (r.node.width !== r.w0 || r.node.height !== r.h0)) {
+        // A page grown inside a group grows the group with it. The resized node
+        // is skipped, which is what makes a GROUP still resizable by hand: fit
+        // it here and the handle would spring back to the contents every time.
+        fitGroups(doc, new Set([r.node]))
+        void persist(doc)
+      }
     }
     draggedLast.current = drag.current?.moved ?? false
     const held = drag.current
@@ -1936,7 +2022,21 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     // `created` as well as `moved`: an Alt+press that never moved still added a
     // card to the doc, and leaving it unsaved would show a duplicate on screen
     // that vanishes on reload.
-    if ((drag.current?.moved || drag.current?.created) && doc) void persist(doc)
+    /**
+     * The fit runs BEFORE the write, so the group's new box travels with the
+     * same save — and, because `persist` snapshots the state it is replacing,
+     * inside the same undo step as the drag that caused it. A fit that wrote
+     * separately would take two backups of one gesture and cost two Ctrl+Z to
+     * put back.
+     *
+     * Everything the gesture had hold of is skipped: dragging a group does not
+     * carry its pages, so a group that fitted itself here would slide back onto
+     * them the moment you released.
+     */
+    if ((drag.current?.moved || drag.current?.created) && doc) {
+      if (held) fitGroups(doc, new Set([held.node, ...held.others.map((o) => o.node)]))
+      void persist(doc)
+    }
     drag.current = null
     pan.current = null
   }

@@ -186,6 +186,78 @@ export const PAGE_SIZE = { width: 612, height: 792 }
 export const MIN_CARD_SIZE = { width: 120, height: 60 }
 
 /**
+ * THE NODES A GROUP IS HOLDING.
+ *
+ * Membership is decided by a node's CENTRE, not by whether the group encloses
+ * it whole. Full containment is the stricter rule and the wrong one here: a
+ * page half dragged out of a group is still a page you are moving within it
+ * until you commit, and under enclosure it would fall out of the group the
+ * instant one corner crossed the line, then be re-adopted on the way back. The
+ * centre gives one unambiguous crossing point, which is what makes dragging a
+ * page in or out of a group read as a decision rather than a wobble.
+ *
+ * Groups are never members of groups. JSON Canvas permits the nesting and this
+ * deliberately does not model it: fitting nested groups correctly means fitting
+ * them innermost-first, and a cycle of two groups each "inside" the other is
+ * representable in the file. Excluding them keeps the fit a single pass with no
+ * ordering to get wrong. A nested group is left exactly where the user put it.
+ */
+export function groupMembers(group: CanvasBox, nodes: CanvasNode[]): CanvasNode[] {
+  return nodes.filter((n) => {
+    if (n.type === 'group') return false
+    const cx = n.x + n.width / 2
+    const cy = n.y + n.height / 2
+    return (
+      cx >= group.x &&
+      cx <= group.x + group.width &&
+      cy >= group.y &&
+      cy <= group.y + group.height
+    )
+  })
+}
+
+/**
+ * The box a group has to be to hold `members` with `pad` around them.
+ *
+ * `null` when it holds nothing, and that is the useful half of the contract:
+ * an EMPTY GROUP IS LEFT ALONE. Fitting one would collapse it to a point, and a
+ * group you have drawn but not filled yet is the normal way to lay out a
+ * pipeline before the pages for it exist — a box that vanished the moment you
+ * finished drawing it would make that impossible.
+ *
+ * Grows AND shrinks. A fit that only ever grew would leave a group carrying the
+ * shape of a page that has since been dragged out of it, which is the same
+ * untidiness the fit exists to remove, just slower to notice.
+ *
+ * `pad` is passed in rather than owned here for the reason `guides.ts` gives
+ * about grid and range: CanvasView owns GROUP_PAD, it is the same measurement a
+ * new group is built from and the same one the snap insets a group's interior
+ * by, and a second copy of it here is how those three quietly stop agreeing.
+ */
+export function groupFit(members: CanvasBox[], pad: number): CanvasBox | null {
+  if (members.length === 0) return null
+  let minX = Infinity
+  let minY = Infinity
+  let maxX = -Infinity
+  let maxY = -Infinity
+  for (const m of members) {
+    minX = Math.min(minX, m.x)
+    minY = Math.min(minY, m.y)
+    maxX = Math.max(maxX, m.x + m.width)
+    maxY = Math.max(maxY, m.y + m.height)
+  }
+  // Rounded because the spec declares x/y/width/height integer, and a group is
+  // the one node the user never types a size into — every value it ever gets
+  // comes from arithmetic like this.
+  return {
+    x: Math.round(minX - pad),
+    y: Math.round(minY - pad),
+    width: Math.round(maxX - minX + pad * 2),
+    height: Math.round(maxY - minY + pad * 2),
+  }
+}
+
+/**
  * The drag payload a canvas accepts: one vault-relative note path.
  *
  * A CUSTOM TYPE RATHER THAN `text/plain`, and that is the whole point of naming

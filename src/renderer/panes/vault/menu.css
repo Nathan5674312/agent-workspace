@@ -211,11 +211,11 @@
   position-anchor: --db-group-by-menu;
 }
 
-[popovertarget='db-cal-jump-menu']:not(.pane-menu-item) {
-  anchor-name: --db-cal-jump-menu;
+[popovertarget='planner-cal-jump-menu']:not(.pane-menu-item) {
+  anchor-name: --planner-cal-jump-menu;
 }
-#db-cal-jump-menu {
-  position-anchor: --db-cal-jump-menu;
+#planner-cal-jump-menu {
+  position-anchor: --planner-cal-jump-menu;
 }
 
 [popovertarget='vault-sort-menu']:not(.pane-menu-item) {

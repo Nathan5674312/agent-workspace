@@ -119,7 +119,10 @@ test('backlinks and wikilinks are wired, not just mentioned', () => {
     /getBacklinks\(/,
     'useVault exposes backlinks but the pane never calls it',
   )
-  assert.match(src('Editor.tsx'), /parseWikilinks\(/)
+  // `parseWikilinkRefs`, not `parseWikilinks`, since block references landed:
+  // the editor needs the `#heading` / `#^block-id` the plain form drops. Still
+  // the SHARED parser, which is the property this line exists to hold.
+  assert.match(src('Editor.tsx'), /parseWikilinkRefs\(/)
   assert.match(src('Editor.tsx'), /vault-editor-backlinks/)
 })
 
@@ -250,14 +253,43 @@ test('HARD FAIL GUARD: no auto-save, debounce, blur-save or unmount-save', () =>
   }
 })
 
+/**
+ * `handleSave`'s body alone, sliced off at the `if (!note)` early return that
+ * ends the hook region.
+ *
+ * The two tests below used to reach for the WHOLE FILE with `[\s\S]*` and
+ * `[\s\S]{0,400}` windows, which held only for as long as the editor had
+ * exactly one effect (none) and exactly one `catch` (the save path's). Block
+ * references added both, and both guards fired on code that does not go near
+ * the save path — `useEffect([\s\S]*handleSave` matched an anchor-scroll effect
+ * two hundred lines above `handleSave`, and the `catch` window matched a
+ * clipboard failure next to a legitimate buffer edit.
+ *
+ * A guard that fails on unrelated code is not strict, it is imprecise, and the
+ * usual repair — widen the exception — is how a real guard gets worn away. So
+ * both are narrowed to what they were always about instead.
+ */
+function saveBody() {
+  const body = stripComments(src('Editor.tsx'))
+  const start = body.indexOf('const handleSave')
+  const end = body.indexOf('if (!note) {', start)
+  assert.ok(start >= 0 && end > start, 'handleSave not found')
+  return body.slice(start, end)
+}
+
 test('the only call to onSave is the Save button click', () => {
   const body = stripComments(src('Editor.tsx'))
   const calls = [...body.matchAll(/\bonSave\s*\(/g)]
   assert.equal(calls.length, 1, 'onSave is invoked from more than one place')
   assert.match(body, /await onSave\(text, note\.mtime\)/)
   assert.match(body, /onClick=\{handleSave\}/, 'save is not click-driven')
-  // handleSave must not be reachable from an effect.
-  assert.doesNotMatch(body, /useEffect\([\s\S]*handleSave/, 'save runs from an effect')
+  // Counting every mention is STRONGER than the old "not inside a useEffect":
+  // its definition and the button's onClick are the only two references a
+  // click-driven save can have, so an effect, a timer, a keybinding or any
+  // other caller shows up here as a third — whatever shape it arrives in.
+  const mentions = [...body.matchAll(/\bhandleSave\b/g)]
+  assert.equal(mentions.length, 2, 'handleSave is reachable from somewhere else')
+  assert.match(body, /const handleSave = async/, 'handleSave is not the definition')
 })
 
 test('SaveConflict is caught in the editor and does not surface as a raw error', () => {
@@ -269,8 +301,10 @@ test('SaveConflict is caught in the editor and does not surface as a raw error',
     'conflict path never re-reads the disk version',
   )
   assert.match(body, /onConflict\(diskNote\.mtime, diskNote\.text\)/)
-  // The buffer must not be reset anywhere in the catch.
-  assert.doesNotMatch(body, /catch[\s\S]{0,400}onTextChange\(/, 'catch clobbers the buffer')
+  // The buffer must not be reset anywhere in the SAVE path — not merely near a
+  // `catch`. This is the stricter reading: a failed save never costs the user
+  // text, on any branch of the function, catch or not.
+  assert.doesNotMatch(saveBody(), /onTextChange\(/, 'the save path clobbers the buffer')
 })
 
 test('the edit buffer is owned above the editor, so unmounting cannot drop it', () => {

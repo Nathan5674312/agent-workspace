@@ -112,6 +112,16 @@
   background: var(--fill-active);
 }
 
+/* A day CHOSEN but not yet written. Dashed, because it is the one state here
+   that describes something that does not exist — the note is a proposal until
+   the button below is pressed. Only ever set on an empty day: a day with a note
+   opens on click and never needs choosing. */
+.daily-day--picked {
+  outline: 1px dashed var(--label-tertiary);
+  outline-offset: -1px;
+  color: var(--label);
+}
+
 /* Today is a ring, so it can coexist with the filled state above rather than
    overriding it — the common case is that today both exists and is today. */
 .daily-day--today {
@@ -133,6 +143,14 @@
 
 .daily-today:hover:not(:disabled) {
   background: var(--fill-hover);
+}
+
+/* The button becomes a write when a day is chosen, so it stops looking like the
+   neutral control it is the rest of the time. The accent is the app's one
+   emphasis and this is the only place in the panel that touches the disk. */
+.daily-today--create {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 .daily-today:disabled {

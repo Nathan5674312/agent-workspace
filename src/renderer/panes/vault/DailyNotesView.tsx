@@ -29,11 +29,16 @@ import type { VaultTreeNode } from '../../../shared/ipc.js'
 import {
   DAILY_DIR,
   DAILY_TEMPLATE,
-  dailyDateFromFilename,
   dailyPath,
   noteFromTemplate,
   todayLocal,
 } from '../../../shared/daily.js'
+import {
+  dailyNotes,
+  hasDailyFolder,
+  monthCells,
+  stepMonth,
+} from '../../../shared/planner.js'
 import './daily.css'
 
 const WEEKDAYS = ['M', 'T', 'W', 'T', 'F', 'S', 'S']
@@ -58,37 +63,54 @@ export function DailyNotesView({ tree, onOpenNote, onCreated }: DailyNotesViewPr
   const [cursor, setCursor] = useState<{ y: number; m: number }>({ y: ty, m: tm })
   const [busy, setBusy] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * The day the footer button will act on, or null for today.
+   *
+   * ONLY EVER AN EMPTY DAY. A day that already has a note opens on click, which
+   * is safe and instant; a day that does not gets selected instead, and the
+   * footer says what creating it would do. See the click handler for why.
+   */
+  const [picked, setPicked] = useState<string | null>(null)
 
-  /** date string -> vault path, for every note in Daily/ named like a date. */
-  const notes = useMemo(() => {
-    const found = new Map<string, string>()
-    const dir = tree?.children?.find(
-      (c) => c.kind === 'folder' && c.name === DAILY_DIR,
-    )
-    for (const child of dir?.children ?? []) {
-      if (child.kind !== 'note') continue
-      // The filename IS the date. `_Template.md` and anything else in the
-      // folder are skipped by this shape check rather than by name, so a
-      // `README.md` in there does not become a calendar entry.
-      const date = dailyDateFromFilename(child.name)
-      if (date) found.set(date, child.path)
-    }
-    return { map: found, hasFolder: !!dir }
-  }, [tree])
+  /**
+   * date string -> vault path, for every note in Daily/ named like a date.
+   *
+   * The walk lives in `shared/planner.ts` rather than inline here, so a test can
+   * assert what it actually returns — that `_Template.md` and a stray README are
+   * not days, and that a vault with no `Daily/` folder is an empty map rather
+   * than an error. This view is its only caller; the planner's calendar reads
+   * dates out of frontmatter instead and never looks at this folder.
+   */
+  const notes = useMemo(
+    () => ({ map: dailyNotes(tree), hasFolder: hasDailyFolder(tree) }),
+    [tree],
+  )
 
   const step = (delta: number): void => {
-    const total = cursor.y * 12 + (cursor.m - 1) + delta
-    setCursor({ y: Math.floor(total / 12), m: (total % 12) + 1 })
+    setCursor(stepMonth(cursor.y, cursor.m, delta))
+    // A selection in a month you have paged away from leaves the footer naming
+    // a day that is not on screen, and the button would write it unseen.
+    setPicked(null)
   }
 
+  /**
+   * Opens the day's note, WRITING IT FIRST IF IT DOES NOT EXIST.
+   *
+   * Reached from the footer button only. It used to be the click handler for
+   * every cell in the grid, and that was the defect: looking at a month wrote a
+   * file for every day you touched. A vault picked up eighteen identical empty
+   * notes that way, four of them for days that had not happened yet, which is
+   * the opposite of what a daily-notes practice is worth having.
+   *
+   * Creating is still one click — it is just a click on a control that SAYS it
+   * creates, rather than on a number in a grid.
+   */
   const open = async (date: string): Promise<void> => {
     const existing = notes.map.get(date)
     if (existing) {
       onOpenNote(existing)
       return
     }
-    // Creating is the whole point of daily notes, and it is user-originated —
-    // the person clicked the day. Same path "+ Note" uses.
     setBusy(true)
     setError(null)
     try {
@@ -115,14 +137,9 @@ export function DailyNotesView({ tree, onOpenNote, onCreated }: DailyNotesViewPr
     }
   }
 
-  // Both UTC, so the grid's shape cannot shift with the local timezone even
-  // though the DAYS it names are local.
-  const firstWeekday = (new Date(Date.UTC(cursor.y, cursor.m - 1, 1)).getUTCDay() + 6) % 7
-  const daysInMonth = new Date(Date.UTC(cursor.y, cursor.m, 0)).getUTCDate()
-  const cells: (number | null)[] = [
-    ...Array<null>(firstWeekday).fill(null),
-    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
-  ]
+  // One copy of the weekday arithmetic, in shared/planner.ts, so the sidebar
+  // picker and the planner month can never lay a month out differently.
+  const cells = monthCells(cursor.y, cursor.m)
 
   return (
     <div className="daily-view">
@@ -164,15 +181,32 @@ export function DailyNotesView({ tree, onOpenNote, onCreated }: DailyNotesViewPr
               type="button"
               role="gridcell"
               className={`daily-cell daily-day ${has ? 'daily-day--has' : ''} ${
-                date === todayKey ? 'daily-day--today' : ''
-              }`}
-              onClick={() => void open(date)}
+                date === picked ? 'daily-day--picked' : ''
+              } ${date === todayKey ? 'daily-day--today' : ''}`}
+              /**
+               * A CLICK NEVER WRITES A FILE. This is the whole fix.
+               *
+               * Every cell used to call the create-or-open path, so reading a
+               * month wrote a note for each day you clicked — a vault collected
+               * eighteen identical empty notes that way, four of them dated in
+               * the future. Browsing a calendar is not consent to author in it.
+               *
+               * A day that HAS a note still opens on one click: that is safe,
+               * reversible and the common case. A day that does not is merely
+               * SELECTED, and the button below then offers to write it, saying
+               * the date it would write. Same one click to create; it just has
+               * to land on a control that admits what it does.
+               */
+              onClick={() => {
+                if (has) onOpenNote(notes.map.get(date)!)
+                else setPicked(date === picked ? null : date)
+              }}
               disabled={busy}
-              // The title carries the whole affordance: a day with a note opens
-              // it, a day without writes one. Those are different enough that
-              // the control has to say which it will do before it is clicked.
-              title={has ? `Open ${date}` : `Create ${DAILY_DIR}/${date}.md`}
-              aria-label={has ? `Open note for ${date}` : `Create note for ${date}`}
+              title={has ? `Open ${date}` : `Choose ${date}`}
+              aria-label={
+                has ? `Open note for ${date}` : `Choose ${date}, then use the button below to create it`
+              }
+              aria-pressed={has ? undefined : date === picked}
             >
               {day}
             </button>
@@ -180,21 +214,34 @@ export function DailyNotesView({ tree, onOpenNote, onCreated }: DailyNotesViewPr
         })}
       </div>
 
+      {/* THE ONLY CONTROL THAT CAN WRITE, and it says which day it would write.
+          With nothing chosen it is about today, which is what this panel is
+          opened for nine times in ten; choosing an empty day in the grid points
+          it at that day instead. */}
       <button
         type="button"
-        className="daily-today"
+        className={`daily-today ${picked ? 'daily-today--create' : ''}`}
         onClick={() => {
+          if (picked) {
+            void open(picked)
+            setPicked(null)
+            return
+          }
           setCursor({ y: ty, m: tm })
           void open(todayKey)
         }}
         disabled={busy}
       >
-        {notes.map.has(todayKey) ? "Open today's note" : "Start today's note"}
+        {picked
+          ? `Create ${Number(picked.slice(8))} ${MONTH_NAMES[Number(picked.slice(5, 7)) - 1]}`
+          : notes.map.has(todayKey)
+            ? "Open today's note"
+            : "Start today's note"}
       </button>
 
       {!notes.hasFolder && (
         <p className="daily-hint">
-          No <code>{DAILY_DIR}/</code> folder yet. Picking a day creates it.
+          No <code>{DAILY_DIR}/</code> folder yet. The first note you create makes it.
         </p>
       )}
 

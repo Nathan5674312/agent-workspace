@@ -1,6 +1,14 @@
-import { useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { VaultNoteBody } from '../../../shared/ipc.js'
-import { isSaveConflict, parseWikilinks } from './helpers.js'
+import type { WikilinkRef } from './helpers.js'
+import {
+  anchorLine,
+  ensureBlockId,
+  isSaveConflict,
+  lineOfOffset,
+  lineRange,
+  parseWikilinkRefs,
+} from './helpers.js'
 
 /**
  * Plain <textarea> editor for notes.
@@ -21,8 +29,17 @@ export interface EditorProps {
   onConflict: (diskMtime: number, diskText: string) => void
   backlinks: string[]
   onOpenNote: (path: string) => void
-  onOpenWikilink: (name: string) => void
+  onOpenWikilink: (link: WikilinkRef) => void
   discarded: { label: string; text: string } | null
+  /**
+   * Where in the open note to land, from the `#…` of the link that opened it.
+   *
+   * The `nonce` is not decoration. Following the same reference twice is a real
+   * thing to do — you scrolled away and want to go back — and on a bare string
+   * the effect below would not re-run, because neither the note nor the
+   * fragment changed. The nonce is what makes "again" a different value.
+   */
+  anchor: { fragment: string; nonce: number } | null
 }
 
 export function Editor({
@@ -36,9 +53,77 @@ export function Editor({
   onOpenNote,
   onOpenWikilink,
   discarded,
+  anchor,
 }: EditorProps) {
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  /**
+   * One line of feedback for the two block-reference actions, because both can
+   * decline and a control that silently does nothing is the defect this pane
+   * has already been reviewed for once. Not an `error` — neither of these is a
+   * failure, they are answers.
+   */
+  const [notice, setNotice] = useState<string | null>(null)
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+
+  /**
+   * Land on the referenced line: select it, and let the browser scroll to the
+   * selection. Selecting rather than only scrolling is deliberate — it says
+   * WHICH line the reference meant, which a scroll position cannot.
+   *
+   * Depends on `anchor` alone. `text` is deliberately not a dependency: the
+   * user typing must not yank the view back to the block they arrived at, and
+   * by the time this runs after a navigation the buffer is already the new
+   * note's — `openNote` sets the buffer and the anchor in one continuation, so
+   * React renders them together.
+   */
+  useEffect(() => {
+    setNotice(null)
+    if (!anchor) return
+    const line = anchorLine(text, anchor.fragment)
+    if (line === null) {
+      setNotice(`Nothing in this note is marked #${anchor.fragment}.`)
+      return
+    }
+    const textarea = textareaRef.current
+    if (!textarea) return
+    const { start, end } = lineRange(text, line)
+    textarea.focus()
+    textarea.setSelectionRange(start, end)
+  }, [anchor])
+
+  /**
+   * Put `[[This note#^id]]` on the clipboard for the line the caret is on,
+   * marking that line with an id if it has none.
+   *
+   * THIS IS THE FIRST THING IN THE APP THAT WRITES INTO A NOTE'S PROSE, and it
+   * writes it into the BUFFER, not to disk. The marker lands under the same
+   * Save button, the same mtime guard and the same backup as any typed edit —
+   * an id appearing in a file the user never saved would be this feature
+   * editing the vault behind them.
+   */
+  const handleCopyBlockRef = async () => {
+    const textarea = textareaRef.current
+    if (!textarea || !note) return
+    const result = ensureBlockId(text, lineOfOffset(text, textarea.selectionStart))
+    if (!result.ok) {
+      setNotice(result.refusal)
+      return
+    }
+    const link = `[[${note.title}#^${result.id}]]`
+    try {
+      await navigator.clipboard.writeText(link)
+    } catch {
+      setNotice(`Could not reach the clipboard. The reference is ${link}`)
+      return
+    }
+    if (result.text === text) {
+      setNotice(`Copied ${link}`)
+      return
+    }
+    onTextChange(result.text)
+    setNotice(`Copied ${link} — save to keep the marker`)
+  }
 
   const handleSave = async () => {
     if (!note || !isDirty || saving) return
@@ -71,7 +156,7 @@ export function Editor({
     return <div className="vault-editor-empty">No note selected</div>
   }
 
-  const wikilinks = parseWikilinks(text)
+  const wikilinks = parseWikilinkRefs(text)
 
   return (
     <div className="vault-editor">
@@ -87,10 +172,25 @@ export function Editor({
         >
           {saving ? 'Saving…' : 'Save'}
         </button>
+        {/* Secondary to Save on purpose: it is the one thing worth doing when
+            there is something to save, and this must not compete with it. */}
+        <button
+          className="vault-editor-blockref"
+          onClick={() => void handleCopyBlockRef()}
+          title="Copy a [[link#^id]] to the line the caret is on"
+        >
+          Copy block ref
+        </button>
         <span className="vault-editor-status" data-dirty={isDirty} aria-live="polite">
           {isDirty ? 'Unsaved changes' : 'Saved'}
         </span>
       </div>
+
+      {notice && (
+        <div className="vault-editor-notice" aria-live="polite">
+          {notice}
+        </div>
+      )}
 
       {/* Out of the actions row: an error is a banner about the last attempt, not
           a third control sitting beside the button. Inside the flex row it was
@@ -102,6 +202,7 @@ export function Editor({
       )}
 
       <textarea
+        ref={textareaRef}
         className="vault-editor-textarea"
         value={text}
         onChange={(e) => onTextChange(e.currentTarget.value)}
@@ -115,13 +216,26 @@ export function Editor({
             <div className="vault-editor-links-empty">No wikilinks</div>
           ) : (
             <ul className="vault-editor-links-list">
-              {wikilinks.map((name) => (
-                <li key={name} className="vault-editor-link">
+              {wikilinks.map((link) => (
+                /* The fragment is IN the label, not stripped off it. A list
+                   showing three identical "Note" rows for three different
+                   blocks is the same loss the parser used to have, moved into
+                   the view. `target || 'this note'` names the same-note form
+                   rather than rendering a row that starts with `#`. */
+                <li
+                  key={`${link.target} ${link.fragment ?? ''}`}
+                  className="vault-editor-link"
+                >
                   <button
                     className="vault-editor-link-button"
-                    onClick={() => onOpenWikilink(name)}
+                    onClick={() => onOpenWikilink(link)}
                   >
-                    {name}
+                    {link.target || 'this note'}
+                    {link.fragment && (
+                      <span className="vault-editor-link-fragment">
+                        #{link.fragment}
+                      </span>
+                    )}
                   </button>
                 </li>
               ))}
@@ -165,6 +279,7 @@ export function Editor({
 
       <div className="vault-editor-hints">
         <div className="vault-editor-hint">Wikilinks: [[note name]]</div>
+        <div className="vault-editor-hint">Blocks: [[note#heading]] · [[note#^id]]</div>
       </div>
     </div>
   )

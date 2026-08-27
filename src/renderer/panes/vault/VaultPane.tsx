@@ -55,6 +55,7 @@ const VIEW_LABEL: Record<MainView, string> = {
   inbox: 'Inbox',
   roadmap: 'Roadmap',
   canvas: 'Canvas',
+  planner: 'Planner',
 }
 import { ConflictDialog } from './ConflictDialog.js'
 import { SettingsDialog } from './SettingsDialog.js'
@@ -71,6 +72,7 @@ import {
   resolveWikilink,
   sortTree,
   type TreeSort,
+  type WikilinkRef,
 } from './helpers.js'
 import type { VaultNoteBody } from '../../../shared/ipc.js'
 import './split.css'
@@ -253,6 +255,15 @@ export function VaultPane(): React.ReactElement {
   })
   /** A failed open used to be a console-only no-op — invisible to the user. */
   const [openError, setOpenError] = useState<string | null>(null)
+  /**
+   * The `#heading` or `#^block-id` of the link being followed, handed to the
+   * editor to land on. Lives here rather than in the editor because the link is
+   * clicked in one note and consumed in another, and the editor for the second
+   * one has not mounted yet at the moment of the click.
+   */
+  const [anchor, setAnchor] = useState<{ fragment: string; nonce: number } | null>(
+    null,
+  )
 
   const canGoBack = nav.index > 0
   const canGoForward = nav.index >= 0 && nav.index < nav.trail.length - 1
@@ -400,9 +411,32 @@ export function VaultPane(): React.ReactElement {
     }
   }
 
-  const handleOpenWikilink = (name: string) => {
-    const path = resolveWikilink(name, noteIndex)
-    if (path) void openNote(path)
+  /**
+   * Follow a wikilink, including its `#heading` or `#^block-id`.
+   *
+   * TWO HALVES, AND THE SECOND ONLY RUNS IF THE FIRST DID. Resolving the note
+   * is this pane's job because it holds the name index; finding the line is the
+   * editor's, because it holds the text. The anchor is set only after the open
+   * actually happened — `openNote` declines on a conflict dialog, a refused
+   * discard and a failed read, and scrolling a note the user just said no to
+   * would be the editor acting on a navigation that never occurred.
+   *
+   * An EMPTY target means `[[#Heading]]`: a link into the note it is written
+   * in. There is nothing to open, so it goes straight to the anchor.
+   */
+  const handleOpenWikilink = (link: WikilinkRef) => {
+    const jump = () => {
+      if (link.fragment) setAnchor((a) => ({ fragment: link.fragment!, nonce: (a?.nonce ?? 0) + 1 }))
+    }
+    if (!link.target) {
+      jump()
+      return
+    }
+    const path = resolveWikilink(link.target, noteIndex)
+    if (!path) return
+    void openNote(path).then((opened) => {
+      if (opened) jump()
+    })
   }
 
   /**
@@ -771,6 +805,7 @@ export function VaultPane(): React.ReactElement {
       canGoForward={canGoForward}
       onOpenNote={openNote}
       onOpenWikilink={handleOpenWikilink}
+      anchor={anchor}
       discarded={discarded}
       view={v}
       onViewChange={onChange}
@@ -794,7 +829,19 @@ export function VaultPane(): React.ReactElement {
           activeView={view === 'versions' ? 'versions' : activeRibbon}
           onViewChange={(id) => {
             if (id === 'versions') handleViewChange('versions')
-            else setActiveRibbon(id)
+            else {
+              setActiveRibbon(id)
+              /**
+               * The calendar icon is the one ribbon item that opens a MAIN view
+               * as well as its sidebar panel, and that is the merge rather than
+               * an inconsistency. Daily notes used to be a sidebar list, and a
+               * sidebar column can show which days you wrote and nothing about
+               * what is on them. The planner is the month with its contents, so
+               * the icon now means "show me the month" and the sidebar keeps
+               * the compact picker beside it.
+               */
+              if (id === 'calendar') handleViewChange('planner')
+            }
           }}
         />
 
@@ -825,7 +872,26 @@ export function VaultPane(): React.ReactElement {
                reads the same data the explorer draws rather than asking again. */
             <DailyNotesView
               tree={vault.tree}
-              onOpenNote={(path) => void openNote(path)}
+              /**
+               * THE VIEW SWITCH IS NOT OPTIONAL HERE, and it became load-bearing
+               * the moment this icon started opening the planner.
+               *
+               * `openNote` loads the note; it does not show it. That was
+               * survivable while the ribbon left the main area alone — you were
+               * usually already on the editor — but the calendar icon now puts
+               * the planner up, so picking a day loaded the note BEHIND the
+               * calendar and the click read as doing nothing at all. Same
+               * failure the database table and the graph both document, and the
+               * same fix.
+               *
+               * Conditional, because `openNote` resolves false when the open was
+               * refused — a declined discard, a conflict dialog — and switching
+               * anyway would drag the user off the month they were reading on
+               * the strength of a click that did not happen.
+               */
+              onOpenNote={async (path) => {
+                if (await openNote(path)) handleViewChange('editor')
+              }}
               onCreated={vault.reload}
             />
           ) : activeRibbon === 'canvas' ? (

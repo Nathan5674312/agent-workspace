@@ -5,12 +5,14 @@ import { GraphView } from './GraphView.js'
 import { CanvasView } from './CanvasView.js'
 import { isCanvasPath } from '../../../shared/canvas.js'
 import { DatabaseView } from './DatabaseView.js'
+import { PlannerView } from './PlannerView.js'
 import { InboxView } from './InboxView.js'
 import { RoadmapView } from './RoadmapView.js'
 import { VersionsView } from './VersionsView.js'
 import { PaneMenu, PaneMenuItem } from './PaneMenu.js'
 import { BookmarkToggleItem } from './BookmarksView.js'
 import type { VaultNoteMeta, InboxItem } from '../../../shared/notemeta.js'
+import type { WikilinkRef } from './helpers.js'
 import { ArrowLeft, ArrowRight, Ellipsis } from 'lucide-react'
 
 /**
@@ -32,6 +34,7 @@ export type MainView =
   | 'inbox'
   | 'roadmap'
   | 'canvas'
+  | 'planner'
 
 export interface MainCanvasProps {
   note: VaultNoteBody | null
@@ -56,8 +59,10 @@ export interface MainCanvasProps {
    *  discard, or a failed read. Callers must not commit a view change until
    *  this says the note is actually open. */
   onOpenNote: (path: string) => Promise<boolean>
-  onOpenWikilink: (name: string) => void
+  onOpenWikilink: (link: WikilinkRef) => void
   discarded: { label: string; text: string } | null
+  /** Where in the open note to land, from the link that opened it. */
+  anchor: { fragment: string; nonce: number } | null
   onBack: () => void
   onForward: () => void
   canGoBack: boolean
@@ -87,6 +92,7 @@ export function MainCanvas({
   onOpenNote,
   onOpenWikilink,
   discarded,
+  anchor,
   onBack,
   onForward,
   canGoBack,
@@ -250,6 +256,8 @@ export function MainCanvas({
                 (canvasPath?.split('/').pop()?.replace(/\.canvas$/i, '') ?? 'Canvas')
               : view === 'database'
               ? 'Database view'
+              : view === 'planner'
+              ? 'Planner'
               : view === 'inbox'
                 ? 'Inbox'
                 : view === 'roadmap'
@@ -399,6 +407,16 @@ export function MainCanvas({
               return opened
             }}
           />
+        ) : view === 'planner' ? (
+          <PlannerView
+            getNotes={getNotes}
+            onOpenNote={async (path) => {
+              // Same conditional switch the table and the graph use: a refused
+              // open — a declined discard, a conflict dialog — must not drag
+              // the user out of the month they were reading.
+              if (await onOpenNote(path)) onViewChange('editor')
+            }}
+          />
         ) : view === 'database' ? (
           <DatabaseView
             notes={notes}
@@ -427,6 +445,7 @@ export function MainCanvas({
             onOpenNote={onOpenNote}
             onOpenWikilink={onOpenWikilink}
             discarded={discarded}
+            anchor={anchor}
           />
         ) : graphError ? (
           <div className="vault-graph-error">Graph failed: {graphError}</div>

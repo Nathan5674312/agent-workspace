@@ -1,9 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import {
   BookOpen,
-  Calendar,
   ChevronDown,
-  ChevronLeft,
   ChevronRight,
   FileText,
   LayoutGrid,
@@ -20,7 +18,6 @@ import {
 } from 'lucide-react'
 import {
   areaOf,
-  parseYmd,
   monthOf,
   statusTone,
   typeFamily,
@@ -73,20 +70,22 @@ import { SelectMenu } from './SelectMenu.js'
  *
  * They share one row set and one filter deliberately — that is the whole claim
  * of "many views, same rows": Board and Gallery are re-renderings of the same
- * `groups` the table draws, and Calendar is the same rows placed by day. None
- * of them is a second query path.
+ * `groups` the table draws. None of them is a second query path.
+ *
+ * There were four. Calendar moved out to the Planner, where it merged with the
+ * daily notes it could never show — see PlannerView for the argument.
  */
-type ViewMode = 'table' | 'board' | 'calendar' | 'gallery'
+type ViewMode = 'table' | 'board' | 'gallery'
 
 const VIEW_MODES: { key: ViewMode; label: string; Icon: LucideIcon; built: boolean }[] = [
   { key: 'table', label: 'Table', Icon: Table, built: true },
   { key: 'board', label: 'Board', Icon: Columns3, built: true },
   { key: 'gallery', label: 'Gallery', Icon: LayoutGrid, built: true },
-  // Calendar was the last of the four, because it is the only one that is not
-  // just a re-rendering of `groups`: it needs `updated` as a real day, and this
-  // vault's dates are hand-written. `parseYmd` is what made it honest — see
-  // CalendarView for why `new Date()` on that string is not an option.
-  { key: 'calendar', label: 'Calendar', Icon: Calendar, built: true },
+  // Calendar was here and has MOVED, to the Planner — see PlannerView. It was
+  // the only one of the four that was not just a re-rendering of `groups`: a
+  // day's daily note is not a row in this table, it is a file that may not
+  // exist yet, and the useful gesture on an empty day is to write it. That is
+  // an authoring surface, and it was wearing a view's clothes in here.
 ]
 
 type SortKey = 'title' | 'area' | 'type' | 'status' | 'updated' | 'links' | 'backlinks'
@@ -373,184 +372,6 @@ function BoardView({
   )
 }
 
-const WEEKDAYS = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-const MONTH_NAMES = [
-  'January', 'February', 'March', 'April', 'May', 'June',
-  'July', 'August', 'September', 'October', 'November', 'December',
-]
-
-/**
- * Calendar — the same rows, placed on the day their frontmatter claims.
- *
- * THE DATE PROBLEM, which is why this was the last view built and why the
- * switcher carried a "not built yet" note rather than a rough version:
- * `updated` is hand-written and `new Date()` on it lies in two directions — it
- * accepts things that are not dates, and it reads a bare `YYYY-MM-DD` as UTC
- * midnight, which renders as the previous day in any negative-offset timezone.
- * `parseYmd` reads the digits instead and refuses everything else, so a note
- * lands on the day it says or on no day at all.
- *
- * UNDATED NOTES ARE SHOWN, not dropped. Most of this vault has no `updated`,
- * and a calendar that quietly renders 12 of 258 notes would be the most
- * confident lie in the app. They get a labelled list under the grid.
- *
- * Weeks start Monday, matching the ISO convention the vault's own date strings
- * follow.
- */
-function CalendarView({
-  rows,
-  onOpenNote,
-}: {
-  rows: VaultNoteMeta[]
-  onOpenNote: (path: string) => void
-}) {
-  /** path -> day, computed once per row set. */
-  const { byDay, undated, months } = useMemo(() => {
-    const byDay = new Map<string, VaultNoteMeta[]>()
-    const undated: VaultNoteMeta[] = []
-    const months = new Set<string>()
-    for (const n of rows) {
-      const ymd = parseYmd(n.updated)
-      if (!ymd) {
-        undated.push(n)
-        continue
-      }
-      const key = `${ymd.y}-${String(ymd.m).padStart(2, '0')}-${String(ymd.d).padStart(2, '0')}`
-      months.add(key.slice(0, 7))
-      const bucket = byDay.get(key)
-      if (bucket) bucket.push(n)
-      else byDay.set(key, [n])
-    }
-    return { byDay, undated, months: [...months].sort() }
-  }, [rows])
-
-  /**
-   * Opens on the most recent month that HAS notes, not on today. This vault is
-   * mostly historical: landing on an empty current month would look like the
-   * view failed, and the user would have to page backwards to find out it had
-   * not.
-   */
-  const [cursor, setCursor] = useState<string | null>(null)
-  const current = cursor ?? months[months.length - 1] ?? null
-
-  if (!current) {
-    return (
-      <div className="db-empty db-empty--placeholder">
-        <strong>No dated notes.</strong>
-        <span>
-          {rows.length} note{rows.length === 1 ? '' : 's'} match, and none carries an
-          ISO <code>updated:</code> date to place on a calendar.
-        </span>
-      </div>
-    )
-  }
-
-  const [yStr, mStr] = current.split('-')
-  const y = Number(yStr)
-  const m = Number(mStr)
-
-  // Both UTC, so no local-timezone shift can creep into the layout.
-  const firstWeekday = (new Date(Date.UTC(y, m - 1, 1)).getUTCDay() + 6) % 7 // Mon=0
-  const daysInMonth = new Date(Date.UTC(y, m, 0)).getUTCDate()
-
-  const step = (delta: number): void => {
-    const total = y * 12 + (m - 1) + delta
-    const ny = Math.floor(total / 12)
-    const nm = (total % 12) + 1
-    setCursor(`${ny}-${String(nm).padStart(2, '0')}`)
-  }
-
-  const cells: (number | null)[] = [
-    ...Array<null>(firstWeekday).fill(null),
-    ...Array.from({ length: daysInMonth }, (_, i) => i + 1),
-  ]
-
-  return (
-    <div className="db-calendar">
-      <div className="db-cal-head">
-        <button type="button" className="db-cal-nav" onClick={() => step(-1)} aria-label="Previous month">
-          <ChevronLeft size={14} aria-hidden="true" />
-        </button>
-        <span className="db-cal-month">
-          {MONTH_NAMES[m - 1]} {y}
-        </span>
-        <button type="button" className="db-cal-nav" onClick={() => step(1)} aria-label="Next month">
-          <ChevronRight size={14} aria-hidden="true" />
-        </button>
-        {/* Jumping to a month that HAS something beats paging through empties. */}
-        <SelectMenu
-          id="db-cal-jump-menu"
-          label="Jump to a month with notes"
-          className="db-cal-jump"
-          value={current}
-          options={[
-            ...(months.includes(current) ? [] : [{ value: current, label: `${current} (empty)` }]),
-            ...months.map((mo) => ({
-              value: mo,
-              label: `${mo} · ${[...byDay.entries()].filter(([k]) => k.startsWith(mo)).reduce((a, [, v]) => a + v.length, 0)}`,
-            })),
-          ]}
-          onChange={setCursor}
-        />
-      </div>
-
-      <div className="db-cal-grid" role="grid" aria-label={`${MONTH_NAMES[m - 1]} ${y}`}>
-        {WEEKDAYS.map((w) => (
-          <div key={w} className="db-cal-weekday" role="columnheader">
-            {w}
-          </div>
-        ))}
-        {cells.map((day, i) => {
-          if (day === null) return <div key={`blank-${i}`} className="db-cal-cell db-cal-cell--blank" />
-          const key = `${y}-${String(m).padStart(2, '0')}-${String(day).padStart(2, '0')}`
-          const notes = byDay.get(key) ?? []
-          return (
-            <div key={key} className="db-cal-cell" role="gridcell">
-              <span className="db-cal-day">{day}</span>
-              {notes.map((n) => (
-                <button
-                  key={n.path}
-                  type="button"
-                  className="db-cal-note"
-                  title={n.path}
-                  onClick={() => onOpenNote(n.path)}
-                >
-                  {n.title}
-                </button>
-              ))}
-            </div>
-          )
-        })}
-      </div>
-
-      {undated.length > 0 && (
-        <div className="db-cal-undated">
-          <h3 className="db-cal-undated-title">
-            {undated.length} without a usable date
-          </h3>
-          <p className="db-cal-undated-note">
-            No <code>updated:</code> field, or one a calendar cannot place. They are
-            counted in the toolbar and are not on the grid.
-          </p>
-          <div className="db-cal-undated-list">
-            {undated.map((n) => (
-              <button
-                key={n.path}
-                type="button"
-                className="db-cal-note"
-                title={n.path}
-                onClick={() => onOpenNote(n.path)}
-              >
-                {n.title}
-              </button>
-            ))}
-          </div>
-        </div>
-      )}
-    </div>
-  )
-}
-
 /** Gallery — the same groups as a card grid, stacked rather than side by side. */
 function GalleryView({
   groups,
@@ -810,15 +631,6 @@ export function DatabaseView({
         <GalleryView
           groups={groups}
           grouped={groupBy !== 'none'}
-          onOpenNote={onOpenNote}
-        />
-      ) : mode === 'calendar' ? (
-        /* The one view that ignores `groupBy`: a calendar IS a grouping, by day.
-           It still honours the search and the orphans filter, which is what
-           "same rows, many views" actually promises. Deduped by path because
-           grouping by tag legitimately puts one note in several groups. */
-        <CalendarView
-          rows={[...new Map(groups.flatMap((g) => g.rows).map((n) => [n.path, n])).values()]}
           onOpenNote={onOpenNote}
         />
       ) : (

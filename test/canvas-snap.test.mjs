@@ -161,10 +161,41 @@ test('the primitive lets the grid win when the page edge is further', () => {
   assert.equal(off, -4)
 })
 
-test('groups are never a snap target', () => {
-  // A group is a region drawn AROUND pages; its edges are wherever it was sized
-  // to and are not a line anything should be flush with.
-  const move = VIEW.slice(VIEW.indexOf('if (e.shiftKey && doc) {'), VIEW.indexOf('const snapX ='))
+test('a group is a snap target as its interior, never as its outline', () => {
+  // The rule this replaces was "groups are never a target", and half of it
+  // survives: a group's OUTER edge is wherever someone dragged the handle to,
+  // so nothing should be flush with it. The other half was wrong — offering
+  // nothing at all is what left a page inside a group with no line to take,
+  // which is why a group looked like a rectangle with its contents scattered.
+  const move = VIEW.slice(VIEW.indexOf('const held = drag.current'), VIEW.indexOf('const snapX ='))
   assert.ok(move.length > 0, 'the drag snap no longer has the shape this test reads')
-  assert.match(move, /n\.type !== 'group'/, 'a group can be aligned against')
+  assert.match(
+    move,
+    /n\.type === 'group' \? groupInterior\(n\) : n/,
+    'a group no longer contributes its interior to the snap',
+  )
+  assert.doesNotMatch(move, /n\.type !== 'group'/, 'groups are being dropped from the snap again')
+})
+
+test('the interior is the group inset by the padding a group is built from', () => {
+  // Pinned to GROUP_PAD rather than a literal: the inset and the room a NEW
+  // group leaves around its pages are the same measurement, and two copies of
+  // it is how a page snaps to a line the group was not drawn with.
+  assert.match(
+    VIEW,
+    /x: g\.x \+ GROUP_PAD/,
+    'the interior no longer starts at the padding',
+  )
+  assert.match(
+    VIEW,
+    /width: Math\.max\(0, g\.width - GROUP_PAD \* 2\)/,
+    'the interior is no longer inset on both sides',
+  )
+})
+
+test('aligning is the default and Shift is the escape hatch', () => {
+  // Inverted deliberately. Held behind Shift, the snap was a feature nobody
+  // invoked, so every drag was a free drag and the board read as loose pages.
+  const move = VIEW.slice(VIEW.indexOf('const held = drag.current'), VIEW.indexOf('const snapX ='))
+  assert.match(move, /if \(doc && !e\.shiftKey\) \{/, 'the drag snap is gated behind Shift again')
 })

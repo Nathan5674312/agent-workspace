@@ -327,3 +327,58 @@ test('adding a link to every real note leaves it parseable and one link longer',
   assert.ok(touched > 100, `only ${touched} notes read`)
   console.log(`      ${touched} real notes · ${grewSection} got a new section · ${touched - grewSection} appended into one`)
 })
+
+test('a section whose heading is the LAST line keeps the file intact', () => {
+  // The trailing '' from split('\n') is an EOF MARKER, not a blank line.
+  // Reading it as one inserted past the end of the file: the final newline was
+  // stripped, and a CRLF file got a bare LF plus a dangling CR. A real note has
+  // this shape -- Fate/Live Placement Dogfood 2026-08-09.md ends at '## Links'.
+  const lf = '# A\n\nBody.\n\n## Links\n'
+  assert.equal(addWikilink(lf, '[[One]]'), '# A\n\nBody.\n\n## Links\n\n- [[One]]\n')
+
+  const crlf = '# A\r\n\r\nBody.\r\n\r\n## Related\r\n'
+  const outCrlf = addWikilink(crlf, '[[One]]')
+  assert.equal(outCrlf, '# A\r\n\r\nBody.\r\n\r\n## Related\r\n\r\n- [[One]]\r\n')
+  assert.doesNotMatch(outCrlf, /[^\r]\n/, 'a bare LF was introduced')
+  assert.doesNotMatch(outCrlf, /\r[^\n]/, 'a dangling CR was introduced')
+
+  // No trailing newline in, none invented out.
+  assert.equal(addWikilink('# A\n\n## Links', '[[One]]'), '# A\n\n## Links\n\n- [[One]]')
+})
+
+test('no real note loses its final newline or gains a mixed ending', { skip: !existsSync(VAULT) }, () => {
+  // The assertion whose absence let the bug above ship green. The other corpus
+  // test checks link COUNT and line survival; neither notices a tail.
+  const SKIP = new Set(['.git', '.obsidian', '.trash', '.backups', 'node_modules', '__pycache__'])
+  const files = []
+  const walk = (d) => {
+    for (const e of readdirSync(d, { withFileTypes: true })) {
+      if (SKIP.has(e.name)) continue
+      const p = join(d, e.name)
+      if (e.isDirectory()) walk(p)
+      else if (e.name.toLowerCase().endsWith('.md')) files.push(p)
+    }
+  }
+  walk(VAULT)
+  let checked = 0
+  let crlfNotes = 0
+  for (const abs of files) {
+    if (statSync(abs).size > 2_000_000) continue
+    let text
+    try {
+      text = readFileSync(abs, 'utf-8')
+    } catch {
+      continue
+    }
+    const out = addWikilink(text, '[[__tail_probe__]]')
+    checked++
+    if (text.endsWith('\n')) assert.ok(out.endsWith('\n'), `${abs} lost its final newline`)
+    if (text.includes('\r\n') && !/[^\r]\n/.test(text)) {
+      crlfNotes++
+      assert.doesNotMatch(out, /[^\r]\n/, `${abs} was CRLF and gained a bare LF`)
+      assert.doesNotMatch(out, /\r[^\n]/, `${abs} gained a dangling CR`)
+    }
+  }
+  assert.ok(checked > 100, `only ${checked} notes checked`)
+  console.log(`      ${checked} real notes, ${crlfNotes} of them CRLF — tails intact`)
+})

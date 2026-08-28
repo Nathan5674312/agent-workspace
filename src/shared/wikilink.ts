@@ -296,6 +296,28 @@ export function addWikilink(text: string, link: string): string {
   const cr = eol === '\r\n' ? '\r' : ''
   const lines = body.split('\n')
 
+  /**
+   * THE TRAILING '' IS AN EOF MARKER, NOT A BLANK LINE.
+   *
+   * `split('\n')` leaves one whenever the body ends with a newline, and the
+   * empty-section branch below used to read it as the blank line that follows a
+   * heading — so it inserted PAST the end of the file. That stripped the final
+   * newline (`'## Links\n'` came back as `'## Links\n\n- [[One]]'`, no trailing
+   * newline, hit on a real note) and on a CRLF file emitted a bare LF and left
+   * a dangling CR, producing mixed line endings in someone's note. It broke
+   * this function's own Rule 4 and the suite missed it because the CRLF test
+   * only covered the append paths.
+   *
+   * Held aside for the whole edit and put back by `rebuild`, so every branch
+   * below reasons about real lines only and none of them can reach the marker.
+   */
+  const endsWithNewline = lines.length > 1 && lines[lines.length - 1] === ''
+  if (endsWithNewline) lines.pop()
+  const rebuild = () => {
+    if (endsWithNewline) lines.push('')
+    return text.slice(0, start) + lines.join('\n')
+  }
+
   // The LAST related heading, not the first. A note with two is malformed, but
   // the one a reader would append to is the one nearest the bottom.
   let head = -1
@@ -328,12 +350,17 @@ export function addWikilink(text: string, link: string): string {
   }
 
   if (linkLines.length === 0) {
-    // A section with a heading and no links yet. Insert after the heading and
-    // the blank line that conventionally follows it, so the result reads the
-    // way a hand-written one does.
-    const at = head + 1 < stop && lines[head + 1].trim() === '' ? head + 2 : head + 1
-    lines.splice(at, 0, `${NEW_BULLET}${link}${cr}`)
-    return text.slice(0, start) + lines.join('\n')
+    /**
+     * A section with a heading and no links yet. The result has to read the way
+     * a hand-written one does — heading, blank, link — so when the heading is
+     * the last line in the file the blank line is WRITTEN rather than borrowed
+     * from the EOF marker, which is what the old code did and is what cost the
+     * file its final newline.
+     */
+    const blankAlready = head + 1 < stop && lines[head + 1].trim() === ''
+    if (blankAlready) lines.splice(head + 2, 0, `${NEW_BULLET}${link}${cr}`)
+    else lines.splice(head + 1, 0, cr, `${NEW_BULLET}${link}${cr}`)
+    return rebuild()
   }
 
   const last = linkLines[linkLines.length - 1]
@@ -361,5 +388,5 @@ export function addWikilink(text: string, link: string): string {
     // matching the bare shape, touching nothing that was already written.
     lines.splice(last + 1, 0, `${link}${cr}`)
   }
-  return text.slice(0, start) + lines.join('\n')
+  return rebuild()
 }

@@ -1855,15 +1855,25 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       /**
        * PAGES LINE UP WITH THEIR NEIGHBOURS BY DEFAULT, per axis.
        *
-       * This used to be held behind Shift, and the honest verdict on that is
-       * that a snap nobody knows to ask for is a snap nobody gets: the board
-       * read as pages floating loose, because in practice every drag was a free
-       * drag. The alignment engine was already good — edges, centres, equal
-       * spacing, the dot grid, all of it drawn while you drag — it was just
-       * never running. So the modifier is INVERTED: aligning is what dragging
-       * does, and Shift is the escape hatch for the deliberate off-grid
-       * placement, which is the rarer intention and the one worth having to ask
-       * for. Same gesture as every design tool that got here first.
+       * NO MODIFIER AT ALL, and that is the second correction to this line.
+       *
+       * It began held behind Shift, which was wrong for the obvious reason: a
+       * snap nobody knows to ask for is a snap nobody gets, so in practice
+       * every drag was a free drag and the board read as pages floating loose.
+       * The alignment engine was already good — edges, centres, equal spacing,
+       * the dot grid, all drawn as you go — it was simply never running.
+       *
+       * Inverting it made Shift the escape hatch, and THAT was wrong too,
+       * because Shift is already taken: it is the additive-selection modifier
+       * a few lines above. Shift-clicking to build a multi-selection and then
+       * dragging it silently turned alignment off — so the one gesture most
+       * likely to be arranging several things at once was the one gesture that
+       * would not help you arrange them. Reported as groups not locking into
+       * anything appealing when shift-clicked, and that is exactly what it was.
+       *
+       * So there is no modifier. Dragging aligns, always. Nothing here needs an
+       * off switch: the snap only pulls inside SNAP_RANGE, so anywhere further
+       * than that is already free placement.
        *
        * Each axis snaps independently, which is the point: a page can lock to
        * one page's left edge while sitting anywhere vertically. Locking both or
@@ -1879,7 +1889,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
        * a group with nothing to line up against, which is most of why a group
        * looked like a rectangle with its contents scattered in it.
        */
-      if (doc && !e.shiftKey) {
+      if (doc) {
         const others: GuideBox[] = doc.nodes
           .filter((n) => n !== held.node && !held.others.some((o) => o.node === n))
           .map((n) => (n.type === 'group' ? groupInterior(n) : n))
@@ -1926,11 +1936,6 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
         x += snap.dx
         y += snap.dy
         showGuides(snap.guides)
-      } else if (guideKey.current !== '') {
-        // Shift taken UP mid-drag, which now means alignment was switched off
-        // rather than on. The lines have to go with it either way, or they sit
-        // there claiming a relationship that is no longer being enforced.
-        showGuides([])
       }
       /**
        * The snap is applied as a DELTA to the rest of the selection, not

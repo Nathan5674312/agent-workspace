@@ -984,6 +984,34 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
    type, so blank was the dominant visual. */
 .db-blank { color: var(--label-quaternary); opacity: 0.5; }
 
+/* The editable Type and Status cells.
+
+   INVISIBLE UNTIL HOVERED, on purpose. 258 rows x 2 columns is 516 of these,
+   and giving every one a visible affordance turns a table you read into a form
+   you fill in. The chip inside is the content; this is only the hit area around
+   it, so it inherits the row's own layout and adds nothing at rest. */
+.db-cell-edit {
+  display: block; width: 100%; padding: 1px var(--space-1); margin: -1px calc(var(--space-1) * -1);
+  border-radius: var(--radius-sm); background: none; text-align: left;
+}
+/* The row is itself hoverable, so the cell has to be a step brighter than the
+   row to read as its own target rather than as part of it. */
+.db-row:hover .db-cell-edit:hover { background: var(--fill-selected); }
+.db-cell-edit:active { transform: none; }
+/* A failed write leaves the OLD value on screen, which is honest and silent --
+   the border and the marker are what stop it being only silent. */
+.db-cell-error { box-shadow: inset 0 0 0 1px var(--red, #d9503f); }
+.db-cell-warn { margin-left: var(--space-1); color: var(--red, #d9503f); font-weight: var(--weight-semibold); }
+
+/* Sized to the cell, not to the global input rule, so opening an editor does
+   not change the row height and shove the rest of the table down a line. */
+.db-cell-input {
+  width: 100%; padding: 0 var(--space-1); border-radius: var(--radius-sm);
+  background: var(--bg-elevated, var(--fill-selected)); color: var(--label);
+  font-size: var(--text-xs); font-family: inherit;
+  box-shadow: inset 0 0 0 1px var(--separator);
+}
+
 /* Values are chips because Type and Status are enumerations -- the shape says
    "one of a set" before the word is read. Truncation is deliberate: one status
    in this vault is a full sentence, and a column must not resize itself around

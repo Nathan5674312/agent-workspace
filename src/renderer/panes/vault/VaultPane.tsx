@@ -75,6 +75,7 @@ import {
   type WikilinkRef,
 } from './helpers.js'
 import type { VaultNoteBody } from '../../../shared/ipc.js'
+import { setFrontmatter } from '../../../shared/notemeta.js'
 import './split.css'
 
 export function VaultPane(): React.ReactElement {
@@ -517,6 +518,64 @@ export function VaultPane(): React.ReactElement {
     return true
   }
 
+  /**
+   * Write one frontmatter property back into a note from the database table.
+   *
+   * THE POINT OF THE FEATURE: the table is a lens, not a second store. Editing
+   * `status` in a row has to end up as `status:` in that note's own Markdown,
+   * or the app has three views of three different truths and the Markdown is
+   * the one that loses.
+   *
+   * Routed through `vault.saveNote` for the same reason the restore above is:
+   * it is the only write path that keeps a pre-edit copy in `.backups/` and
+   * runs the lost-update guard. DatabaseView.tsx used to argue this could not
+   * be built because "a table cell has nowhere to show" a SaveConflict. That
+   * was the wrong half of the problem — <VersionsView> already reports one
+   * inline without opening the dialog, and the cell now does the same. Nothing
+   * about the guard needed weakening to make a cell editable.
+   *
+   * The mtime handed to save() is the one from THIS read, moments earlier, not
+   * a stamp cached when the table was drawn. The table is a long-lived view
+   * over hundreds of notes and its `mtime` column can be minutes stale, so
+   * using it would raise a conflict on almost every edit and teach the user to
+   * ignore the one that mattered. Read, patch, write, with the guard covering
+   * the window that is actually ours.
+   *
+   * REFUSED, not merged, when the note is open in the editor with unsaved
+   * edits. Both texts are legitimate and this cannot know which the user meant;
+   * writing the file would strand the buffer on a stale mtime, and writing the
+   * buffer would silently discard whatever they had typed. The error names the
+   * note, because the row being edited is usually not the tab in front of them.
+   */
+  const handleSetProperty = async (path: string, key: string, value: string): Promise<void> => {
+    const openHere = selectedNote?.path === path
+    if (openHere && isDirty) {
+      throw new Error(
+        `"${selectedNote!.title}" is open in the editor with unsaved edits. Save or discard them first.`,
+      )
+    }
+    const note = await vault.readNote(path)
+    const next = setFrontmatter(note.text, key, value)
+    // Setting a property to what it already says is not a write. Without this
+    // every re-commit of an unchanged cell would burn a backup copy.
+    if (next === note.text) return
+    const saved = await vault.saveNote(path, next, note.mtime)
+    /**
+     * Keep the editor honest when it is showing the note that just changed.
+     *
+     * Only reachable when the buffer is CLEAN — the branch above refused
+     * otherwise — so there is nothing of the user's to lose here. Leaving it
+     * alone instead would show the old frontmatter over a file that no longer
+     * says that, and the next Save would quietly undo the property edit.
+     */
+    if (openHere) {
+      setSelectedNote((prev) =>
+        prev && prev.path === path ? { ...prev, mtime: saved.mtime, text: next } : prev,
+      )
+      setBuffer(next)
+    }
+  }
+
   const handleSave = async (text: string, mtime: number) => {
     // Pin the note this save belongs to. `selectedNote` is captured from the
     // render that produced this closure, and a save is a round-trip to the
@@ -839,6 +898,7 @@ export function VaultPane(): React.ReactElement {
       onSave={handleSave}
       onConflict={handleConflict}
       onRestore={handleRestore}
+      onSetProperty={handleSetProperty}
       getGraph={vault.getGraph}
       getNotes={vault.getNotes}
       getInbox={vault.getInbox}

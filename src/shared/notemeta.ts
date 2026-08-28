@@ -269,9 +269,120 @@ export function parseFrontmatter(text: string): Record<string, string> {
   for (const line of text.slice(3, end).split('\n')) {
     if (!line.includes(':') || /^[\s\-#]/.test(line)) continue
     const cut = line.indexOf(':')
-    fm[line.slice(0, cut).trim()] = line.slice(cut + 1).trim().replace(/^"|"$/g, '')
+    fm[line.slice(0, cut).trim()] = unquote(line.slice(cut + 1).trim())
   }
   return fm
+}
+
+/**
+ * Strip the quotes off a double-quoted scalar, and UNESCAPE what is inside.
+ *
+ * This used to be `.replace(/^"|"$/g, '')`, which strips but does not unescape,
+ * so `title: "My \"Thing\""` read back as `My \"Thing\"` — with the backslashes
+ * still in it. Latent for as long as nothing wrote these files, and no longer
+ * latent now that `setFrontmatter` does: the writer has to quote a value that
+ * would otherwise parse as YAML, and a writer whose output this could not read
+ * back is a table showing one thing while the file says another.
+ *
+ * `JSON.parse` is the whole implementation because a YAML double-quoted scalar
+ * and a JSON string agree on the escapes that occur in practice. Anything it
+ * refuses falls back to the old bare strip, so the scruffiest hand-written line
+ * in the vault still yields a string rather than throwing.
+ */
+function unquote(v: string): string {
+  if (v.length > 1 && v.startsWith('"') && v.endsWith('"')) {
+    try {
+      const parsed: unknown = JSON.parse(v)
+      if (typeof parsed === 'string') return parsed
+    } catch {
+      /* not JSON-shaped — fall through to the bare strip below */
+    }
+  }
+  return v.replace(/^"|"$/g, '')
+}
+
+/**
+ * WRITE one frontmatter key back into a note, leaving everything else byte for
+ * byte as it was.
+ *
+ * This is the inverse of `parseFrontmatter` and it MUST agree with it about
+ * what a key line is, or a value the table wrote would not be a value the table
+ * reads back. Same rule, stated once here and once there: a line that contains
+ * a `:` and does not start with whitespace, `-` or `#`. That excludes list
+ * items, comments, and the indented continuation of a block scalar — none of
+ * which this may touch.
+ *
+ * An empty `value` DELETES the key rather than writing a blank one. `status:`
+ * with nothing after it parses back as `''`, which every reader in this app
+ * already treats as absent, so the line would be litter that means nothing.
+ * Clearing a property in the table is how a key gets removed.
+ *
+ * Not a YAML library, and deliberately not. The file is never re-emitted, so a
+ * note whose frontmatter this cannot fully model still round-trips untouched
+ * apart from the single line being changed. A real serialiser would rewrite
+ * comments, key order, quoting style and block scalars across 200-odd notes it
+ * was never asked to touch, and the diff would be unreadable.
+ *
+ * ponytail: single scalar keys only. `tags:` is a list and stays read-only —
+ * both the inline `[a, b]` form and a `- ` block exist in this vault, and
+ * picking one to write would silently rewrite the other. Tags get their own
+ * editor when they need one.
+ */
+export function setFrontmatter(text: string, key: string, value: string): string {
+  // A newline inside a scalar ends the line and turns the rest of the value
+  // into a second, bogus key. Every caller is a single-line input, so this is a
+  // guard against paste, not a feature.
+  const v = value.replace(/[\r\n]+/g, ' ').trim()
+  const isKey = (line: string) =>
+    line.includes(':') &&
+    !/^[\s\-#]/.test(line) &&
+    line.slice(0, line.indexOf(':')).trim() === key
+
+  if (!text.startsWith('---')) {
+    // Nothing to clear, and no reason to grow a block onto a note just to say a
+    // property is absent — which is what it already is.
+    if (!v) return text
+    const eol = text.includes('\r\n') ? '\r\n' : '\n'
+    return `---${eol}${key}: ${scalar(v)}${eol}---${eol}${eol}${text}`
+  }
+  const end = text.indexOf('\n---', 3)
+  // An opening `---` with no closing one is not frontmatter — it is a
+  // horizontal rule, or a block someone is halfway through typing. Writing into
+  // it would invent a boundary the file does not have.
+  if (end === -1) return text
+
+  const block = text.slice(3, end)
+  const rest = text.slice(end)
+  // Line endings are matched, not normalised: a CRLF file stays CRLF, and a
+  // mixed one is not "corrected" on the lines this was not asked to touch.
+  const cr = block.includes('\r\n') || rest.startsWith('\r\n') ? '\r' : ''
+  const lines = block.split('\n')
+
+  const at = lines.findIndex(isKey)
+  if (at !== -1) {
+    if (!v) lines.splice(at, 1)
+    else lines[at] = `${key}: ${scalar(v)}${cr}`
+  } else {
+    if (!v) return text
+    // Appended at the END of the block, not the top. These notes open with
+    // `title` and `type`, which is the order a reader expects to find them in,
+    // and inserting above that would reshuffle every note the table touches.
+    lines.push(`${key}: ${scalar(v)}${cr}`)
+  }
+  return `---${lines.join('\n')}${rest}`
+}
+
+/**
+ * Quote only when a bare scalar would parse back as something else.
+ *
+ * Bare wherever possible, because these notes are read by a human in Obsidian:
+ * `status: active` is what the other 200 notes say, and quoting it for safety
+ * would make the one note the table touched look machine-written.
+ * `JSON.stringify` is the double-quoted YAML form for ordinary text, and it is
+ * exactly what `parseFrontmatter` strips back off.
+ */
+function scalar(v: string): string {
+  return /^[>|&*!%@`'"[{]|:\s|\s#/.test(v) ? JSON.stringify(v) : v
 }
 
 /** The body after the frontmatter block, or the whole text when there is none. */

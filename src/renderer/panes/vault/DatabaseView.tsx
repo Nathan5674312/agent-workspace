@@ -28,6 +28,7 @@ import {
 import { facets, facetKeys, neighbourhoods } from '../../../shared/facets.js'
 import type { VaultGraph } from '../../../shared/ipc.js'
 import { SelectMenu } from './SelectMenu.js'
+import { isSaveConflict } from './helpers.js'
 
 /**
  * The database view — the Notion half of the app.
@@ -59,11 +60,183 @@ import { SelectMenu } from './SelectMenu.js'
  * frontmatter VALUE in 1 note of 280, against 653 resolved body edges. There
  * is no data for that feature to display.
  *
- * Status is read-only here on purpose. Making a cell editable means writing
+ * ~~Status is read-only here on purpose. Making a cell editable means writing
  * frontmatter back into the file, and the save path owns a lost-update guard
  * (`SaveConflict`) that a table cell has nowhere to show. That is a feature,
- * not a missing afternoon.
+ * not a missing afternoon.~~
+ *
+ * **Superseded 2026-08-27. Type and Status are editable, and they write into
+ * the note's own Markdown.** The argument above was wrong in its second half.
+ * The guard is real and stayed exactly as it was — nothing about it needed
+ * weakening — but "nowhere to show it" was never true: <VersionsView> already
+ * reports a SaveConflict inline without opening the conflict dialog, which is
+ * about the edit buffer and has nothing to offer a table cell. The cell does
+ * the same, and marks itself. See `PropertyCell` below and `handleSetProperty`
+ * in VaultPane.
+ *
+ * WHY IT CHANGED, which is not "someone had an afternoon": a reader put the
+ * case better than the original comment did — the appealing thing is not three
+ * powerful views, it is changing view without changing where the truth lives.
+ * A table that can only read is a fourth place to look; a table that writes
+ * `status:` into the file is the same note seen side-on. The Markdown stays the
+ * only store. Nothing is cached, mirrored, or kept in a database of our own.
+ *
+ * Still read-only, and each for a reason rather than a backlog: Area is derived
+ * from the folder, so moving the note IS the edit; Links and Backlinks are the
+ * wikilinks in the body; Updated is a stamp; Tags is a list, and `setFrontmatter`
+ * writes scalars only because this vault contains both list spellings and
+ * picking one would rewrite the other.
  */
+
+/**
+ * ONE EDITABLE PROPERTY CELL — the write half of "many views, same rows".
+ *
+ * This is the control the file header used to say would not be built, and the
+ * argument against it was: the save path owns a lost-update guard that a table
+ * cell has nowhere to show. That was the wrong half of the problem. <VersionsView>
+ * already reports a SaveConflict inline without opening the conflict dialog,
+ * which is about the edit buffer and has nothing to offer a cell. So the cell
+ * does the same, and the guard is untouched — see `handleSetProperty`.
+ *
+ * READ MODE IS NOT AN INPUT. A grid of 258 boxes reads as a form, and this is a
+ * table you mostly look at. It stays a chip until you click it, which is also
+ * what keeps the column scannable at a glance.
+ *
+ * <datalist> rather than a <select>, deliberately: `status` is a convention in
+ * these notes, not an enum — nothing declares the allowed values and the vault
+ * has whatever people typed. A select could only offer what already exists,
+ * which would make the first note to use a new status unwritable. The list is
+ * the existing values as suggestions; the field still takes anything.
+ *
+ * ENTER COMMITS AND NOTHING ELSE DOES. Not blur — `review-s2-vault-pane`
+ * hard-fails on `onBlur=` anywhere in this pane, and that guard is right: every
+ * write in this app is something the user asked for at the moment they asked
+ * for it. A cell that saved because focus moved would be the first write here
+ * that nobody pressed anything to cause, and the test file's own note on the
+ * subject says the repair for a guard in the way is to narrow it to what it was
+ * always about, never to widen an exception through it. Escape cancels.
+ *
+ * Which cell is open is owned by the TABLE, not by each cell, and that is what
+ * replaces blur: opening one closes the other, so a click on a second cell
+ * abandons the first instead of leaving two inputs open across the grid.
+ */
+function PropertyCell({
+  value,
+  options,
+  listId,
+  label,
+  editing,
+  onOpen,
+  onClose,
+  onCommit,
+  children,
+}: {
+  value: string
+  options: string[]
+  listId: string
+  label: string
+  editing: boolean
+  onOpen: () => void
+  onClose: () => void
+  onCommit: (next: string) => Promise<void>
+  children: React.ReactNode
+}) {
+  // UNCONTROLLED on purpose. The field is read off the element at commit
+  // time -- see the Enter handler -- so a draft in state would be a second copy
+  // that has to be kept in step for no gain, and re-rendering 258 rows on every
+  // keystroke in one of them is a real cost in a table this size.
+  const [busy, setBusy] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+
+  const commit = async (next: string) => {
+    onClose()
+    if (next === value) return
+    setBusy(true)
+    setError(null)
+    try {
+      await onCommit(next)
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      /**
+       * The conflict gets a sentence a person can act on; anything else is
+       * reported as itself.
+       *
+       * Both stay ON THE CELL until the next attempt rather than clearing on a
+       * timer. The write did not happen, the old value is still on screen, and
+       * a message that disappears leaves a row that looks like it was edited
+       * and was not.
+       */
+      setError(
+        isSaveConflict(message)
+          ? 'Changed on disk since the table loaded. Reopen the table and try again.'
+          : message,
+      )
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  if (editing) {
+    return (
+      <>
+        <input
+          className="db-cell-input"
+          list={listId}
+          defaultValue={value}
+          autoFocus
+          aria-label={label}
+          // Says what commits, in the one place the question comes up. Enter is
+          // not guessable when every other table on earth saves on blur.
+          placeholder="Enter to save"
+          // The row opens the note on click, and the table sorts on the header.
+          // Neither should fire because someone clicked into a text field.
+          onClick={(e) => e.stopPropagation()}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              // Read off the ELEMENT rather than from state: picking a
+              // <datalist> suggestion with the keyboard and pressing Enter in
+              // the same beat commits before a change event has been seen.
+              void commit(e.currentTarget.value)
+            } else if (e.key === 'Escape') {
+              e.preventDefault()
+              onClose()
+            }
+            // Arrow keys and Escape belong to the field while it is open.
+            e.stopPropagation()
+          }}
+        />
+        <datalist id={listId}>
+          {options.map((o) => (
+            <option key={o} value={o} />
+          ))}
+        </datalist>
+      </>
+    )
+  }
+  return (
+    <button
+      type="button"
+      className={`db-cell-edit ${error ? 'db-cell-error' : ''}`}
+      // Not `disabled` while busy: a disabled button loses focus, which throws
+      // the keyboard user out of the table mid-edit. It just stops responding.
+      aria-busy={busy || undefined}
+      // The full message on hover, since the cell is too narrow to show it.
+      title={error ?? `${label}: click to edit`}
+      onClick={(e) => {
+        e.stopPropagation()
+        if (!busy) onOpen()
+      }}
+    >
+      {children}
+      {error && (
+        <span className="db-cell-warn" role="alert">
+          !
+        </span>
+      )}
+    </button>
+  )
+}
 
 /**
  * The four view shapes on the roadmap. All four are built now.
@@ -417,6 +590,14 @@ export interface DatabaseViewProps {
   loading: boolean
   error: string | null
   onOpenNote: (path: string) => void
+  /**
+   * Write one property back into the note's own Markdown.
+   *
+   * REJECTS rather than resolving on failure, and the cell needs it that way:
+   * a SaveConflict has to reach the control that asked for the write, because
+   * that is the only place on screen that can say which row did not change.
+   */
+  onSetProperty: (path: string, key: string, value: string) => Promise<void>
 }
 
 export function DatabaseView({
@@ -425,6 +606,7 @@ export function DatabaseView({
   loading,
   error,
   onOpenNote,
+  onSetProperty,
 }: DatabaseViewProps) {
   const [query, setQuery] = useState('')
   const [groupBy, setGroupBy] = useState<GroupKey>('area')
@@ -451,6 +633,43 @@ export function DatabaseView({
    * the graph on every render that changes either, which is what lets them
    * never be stale: move a note and its facets moved with it.
    */
+  /**
+   * The suggestions the two editable columns offer, read off the vault itself.
+   *
+   * Not a declared enum anywhere, because there is not one: `status` and `type`
+   * are a convention these notes follow, so the honest list of allowed values
+   * is the list of values in use. That also makes the suggestions self-healing
+   * — rename a status across the vault and the old one stops being offered
+   * without anything needing to be told.
+   *
+   * Sorted, and off the FULL note set rather than the filtered rows: a filter
+   * is what you are looking at, not what the vault permits, and offering fewer
+   * values because a search box is narrowed would be a trap.
+   */
+  /**
+   * WHICH cell is open for editing, as the path and the key joined by a NUL, or null for none.
+   *
+   * One piece of state for the whole table rather than one per cell, and that
+   * is what stands in for the blur handler this pane is not allowed to have:
+   * opening a second cell closes the first by construction, so there can never
+   * be two inputs open across 258 rows. A per-cell boolean could not do that
+   * without the cells knowing about each other.
+   *
+   * NUL as the separator because a vault path can contain anything else, and
+   * two cells resolving to one key would let an edit open on the wrong row.
+   */
+  const [editingCell, setEditingCell] = useState<string | null>(null)
+
+  const [typeOptions, statusOptions] = useMemo(() => {
+    const types = new Set<string>()
+    const statuses = new Set<string>()
+    for (const n of notes ?? []) {
+      if (n.type) types.add(n.type)
+      if (n.status) statuses.add(n.status)
+    }
+    return [[...types].sort(), [...statuses].sort()]
+  }, [notes])
+
   const facetIndex = useMemo(() => {
     const empty = new Map<string, { keys: string[]; why: string }>()
     if (!notes) return empty
@@ -736,24 +955,52 @@ export function DatabaseView({
                           chips inside "Business". It stays for sorting and for
                           the ungrouped view, dimmed to what it is worth. */}
                       <td className="db-col-area">{areaOf(n)}</td>
+                      {/* Type and Status are the two EDITABLE columns, and the
+                          only two, because they are the only plain scalars a
+                          person maintains by hand. Area is derived from the
+                          folder (moving the note is the edit), Links and
+                          Backlinks are the wikilinks in the body, Updated is a
+                          stamp, and Tags is a list — see `setFrontmatter`. */}
                       <td className="db-col-type">
                         {/* 190 of 258 notes have no type. A truly empty cell
                             reads as a rendering failure; an em-dash reads as an
                             answer. */}
-                        {n.type ? (
-                          <TypeChip type={n.type} />
-                        ) : (
-                          <span className="db-blank">{NONE}</span>
-                        )}
+                        <PropertyCell
+                          value={n.type}
+                          options={typeOptions}
+                          listId="db-types"
+                          label="Type"
+                          editing={editingCell === `${n.path}\0type`}
+                          onOpen={() => setEditingCell(`${n.path}\0type`)}
+                          onClose={() => setEditingCell(null)}
+                          onCommit={(next) => onSetProperty(n.path, 'type', next)}
+                        >
+                          {n.type ? (
+                            <TypeChip type={n.type} />
+                          ) : (
+                            <span className="db-blank">{NONE}</span>
+                          )}
+                        </PropertyCell>
                       </td>
                       <td className="db-col-status">
-                        {n.status ? (
-                          <span className={`db-tag db-tone-${statusTone(n.status)}`}>
-                            {n.status}
-                          </span>
-                        ) : (
-                          <span className="db-blank">{NONE}</span>
-                        )}
+                        <PropertyCell
+                          value={n.status}
+                          options={statusOptions}
+                          listId="db-statuses"
+                          label="Status"
+                          editing={editingCell === `${n.path}\0status`}
+                          onOpen={() => setEditingCell(`${n.path}\0status`)}
+                          onClose={() => setEditingCell(null)}
+                          onCommit={(next) => onSetProperty(n.path, 'status', next)}
+                        >
+                          {n.status ? (
+                            <span className={`db-tag db-tone-${statusTone(n.status)}`}>
+                              {n.status}
+                            </span>
+                          ) : (
+                            <span className="db-blank">{NONE}</span>
+                          )}
+                        </PropertyCell>
                       </td>
                       <td className="db-col-tags">
                         <TagList tags={n.tags} />

@@ -45,6 +45,15 @@ export interface MainCanvasProps {
   onConflict: (diskMtime: number, diskText: string) => void
   /** Save an older version over the open note. False when the user declined. */
   onRestore: (text: string) => Promise<boolean>
+  /**
+   * Write one frontmatter property back into a note, from a database cell.
+   *
+   * Owned by <VaultPane> rather than here because it may have to touch the open
+   * buffer: the row being edited can be the note in the editor, and a file that
+   * changed under a buffer still showing the old frontmatter is the exact split
+   * this feature exists to close. It rejects when that buffer is dirty.
+   */
+  onSetProperty: (path: string, key: string, value: string) => Promise<void>
   getGraph: () => Promise<VaultGraph>
   getNotes: () => Promise<VaultNoteMeta[]>
   getInbox: () => Promise<InboxItem[]>
@@ -84,6 +93,7 @@ export function MainCanvas({
   onSave,
   onConflict,
   onRestore,
+  onSetProperty,
   getGraph,
   getNotes,
   getInbox,
@@ -428,6 +438,28 @@ export function MainCanvas({
               // conflict dialog is up, and switching anyway drags them out of
               // the table they were reading into an editor they refused.
               if (await onOpenNote(path)) onViewChange('editor')
+            }}
+            /**
+             * RE-READ THE WHOLE LIST after a successful write, rather than
+             * patching the edited row in place.
+             *
+             * The row is not the only thing the write changed. `updated:` is
+             * frontmatter too, `mtime` moved, and the month grouping and the
+             * Updated sort both read those — so a locally patched row would
+             * agree with the file about `status` and lie about everything else.
+             * This is the same `getNotes()` a tab switch already runs, and the
+             * comment on `handleSwitchToDatabase` above is the reason it is
+             * affordable: there is no cache behind it and the view's whole job
+             * is to be current.
+             *
+             * NOT wrapped in try/catch. A failed write must reach the cell that
+             * asked for it — that is where the conflict is reported — and
+             * swallowing it here would leave the table showing the old value
+             * with no sign anything went wrong.
+             */
+            onSetProperty={async (path, key, value) => {
+              await onSetProperty(path, key, value)
+              setNotes(await getNotes())
             }}
           />
         ) : view === 'editor' ? (

@@ -20,7 +20,7 @@ import { readSource } from './fixtures/source.mjs'
 
 const VIEW = readSource('CanvasView.tsx')
 
-const { groupMembers, groupFit } = await import('../src/shared/canvas.ts')
+const { groupMembers, groupFit, dragSet } = await import('../src/shared/canvas.ts')
 
 /** The padding CanvasView passes in, mirrored here so the numbers below read. */
 const PAD = 48
@@ -129,37 +129,67 @@ test('a page already on the interior line needs no fit at all', () => {
 
 // ── a group carries what it holds ─────────────────────────────────
 
-test('dragging a group moves the pages inside it', () => {
-  // A group that moved alone was a rectangle you could slide off its own
-  // contents, and auto-fit could not rescue it: a dragged group is exempt from
-  // its own fit, or fitting would pull it straight back onto the pages.
-  const view = readSource('CanvasView.tsx')
-  // The end anchor is searched FROM the start index: `setPointerCapture` also
-  // appears earlier in the file, and a backwards slice is silently empty.
-  const from = view.indexOf('const additive =')
-  const start = view.slice(from, view.indexOf('setPointerCapture', from))
-  assert.ok(start.length > 0, 'the drag start no longer has the shape this test reads')
-  assert.match(start, /const movers = new Set<CanvasNode>\(/, 'no drag set is assembled')
-  assert.match(
-    start,
-    /n\.type === 'group' && doc\) for \(const m of groupMembers\(n, doc\.nodes\)\) movers\.add\(m\)/,
-    'a dragged group no longer collects its members',
+/*
+ * THESE ARE UNIT TESTS ON PURPOSE, and the reason is worth recording. The
+ * first cut of this feature was covered by source regexes asserting the right
+ * lines existed. They did exist, the tests passed, and dragging a group still
+ * left its pages behind. A source-shaped test cannot tell you that. `dragSet`
+ * was pulled out of the view so this file can run the actual decision.
+ */
+
+test('dragging a group carries every page inside it', () => {
+  const g = group('g', 0, 0, 1000, 1000)
+  const nodes = [g, page('a', 100, 100), page('b', 400, 400), page('c', 5000, 5000)]
+  assert.deepEqual(
+    dragSet(g, new Set(), nodes).map((n) => n.id).sort(),
+    ['a', 'b'],
+    'a group did not pick up its members, or picked up one outside it',
   )
-  assert.match(start, /movers\.delete\(target\)/, 'the held node would be moved twice')
+})
+
+test('the target is never in its own carry set', () => {
+  // It moves as `held.node`; carrying it as well would apply the delta twice.
+  const g = group('g', 0, 0, 1000, 1000)
+  const nodes = [g, page('a', 100, 100)]
+  assert.ok(!dragSet(g, new Set(), nodes).includes(g))
+})
+
+test('dragging a lone page carries nothing', () => {
+  const g = group('g', 0, 0, 1000, 1000)
+  const a = page('a', 100, 100)
+  assert.deepEqual(dragSet(a, new Set(), [g, a]), [])
+})
+
+test('a multi-selection carries the members of any group in it', () => {
+  const g = group('g', 0, 0, 1000, 1000)
+  const inside = page('in', 100, 100)
+  const far = page('far', 5000, 5000)
+  const nodes = [g, inside, far]
+  // Selection is {g, far}, dragged by `far`: g comes along as a selected node,
+  // and g's own member comes along with g.
+  const out = dragSet(far, new Set(['g', 'far']), nodes)
+  assert.deepEqual(out.map((n) => n.id).sort(), ['g', 'in'])
+})
+
+test('a group nested in the drag set does not carry other groups', () => {
+  const outer = group('outer', 0, 0, 2000, 2000)
+  const inner = group('inner', 100, 100, 200, 200)
+  assert.deepEqual(dragSet(outer, new Set(), [outer, inner]), [])
 })
 
 test('membership is snapshot at press, not recomputed mid-drag', () => {
   // Recomputing per frame would let a group adopt pages it swept over and drop
   // the ones it left, so what you released would depend on the path you took.
   const view = readSource('CanvasView.tsx')
-  const move = view.slice(view.indexOf('if (drag.current) {'), view.indexOf('const snapX ='))
-  assert.doesNotMatch(move, /groupMembers\(/, 'membership is being recomputed during the drag')
+  const from = view.indexOf('if (drag.current) {')
+  const move = view.slice(from, view.indexOf('const snapX =', from))
+  assert.ok(move.length > 0, 'the move handler no longer has the shape this test reads')
+  assert.doesNotMatch(move, /dragSet\(|groupMembers\(/, 'membership is recomputed during the drag')
 })
 
 test('a moving group snaps by its interior, not its outline', () => {
-  // The other half of the rule a stationary group already followed. Matching on
-  // the outline made a group lock to arbitrary positions, which reads worse
-  // than not locking at all - the board looks like it found something real.
+  // Matching on the outline made a group lock to arbitrary positions, which
+  // reads worse than not locking: the board looks like it found something real.
   const view = readSource('CanvasView.tsx')
   assert.match(
     view,

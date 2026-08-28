@@ -143,3 +143,51 @@ test('the primary view is derived from the active tab, never mirrored', () => {
   )
   assert.doesNotMatch(PANE, /useState<MainView>\('editor'\)/, 'the primary view was mirrored into state')
 })
+
+// ------------------------------------------------- the versions dead-end
+/**
+ * Reported symptom: with the Versions panel showing, nothing in the sidebar
+ * gets that tab back to the editor. Clicking the note in the tree did nothing,
+ * the files icon did nothing, and the only ways out were a new tab or closing
+ * the one you were on. The planner behaved identically.
+ *
+ * Cause: <MainCanvas> inferred the switch from the OPEN PATH CHANGING. Opening
+ * the note that is already open is not a path change, so the effect never fired.
+ */
+test('opening a note switches to the editor at the navigation, not from a path watch', () => {
+  assert.match(
+    PANE,
+    /if \(!\(await loadNote\(path, tabId\)\)\) return false\n\s*if \(tabId === undefined\) handleViewChange\('editor'\)/,
+    'openNote does not bring the editor forward itself',
+  )
+  assert.doesNotMatch(
+    CANVAS,
+    /useEffect\(\(\) => \{\s*if \(openPath\) onViewChange\('editor'\)/,
+    'the path-keyed effect is back',
+  )
+})
+
+test('a tab click does not rewrite the view of the tab it lands on', () => {
+  // handleTabChange passes the incoming tab's id, so the switch must be skipped
+  // for it: a tab parked on the graph has to still be on the graph.
+  assert.match(PANE, /if \(tabId === undefined\) handleViewChange\('editor'\)/)
+  assert.match(
+    PANE,
+    /handleViewChange = \(next: MainView, tabId: string = activeTabId\)/,
+    'handleViewChange cannot target a tab other than the active one',
+  )
+  assert.match(PANE, /handleViewChange\('canvas', tabId\)/, 'the .canvas branch still targets the active tab')
+})
+
+test('back and forward carry the view switch themselves', () => {
+  // They call loadNote directly to avoid pushing the trail they are walking,
+  // so openNote's switch never runs for them.
+  for (const arrow of ['goBack', 'goForward']) {
+    const body = PANE.slice(PANE.indexOf(`const ${arrow} =`))
+    assert.match(
+      body.slice(0, body.indexOf('}\n\n')),
+      /handleViewChange\('editor'\)/,
+      `${arrow} lands on a note behind whatever view was up`,
+    )
+  }
+})

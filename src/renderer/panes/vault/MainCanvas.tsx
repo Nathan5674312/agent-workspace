@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useState } from 'react'
 import type { VaultNoteBody, VaultGraph } from '../../../shared/ipc.js'
 import { Editor } from './Editor.js'
 import { GraphView } from './GraphView.js'
@@ -182,25 +182,22 @@ export function MainCanvas({
   }
 
   /**
-   * Opening a note from ANYWHERE brings the editor forward.
+   * THE "BRING THE EDITOR FORWARD" EFFECT USED TO LIVE HERE. It watched the
+   * open note's path and switched view when it changed, because the tree, the
+   * tab bar and the arrows could all load a note and none of them could reach
+   * `view`. It is gone, and <VaultPane> now switches at the navigation itself.
    *
-   * The sidebar tree, the tab bar and the back/forward arrows all call
-   * `openNote` in <VaultPane>, which loads the note into the buffer — and then
-   * nothing happened, because `view` lives here and none of them can reach it.
-   * Clicking CLAUDE.md while the graph was open genuinely worked and was
-   * completely invisible, which reads as a dead button.
+   * Deleted rather than kept alongside, because inferring a navigation from a
+   * path change was wrong three ways and each one was reachable:
    *
-   * Keyed on the PATH rather than the note object: `handleSave` replaces
-   * `selectedNote` with a new object on every save, and on the object identity
-   * this would drag the user out of the graph each time they hit save.
-   *
-   * The graph and the database set the view themselves before this runs, so for
-   * those two it is a no-op. This is the catch-all for every other entry point.
+   *  - RE-OPENING THE OPEN NOTE is not a path change. With the versions panel
+   *    or the planner up, clicking that note in the tree fired nothing and the
+   *    sidebar was dead against the tab.
+   *  - A TAB CLICK loads the incoming tab's note, so this fired and reset that
+   *    tab's view to the editor — a tab parked on the graph never stayed there.
+   *  - IN SPLIT, both canvases see the same note, so the second one collapsed
+   *    onto the editor too and the split showed one view twice.
    */
-  const openPath = note?.path
-  useEffect(() => {
-    if (openPath) onViewChange('editor')
-  }, [openPath])
 
   /**
    * Re-fetch every time, for the strongest version of the reason the other two

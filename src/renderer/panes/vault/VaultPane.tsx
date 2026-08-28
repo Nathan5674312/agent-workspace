@@ -152,10 +152,16 @@ export function VaultPane(): React.ReactElement {
    */
   const view: MainView = tabs.find((t) => t.id === activeTabId)?.view ?? 'editor'
 
-  const handleViewChange = (next: MainView) => {
+  /**
+   * `tabId` defaults to the active tab but is a parameter for the same reason
+   * `loadNote`'s is: a tab CLICK opens the note before it activates the tab, so
+   * at that moment `activeTabId` is still the tab being left, and the default
+   * would rewrite the view of the tab the user just navigated away from.
+   */
+  const handleViewChange = (next: MainView, tabId: string = activeTabId) => {
     setTabs((ts) =>
       ts.map((t) =>
-        t.id === activeTabId
+        t.id === tabId
           ? { ...t, view: next, name: t.path ? t.name : VIEW_LABEL[next] }
           : t,
       ),
@@ -384,10 +390,26 @@ export function VaultPane(): React.ReactElement {
      */
     if (path.toLowerCase().endsWith('.canvas')) {
       setCanvasPath(path)
-      handleViewChange('canvas')
+      handleViewChange('canvas', tabId)
       return true
     }
     if (!(await loadNote(path, tabId))) return false
+    /**
+     * OPENING A NOTE IS SHOWING IT, and this is where that has to be said.
+     *
+     * <MainCanvas> used to infer it from the open path changing. That missed
+     * the case the Versions view exposed: with the panel up you re-click the
+     * note already open, the path does not change, the effect does not fire,
+     * and the sidebar goes dead against that tab — the only ways back to the
+     * editor were a new tab or closing this one. The planner behaved the same.
+     * Inferring a navigation from its result is the bug; the navigation itself
+     * happens here, and every entry point funnels through it.
+     *
+     * NOT ON A TAB CLICK. `tabId` is passed only by <TabBar>, and a tab's view
+     * is its own — switching to a tab parked on the graph must show the graph.
+     * Back and forward call `loadNote` directly and switch for themselves.
+     */
+    if (tabId === undefined) handleViewChange('editor')
     // Browser semantics: opening from the tree truncates any forward history.
     // Trail and cursor move together, both read from the same `n`.
     setNav((n) => ({
@@ -397,10 +419,17 @@ export function VaultPane(): React.ReactElement {
     return true
   }
 
+  /**
+   * Back and forward go through `loadNote` rather than `openNote` — they must
+   * not push the trail they are walking — so they carry the view switch that
+   * `openNote` does, for the same reason: arriving at a note behind the
+   * versions panel or the planner reads as an arrow that does nothing.
+   */
   const goBack = async () => {
     if (!canGoBack) return
     if (await loadNote(nav.trail[nav.index - 1])) {
       setNav((n) => ({ ...n, index: n.index - 1 }))
+      handleViewChange('editor')
     }
   }
 
@@ -408,6 +437,7 @@ export function VaultPane(): React.ReactElement {
     if (!canGoForward) return
     if (await loadNote(nav.trail[nav.index + 1])) {
       setNav((n) => ({ ...n, index: n.index + 1 }))
+      handleViewChange('editor')
     }
   }
 

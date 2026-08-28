@@ -217,6 +217,35 @@ export function groupMembers(group: CanvasBox, nodes: CanvasNode[]): CanvasNode[
 }
 
 /**
+ * Everything a drag on `target` must carry, target itself excluded.
+ *
+ * The selection when `target` is part of a multi-selection, plus whatever any
+ * group in that set is holding — because a group that moved alone was a
+ * rectangle you could slide off its own contents.
+ *
+ * PURE AND HERE rather than inline in the view, and that placement is the whole
+ * lesson of the revision that added it: the first cut lived in CanvasView and
+ * was "tested" by a regex asserting the lines existed. They did exist. It still
+ * did not work, and a source-shaped test cannot tell you that. This one can be
+ * run against a real board.
+ */
+export function dragSet(
+  target: CanvasNode,
+  selection: ReadonlySet<string>,
+  nodes: CanvasNode[],
+): CanvasNode[] {
+  const inSelection = selection.has(target.id) && selection.size > 1
+  const movers = new Set<CanvasNode>(
+    inSelection ? nodes.filter((n) => selection.has(n.id)) : [target],
+  )
+  for (const n of [...movers]) {
+    if (n.type === 'group') for (const m of groupMembers(n, nodes)) movers.add(m)
+  }
+  movers.delete(target)
+  return [...movers]
+}
+
+/**
  * The box a group has to be to hold `members` with `pad` around them.
  *
  * `null` when it holds nothing, and that is the useful half of the contract:

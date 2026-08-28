@@ -18,6 +18,7 @@ import {
   MIN_CARD_SIZE,
   groupMembers,
   groupFit,
+  dragSet,
   type CanvasDoc,
   type CanvasNode,
   type CanvasEdge,
@@ -1716,13 +1717,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
      * sweep over and drop the ones it left behind, so what you released would
      * depend on the path you took rather than what you picked up.
      */
-    const movers = new Set<CanvasNode>(
-      inGroup && doc ? doc.nodes.filter((n) => selected.has(n.id)) : [target],
-    )
-    for (const n of [...movers]) {
-      if (n.type === 'group' && doc) for (const m of groupMembers(n, doc.nodes)) movers.add(m)
-    }
-    movers.delete(target)
+    const movers = dragSet(target, selected, doc?.nodes ?? [])
 
     // The grab offset is kept so the card does not jump its centre to the
     // cursor on the first move — the same correction GraphView documents.
@@ -1747,7 +1742,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
        */
       others:
         target === node
-          ? [...movers].map((other) => ({ node: other, dx: p.x - other.x, dy: p.y - other.y }))
+          ? movers.map((other) => ({ node: other, dx: p.x - other.x, dy: p.y - other.y }))
           : [],
     }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)

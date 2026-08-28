@@ -10,7 +10,12 @@ import type { VaultLink, VaultTreeNode } from '../../../shared/ipc.js'
  * this pane MUST agree on what a wikilink is — they disagreed before, and the
  * graph drew edges the editor's Links list did not list.
  */
-export { parseWikilinkRefs, parseWikilinks } from '../../../shared/wikilink.ts'
+export {
+  parseWikilinkRefs,
+  parseWikilinks,
+  indexNotesByName,
+  resolveWikilink,
+} from '../../../shared/wikilink.ts'
 export type { WikilinkRef } from '../../../shared/wikilink.ts'
 
 /**
@@ -143,47 +148,20 @@ export function nextUntitledPath(
 }
 
 /**
- * Normalisation shared by the indexer and the resolver. Must match the one in
- * src/main/vault.ts `graph()`, or a link the graph draws will not open here.
- */
-const norm = (s: string) =>
-  s.trim().toLowerCase().replace(/\\/g, '/').replace(/\.md$/i, '')
-
-/**
- * Wikilink key -> vault-relative path.
+ * THE INDEX AND THE RESOLVER MOVED to `shared/wikilink.ts`, and are re-exported
+ * from here (see the top of this file) so every existing caller is unaffected.
  *
- * Basenames AND full paths, because Obsidian accepts both and the main
- * process's graph index already indexed both — so `[[Business/Playbooks/Launch]]`
- * drew an edge in the graph while clicking the same link in the editor resolved
- * to null and silently did nothing. Basenames are added for every note before
- * any path, so on a collision the short form wins, matching the graph.
+ * They went for the reason this file's own header gives for the parsers: a
+ * wikilink has one definition. Once something WRITES a link, the writer has to
+ * agree with the resolver about what one address is — `[[Launch]]`,
+ * `[[launch]]` and `[[Launch.md]]` — and the normalisation they share was
+ * private to this file, which meant the writer either duplicated it or could
+ * not have it. A writer and a resolver that disagreed would produce links this
+ * app creates and then fails to follow.
+ *
+ * Nothing about them was renderer-specific; `indexNotesByName` walks a
+ * `VaultTreeNode`, which is a shared contract already.
  */
-export function indexNotesByName(node: VaultTreeNode | null): Map<string, string> {
-  const index = new Map<string, string>()
-  const notes: VaultTreeNode[] = []
-  const walk = (n: VaultTreeNode | null): void => {
-    if (!n) return
-    if (n.kind === 'note') notes.push(n)
-    for (const child of n.children ?? []) walk(child)
-  }
-  walk(node)
-
-  const add = (key: string, path: string) => {
-    const k = norm(key)
-    if (k && !index.has(k)) index.set(k, path)
-  }
-  for (const n of notes) add(n.name, n.path)
-  for (const n of notes) add(n.path, n.path)
-  return index
-}
-
-/** Resolve a wikilink target to a vault path. Case-insensitive, like the indexer. */
-export function resolveWikilink(
-  name: string,
-  index: Map<string, string>,
-): string | null {
-  return index.get(norm(name)) ?? null
-}
 
 /**
  * The subset of graph edges d3-force can actually resolve, in d3's own shape.

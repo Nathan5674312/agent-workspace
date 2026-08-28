@@ -1,6 +1,6 @@
 # Connecting two notes from the graph — scope
 
-**Status:** `planned` — scoped and measured, **not started**. Nothing here is built.
+**Status:** pieces **1, 2 and 6 are BUILT** (`shared/wikilink.ts`, `test/wikilink-write.test.mjs`). Pieces 3, 4, 5 and 7 — the handler, the gesture, the refresh and the watched-running pass — are **not started**. Nothing in the app writes a link yet; the functions that would are done and tested.
 
 > This is the other half of what the r/PKMS commenter asked for. The first half shipped in `f316354`: a property edited in the database table is written into the note's own frontmatter. This document scopes the second half — *"or add a connection"* — so it does not have to be re-derived.
 >
@@ -80,6 +80,15 @@ The graph hands you a **path** (`Fate/Decisions.md`). A wikilink addresses a **n
 
 The 70% is dominated by 1120 files called `SKILL.md`. For the notes a person connects in the graph, stems are effectively unique — but "effectively" is not a thing to write into someone's file.
 
+**Now measured exactly, by the round-trip test running over the real vault:**
+
+| Corpus | Short `[[Stem]]` | Needed `[[path\|Stem]]` |
+|---|---|---|
+| Whole vault, 1900 files | 599 | **1301** |
+| Excluding the skills library, 212 notes | **206** | **6** |
+
+So the fallback fires for 6 notes out of 212 in practice, and for two thirds of the vault if the skills library is ever drawn in the graph. Both numbers argue the same way: the check is cheap, it is right either way, and skipping it would be wrong 6 times in the corpus that matters and 1301 times in the one that does not.
+
 **The rule, and it is testable:** write the shortest form that resolves *back to the note you meant*.
 
 ```
@@ -135,17 +144,23 @@ Reusing `handleSetProperty`'s posture: route through `vault.saveNote` so the wri
 
 ## Work breakdown
 
-| # | Piece | Where | Size |
+| # | Piece | Where | Status |
 |---|---|---|---|
-| 1 | `addWikilink(text, link)` — normalise the tail, find or create the section, match the note's existing shape, append | `src/shared/wikilink.ts` | **the real work**; pure, and the only piece that touches prose |
-| 2 | `linkTextFor(path, index)` — shortest form that round-trips | `src/shared/wikilink.ts` | small |
-| 3 | `handleAddLink(from, to)` — read, apply, `saveNote`, refuse on dirty buffer, update buffer if open | `VaultPane.tsx` | small; a near-copy of `handleSetProperty` |
-| 4 | Alt+drag, rubber band, drop target, confirm | `GraphView.tsx` | medium; the canvas render loop is dense but the hit-testing exists |
-| 5 | Refresh after the write | `MainCanvas.tsx` | one line — `invalidateGraph()` already runs inside `save()`, so it is a re-fetch, not new plumbing |
-| 6 | Unit tests for 1 and 2, incl. the round-trip over the real corpus | `test/` | small |
-| 7 | Watched-running pass over CDP against a scratch vault, asserting the **file** | — | as per the last three commits |
+| 1 | `addWikilink(text, link)` — normalise the tail, find or create the section, match the note's existing shape, append | `src/shared/wikilink.ts` | **BUILT** |
+| 2 | `linkTextFor(path, resolve)` — shortest form that round-trips | `src/shared/wikilink.ts` | **BUILT** |
+| 3 | `handleAddLink(from, to)` — read, apply, `saveNote`, refuse on dirty buffer, update buffer if open | `VaultPane.tsx` | not started; a near-copy of `handleSetProperty` |
+| 4 | Alt+drag, rubber band, drop target, confirm | `GraphView.tsx` | not started; medium — the canvas render loop is dense but the hit-testing exists |
+| 5 | Refresh after the write | `MainCanvas.tsx` | not started; one line — `invalidateGraph()` already runs inside `save()` |
+| 6 | Unit tests for 1 and 2, incl. the round-trip over the real corpus | `test/wikilink-write.test.mjs` | **BUILT** — 24 tests |
+| 7 | Watched-running pass over CDP against a scratch vault, asserting the **file** | — | not started |
 
-Pieces 1, 2 and 6 are the half that carries the risk and can be built and proven with no UI at all. **Ship them first**; the gesture is then a thin layer over a function that is already known to be correct.
+Pieces 1, 2 and 6 are the half that carries the risk and can be proven with no UI at all, which is why they went first. The gesture is now a thin layer over functions already known to be correct.
+
+### What building them changed
+
+- **`indexNotesByName` and `resolveWikilink` moved** out of the vault pane's `helpers.ts` into `shared/wikilink.ts`, which re-exports them from there so no caller changed. They had to: the normalisation they share was private to the renderer, and a writer that could not reach it would have had to copy it — a writer and a resolver disagreeing about what one address is would produce links the app creates and then fails to follow. `helpers.ts` may hold only type-only imports (`review-s2` enforces it), and moving the functions satisfies that guard rather than widening it.
+- **The `·` rule got stricter.** The first cut extended any non-bullet link line. Three notes in the vault are of the form `[[motion-system]] — scroll layer, one-ticker rule, …`, where that would have appended the new link after somebody's sentence. It now extends a line only when the line **already contains** ` · `; anything else — a bare link, a link with prose after it, a table row — gets its own line below. No table rows exist in a related section today, and this is why one appearing later cannot corrupt the table.
+- **Idempotence is checked against every real note**, not just fixtures: adding the same link twice to all 1900 files is a no-op in all 1900.
 
 ---
 

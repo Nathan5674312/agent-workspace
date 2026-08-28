@@ -1055,6 +1055,11 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       }
     }
 
+    // Two names for one teardown. `pointerup` completes the gesture;
+    // `pointercancel` abandons it, and must not write.
+    const onUp = (e: PointerEvent) => finish(e, true)
+    const onCancel = (e: PointerEvent) => finish(e, false)
+
     let panning: { x: number; y: number } | null = null
     /** Pointer position and view offset at the moment the pan began. */
     let panAnchor = { x: 0, y: 0, tx: 0, ty: 0 }
@@ -1091,7 +1096,33 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       invalidate()
     }
 
-    const onUp = (e: PointerEvent) => {
+    /**
+     * Releasing capture must not be able to throw inside a listener.
+     *
+     * On `pointercancel` the pointer is already gone, so
+     * `releasePointerCapture` raises NotFoundError — and the `?.` on it guards
+     * an undefined METHOD, not a throw, so the rest of the handler (the drag
+     * pin release, the cursor reset) would be skipped.
+     */
+    const release = (e: PointerEvent) => {
+      try {
+        release(e)
+      } catch {
+        /* the pointer was already taken away — nothing to release */
+      }
+    }
+
+    /**
+     * `commit` is false when the gesture was ABORTED rather than released.
+     *
+     * This one handler is registered for `pointerup` AND `pointercancel`, and
+     * a cancel is the OS taking the gesture away — a touch or pen takeover, a
+     * window-manager grab, a context menu. The link branch below used to write
+     * on either, so an interrupted drag that happened to be over a node opened
+     * the confirm for a gesture the user never finished. A cancel must undo,
+     * never commit.
+     */
+    const finish = (e: PointerEvent, commit: boolean) => {
       if (linking) {
         const { from, over } = linking
         // Cleared BEFORE the callback. That handler opens a confirm, which
@@ -1101,10 +1132,11 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
         pressed = null
         downAt = null
         canvas.style.cursor = 'grab'
-        canvas.releasePointerCapture?.(e.pointerId)
+        release(e)
         invalidate()
-        // Released on nothing, or back on the source: a cancel, silently.
-        if (over) linkRef.current?.(from.id, over.id)
+        // Released on nothing, or back on the source: a cancel, silently. And
+        // `commit` is false when the OS took the gesture away mid-drag.
+        if (commit && over) linkRef.current?.(from.id, over.id)
         return
       }
       if (dragging) {
@@ -1125,7 +1157,7 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       pressed = null
       downAt = null
       canvas.style.cursor = 'grab'
-      canvas.releasePointerCapture?.(e.pointerId)
+      release(e)
       invalidate() // the lift has to be released even if nothing else moves
 
       if (wasPanning && !reduced) {
@@ -1291,7 +1323,7 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
     canvas.addEventListener('pointermove', onPan)
     canvas.addEventListener('pointerdown', onDown)
     canvas.addEventListener('pointerup', onUp)
-    canvas.addEventListener('pointercancel', onUp)
+    canvas.addEventListener('pointercancel', onCancel)
     canvas.addEventListener('click', onClick)
     canvas.addEventListener('wheel', onWheel, { passive: false })
     canvas.style.cursor = 'grab'
@@ -1323,7 +1355,7 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       canvas.removeEventListener('pointermove', onPan)
       canvas.removeEventListener('pointerdown', onDown)
       canvas.removeEventListener('pointerup', onUp)
-      canvas.removeEventListener('pointercancel', onUp)
+      canvas.removeEventListener('pointercancel', onCancel)
       canvas.removeEventListener('click', onClick)
       canvas.removeEventListener('wheel', onWheel)
     }

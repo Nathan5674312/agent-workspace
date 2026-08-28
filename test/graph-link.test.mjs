@@ -114,13 +114,13 @@ test('a node cannot be dropped on itself', () => {
 })
 
 test('released on empty space, nothing is written', () => {
-  assert.match(GRAPH, /if \(over\) linkRef\.current\?\.\(from\.id, over\.id\)/)
+  assert.match(GRAPH, /if \(commit && over\) linkRef\.current\?\.\(from\.id, over\.id\)/)
 })
 
 test('the band is cleared BEFORE the handler opens its confirm', () => {
   // window.confirm blocks. A band left painted under a modal shows a
   // connection that has not been agreed to.
-  const at = GRAPH.indexOf('const onUp = ')
+  const at = GRAPH.indexOf('const finish = ')
   const body = GRAPH.slice(at, at + 900)
   assert.ok(
     body.indexOf('linking = null') < body.indexOf('linkRef.current?.'),
@@ -167,4 +167,34 @@ test('a graph rebuild clears the hover label it was reporting', () => {
   const at = GRAPH.lastIndexOf('return () => {')
   const cleanup = GRAPH.slice(at, at + 600)
   assert.match(cleanup, /setHoverLabel\(null\)/)
+})
+
+test('an aborted gesture does not write', () => {
+  // One handler is registered for pointerup AND pointercancel. A cancel is the
+  // OS taking the gesture away -- a touch/pen takeover, a window-manager grab,
+  // a context menu -- and it used to commit if the pointer happened to be over
+  // a node, opening the confirm for a drag the user never finished.
+  assert.match(GRAPH, /const finish = \(e: PointerEvent, commit: boolean\)/)
+  assert.match(GRAPH, /if \(commit && over\) linkRef\.current\?\./)
+  assert.match(GRAPH, /const onCancel = \(e: PointerEvent\) => finish\(e, false\)/)
+  assert.match(GRAPH, /addEventListener\('pointercancel', onCancel\)/)
+  assert.doesNotMatch(GRAPH, /addEventListener\('pointercancel', onUp\)/)
+})
+
+test('releasing pointer capture cannot throw out of the handler', () => {
+  // On pointercancel the pointer is already gone and releasePointerCapture
+  // raises NotFoundError. The `?.` guards an undefined method, not a throw, so
+  // the rest of the teardown -- the drag pin release, the cursor reset -- would
+  // be skipped.
+  assert.match(GRAPH, /const release = \(e: PointerEvent\) => \{\s*try \{/)
+  assert.doesNotMatch(GRAPH, /^\s*canvas\.releasePointerCapture\?\.\(e\.pointerId\)$/m)
+})
+
+test('a failed graph rebuild after a successful write is reported', () => {
+  // onAddLink never rejects, so anything arriving here came from getGraph. With
+  // no catch it was an unhandled rejection: no edge, no error, and no sign the
+  // link had actually been written.
+  const at = CANVAS.indexOf('onLinkNotes={')
+  const body = CANVAS.slice(at, at + 600)
+  assert.match(body, /\.catch\(\(e: unknown\) => setGraphError\(String\(e\)\)\)/)
 })

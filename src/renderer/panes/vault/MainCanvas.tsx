@@ -501,9 +501,19 @@ export function MainCanvas({
              * about. If the write did not happen, neither does this.
              */
             onLinkNotes={(from, to) => {
-              void onAddLink(from, to).then(async (written) => {
-                if (written) setGraph(await getGraph())
-              })
+              void onAddLink(from, to)
+                .then(async (written) => {
+                  if (written) setGraph(await getGraph())
+                })
+                /**
+                 * The rebuild can fail after the write SUCCEEDED, and without
+                 * this that is an unhandled rejection: no new edge, no error,
+                 * and no sign the link is in fact on disk. Reported the same
+                 * way `handleSwitchToGraph` reports a failed fetch, because it
+                 * is the same failure — `onAddLink` never rejects, so anything
+                 * arriving here came from `getGraph`.
+                 */
+                .catch((e: unknown) => setGraphError(String(e)))
             }}
             onOpenNote={async (path) => {
               // Loading the note is only half of "open". Without the view

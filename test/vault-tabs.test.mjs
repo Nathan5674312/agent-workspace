@@ -191,3 +191,16 @@ test('back and forward carry the view switch themselves', () => {
     )
   }
 })
+
+test('clicking the tab you are already on does nothing at all', () => {
+  // It used to run the full open path against the note already open: the
+  // discard confirm fired on your own unsaved edits, and saying yes re-read the
+  // file over them. The guard has to be FIRST — everything after it assumes a
+  // navigation happened.
+  const body = PANE.slice(PANE.indexOf('const handleTabChange ='))
+  assert.match(
+    body.slice(0, body.indexOf('const tab =')),
+    /if \(id === activeTabId\) return/,
+    'handleTabChange acts on a click that changes nothing',
+  )
+})

@@ -728,6 +728,21 @@ export function VaultPane(): React.ReactElement {
    * a button that does nothing.
    */
   const handleTabChange = async (id: string) => {
+    /**
+     * CLICKING THE TAB YOU ARE ALREADY ON IS NOT A NAVIGATION, and everything
+     * below assumes one happened.
+     *
+     * Without this it ran the whole open path against the note already open:
+     * the discard confirm fired on your OWN unsaved edits — "…has unsaved edits
+     * that will be lost", about the note you are sitting in — and answering yes
+     * re-read the file and threw them away. The trail grew a duplicate entry
+     * too, so Back then went to the note already on screen.
+     *
+     * `handleCloseTab` is the only other caller and cannot trip this: it acts
+     * only when the tab being closed IS the active one, and then activates a
+     * tab out of `rest`, which is the list with that id removed.
+     */
+    if (id === activeTabId) return
     const tab = tabs.find((t) => t.id === id)
     if (!tab) return
     if (tab.path) {

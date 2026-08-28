@@ -68,6 +68,7 @@ import {
   indexNotesByName,
   isBufferDirty,
   isPlainName,
+  isSaveConflict,
   nextUntitledPath,
   resolveWikilink,
   sortTree,
@@ -76,6 +77,7 @@ import {
 } from './helpers.js'
 import type { VaultNoteBody } from '../../../shared/ipc.js'
 import { setFrontmatter } from '../../../shared/notemeta.js'
+import { addWikilink, linkTextFor, NEW_HEADING } from '../../../shared/wikilink.js'
 import './split.css'
 
 export function VaultPane(): React.ReactElement {
@@ -576,6 +578,83 @@ export function VaultPane(): React.ReactElement {
     }
   }
 
+  /**
+   * ADD A CONNECTION: write `[[to]]` into `from`'s own Markdown.
+   *
+   * The graph half of the same idea the database cell answers. An edge is not a
+   * thing this app stores — the graph, the Links column and the backlinks list
+   * are all derived from wikilinks in the body — so "connect A to B" has
+   * exactly one meaning, which is to write the link into A and let everything
+   * re-derive. Anything else would be the app's first private store, and a
+   * store is what the whole write-back exists to avoid.
+   *
+   * `linkTextFor` is handed THE SAME resolver the editor follows links with, so
+   * the check it makes is literally "would clicking this link land on the note
+   * I am linking to". That matters more than it sounds: the name index is
+   * first-wins, and 6 of the 212 notes outside the skills library share a stem
+   * with another, so a short link is sometimes a link to the wrong note.
+   *
+   * CONFIRMED BEFORE WRITING, unlike a property cell, because this appends a
+   * line to PROSE in a file that is usually not on screen. `window.confirm` is
+   * what the discard prompt in `loadNote` already uses; a real dialog would be
+   * nicer and is not what makes this safe.
+   *
+   * The mtime comes from the read a moment earlier, so the guard covers the
+   * window the dialog is open in: a note that changed while you were reading
+   * the confirmation raises SaveConflict instead of being clobbered.
+   *
+   * Errors land on the pane's own banner rather than being thrown. The caller
+   * is a canvas pointer handler with nowhere to put a rejection, and an
+   * unhandled one would make a refused write look like a write that worked.
+   *
+   * Returns whether anything was written, so the graph is only re-fetched when
+   * there is something new to draw.
+   */
+  const handleAddLink = async (from: string, to: string): Promise<boolean> => {
+    if (from === to) return false
+    try {
+      // Same refusal as a property edit, for the same reason: two legitimate
+      // texts and nothing here can know which one was meant.
+      if (selectedNote?.path === from && isDirty) {
+        throw new Error(
+          `"${selectedNote.title}" is open in the editor with unsaved edits. Save or discard them first.`,
+        )
+      }
+      const link = linkTextFor(to, (name) => resolveWikilink(name, noteIndex))
+      const note = await vault.readNote(from)
+      const next = addWikilink(note.text, link)
+      // Already linked. Silent, not an error — dragging A to B twice is a
+      // reasonable thing to do and the second one is simply already true.
+      if (next === note.text) return false
+
+      const headings = (t: string) => (t.match(/^#{1,6}\s/gm) ?? []).length
+      const where =
+        headings(next) > headings(note.text)
+          ? `a new "${NEW_HEADING}" section`
+          : 'its related-notes section'
+      if (!window.confirm(`Add to ${from}\n\nIn ${where}:\n\n    ${link}`)) return false
+
+      const saved = await vault.saveNote(from, next, note.mtime)
+      // The editor may be showing the note that just grew a line. Only
+      // reachable with a clean buffer, so there is nothing of the user's here.
+      if (selectedNote?.path === from) {
+        setSelectedNote((prev) =>
+          prev && prev.path === from ? { ...prev, mtime: saved.mtime, text: next } : prev,
+        )
+        setBuffer(next)
+      }
+      return true
+    } catch (e) {
+      const message = e instanceof Error ? e.message : String(e)
+      setOpenError(
+        isSaveConflict(message)
+          ? `${from} changed on disk since the graph was drawn. Nothing was written.`
+          : message,
+      )
+      return false
+    }
+  }
+
   const handleSave = async (text: string, mtime: number) => {
     // Pin the note this save belongs to. `selectedNote` is captured from the
     // render that produced this closure, and a save is a round-trip to the
@@ -899,6 +978,7 @@ export function VaultPane(): React.ReactElement {
       onConflict={handleConflict}
       onRestore={handleRestore}
       onSetProperty={handleSetProperty}
+      onAddLink={handleAddLink}
       getGraph={vault.getGraph}
       getNotes={vault.getNotes}
       getInbox={vault.getInbox}

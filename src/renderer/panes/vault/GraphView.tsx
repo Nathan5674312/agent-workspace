@@ -60,6 +60,19 @@ import {
 export interface GraphViewProps {
   graph: VaultGraph | null
   onOpenNote?: (path: string) => void
+  /**
+   * Alt+drag from one node to another: write `[[to]]` into `from`'s Markdown.
+   *
+   * ALT, because plain drag is taken and cannot be taken back — it moves a node
+   * and pins it into the simulation, which is the gesture this whole view is
+   * built around. No modifier, right-click or selection state was used anywhere
+   * in here before this, so the whole modifier space was free.
+   *
+   * Fire-and-forget from this side. The handler confirms, writes, and puts its
+   * own failures on the pane's banner; a canvas pointer handler has nowhere to
+   * put a rejection.
+   */
+  onLinkNotes?: (from: string, to: string) => void
 }
 
 type Node = d3.SimulationNodeDatum & {
@@ -73,7 +86,7 @@ type Link = { source: Node; target: Node; kind?: 'content' | 'structure' }
 
 const titleOf = (p: string) => p.split('/').pop()!.replace(/\.md$/i, '')
 
-export function GraphView({ graph, onOpenNote }: GraphViewProps) {
+export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
   const [hoverLabel, setHoverLabel] = useState<string | null>(null)
@@ -92,6 +105,10 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
    */
   const openRef = useRef(onOpenNote)
   openRef.current = onOpenNote
+  // Same reasoning as `openRef`: a dependency here would rebuild the whole
+  // simulation whenever the parent re-rendered with an inline arrow.
+  const linkRef = useRef(onLinkNotes)
+  linkRef.current = onLinkNotes
 
   /**
    * The live forces. Two copies on purpose:
@@ -277,6 +294,20 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
      * references. Same Map object either way, so the getter stays correct.
      */
     let dragging: Node | null = null
+    /**
+     * The in-flight Alt+drag: where it started, where the cursor is now (graph
+     * coordinates), and the node it would land on.
+     *
+     * Declared up here beside `dragging` for the same temporal-dead-zone reason
+     * the comment above gives — `draw` closes over it and runs before anything
+     * below this line has been evaluated.
+     *
+     * Deliberately NOT a physics drag: the source node is never pinned and the
+     * simulation is never reheated, because nothing is being moved. The graph
+     * carries on settling underneath the band, which is also what makes it
+     * obvious that this gesture is a different one.
+     */
+    let linking: { from: Node; x: number; y: number; over: Node | null } | null = null
     const adjacency = new Map<string, Node[]>()
 
     /**
@@ -747,6 +778,42 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
         }
         ctx.globalAlpha = 1
       }
+
+      /**
+       * The connection being drawn, on top of everything.
+       *
+       * DASHED, and that is the whole visual argument: every real edge in this
+       * view is a solid line read out of somebody's Markdown, so a proposed one
+       * must not be able to be mistaken for a link that already exists. It is
+       * dashed until it is written, and after the write it comes back as an
+       * ordinary solid edge because by then it IS one.
+       *
+       * Snapped to the target's centre once there is a target, rather than
+       * trailing to the cursor. The line stops moving the moment the drop would
+       * succeed, which is a clearer commitment signal than the cursor change.
+       */
+      if (linking) {
+        const to = linking.over
+        ctx.save()
+        ctx.strokeStyle = COL.hot
+        ctx.lineWidth = 1.5 / k
+        ctx.globalAlpha = to ? 0.95 : 0.6
+        ctx.setLineDash([6 / k, 4 / k])
+        ctx.beginPath()
+        ctx.moveTo(linking.from.x!, linking.from.y!)
+        ctx.lineTo(to ? to.x! : linking.x, to ? to.y! : linking.y)
+        ctx.stroke()
+        ctx.setLineDash([])
+        // Both ends ringed: which note it comes FROM is the half that decides
+        // whose file gets edited, and it is the half a user gets wrong.
+        ctx.globalAlpha = 0.95
+        for (const n of to ? [linking.from, to] : [linking.from]) {
+          ctx.beginPath()
+          ctx.arc(n.x!, n.y!, nodeR(n) + 4 / k, 0, Math.PI * 2)
+          ctx.stroke()
+        }
+        ctx.restore()
+      }
     }
 
     /**
@@ -876,6 +943,19 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
     }
 
     const onMove = (e: PointerEvent) => {
+      if (linking) {
+        const r = canvas.getBoundingClientRect()
+        const p = toGraph(e.clientX - r.left, e.clientY - r.top)
+        linking.x = p.x
+        linking.y = p.y
+        const hit = pick(e)
+        // A node cannot link to itself, so hovering the source is not a target.
+        linking.over = hit && hit.id !== linking.from.id ? hit : null
+        // The cursor is the only thing that says "release here and it lands".
+        canvas.style.cursor = linking.over ? 'copy' : 'crosshair'
+        invalidate()
+        return
+      }
       if (dragging) {
         const r = canvas.getBoundingClientRect()
         const p = toGraph(e.clientX - r.left, e.clientY - r.top)
@@ -925,6 +1005,22 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
       // Felt before anything moves, and before the release decides anything.
       pressed = hit
       if (hit) invalidate()
+      if (hit && e.altKey && linkRef.current) {
+        /**
+         * Alt+press on a node starts a CONNECTION, not a move.
+         *
+         * `moved` is set true immediately, and that is load-bearing rather than
+         * bookkeeping: releasing the pointer fires a click, `onClick` opens the
+         * note unless the gesture was a drag, and without this every connection
+         * would also yank you into the editor for the note you dragged FROM.
+         */
+        moved = true
+        linking = { from: hit, x: hit.x!, y: hit.y!, over: null }
+        canvas.setPointerCapture(e.pointerId)
+        canvas.style.cursor = 'crosshair'
+        invalidate()
+        return
+      }
       if (hit) {
         dragging = hit
         const r = canvas.getBoundingClientRect()
@@ -996,6 +1092,21 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
     }
 
     const onUp = (e: PointerEvent) => {
+      if (linking) {
+        const { from, over } = linking
+        // Cleared BEFORE the callback. That handler opens a confirm, which
+        // blocks; leaving the band up under a modal would paint a connection
+        // that has not been agreed to yet.
+        linking = null
+        pressed = null
+        downAt = null
+        canvas.style.cursor = 'grab'
+        canvas.releasePointerCapture?.(e.pointerId)
+        invalidate()
+        // Released on nothing, or back on the source: a cancel, silently.
+        if (over) linkRef.current?.(from.id, over.id)
+        return
+      }
       if (dragging) {
         // Release the pin so the forces reclaim the node. Keeping fx/fy here
         // left every dragged node permanently outside the simulation — you
@@ -1186,6 +1297,21 @@ export function GraphView({ graph, onOpenNote }: GraphViewProps) {
     canvas.style.cursor = 'grab'
 
     return () => {
+      /**
+       * THE LABEL DIES WITH THE SIMULATION THAT WAS REPORTING IT.
+       *
+       * `hover` is a local of this effect and `hoverLabel` is React state, so a
+       * rebuild resets one and not the other. The reconciliation in `onMove` is
+       * `hit?.id !== hover?.id`, and after a rebuild both are undefined over
+       * empty canvas — so it never fires, and the name of a node from the
+       * PREVIOUS simulation stays on screen permanently, following the cursor
+       * everywhere including the corners.
+       *
+       * Latent until something rebuilt the graph while a label was up. Alt+drag
+       * to connect does exactly that: it writes, re-fetches, and the effect
+       * restarts with the cursor still sitting on the node you dragged from.
+       */
+      setHoverLabel(null)
       ro.disconnect()
       cancelAnimationFrame(raf)
       // A glide or a settle outlives the component otherwise: both hold a rAF

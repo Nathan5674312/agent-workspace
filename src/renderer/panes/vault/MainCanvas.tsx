@@ -54,6 +54,15 @@ export interface MainCanvasProps {
    * this feature exists to close. It rejects when that buffer is dirty.
    */
   onSetProperty: (path: string, key: string, value: string) => Promise<void>
+  /**
+   * Write `[[to]]` into `from`'s Markdown — the graph's Alt+drag.
+   *
+   * Resolves to whether anything was actually written, so a cancelled confirm
+   * or an already-existing link does not pay for a full graph rebuild. It does
+   * not reject: it reports its own failures on the pane's banner, because the
+   * caller is a canvas pointer handler.
+   */
+  onAddLink: (from: string, to: string) => Promise<boolean>
   getGraph: () => Promise<VaultGraph>
   getNotes: () => Promise<VaultNoteMeta[]>
   getInbox: () => Promise<InboxItem[]>
@@ -94,6 +103,7 @@ export function MainCanvas({
   onConflict,
   onRestore,
   onSetProperty,
+  onAddLink,
   getGraph,
   getNotes,
   getInbox,
@@ -481,6 +491,20 @@ export function MainCanvas({
         ) : (
           <GraphView
             graph={graph}
+            /**
+             * RE-FETCH, don't patch a link into the local copy.
+             *
+             * `save()` calls `invalidateGraph()` in main, so this comes back
+             * rebuilt from the files rather than from a cached index — which is
+             * the point: the new edge has to appear because it is in the
+             * Markdown now, not because the renderer drew one it was told
+             * about. If the write did not happen, neither does this.
+             */
+            onLinkNotes={(from, to) => {
+              void onAddLink(from, to).then(async (written) => {
+                if (written) setGraph(await getGraph())
+              })
+            }}
             onOpenNote={async (path) => {
               // Loading the note is only half of "open". Without the view
               // switch the note opens behind the graph and nothing appears to

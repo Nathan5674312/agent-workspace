@@ -173,7 +173,7 @@ const BULLET = /^(\s*)([-*+])\s/
  * yet — when it has one, its own shape wins, which is why the split does not
  * have to be resolved before this can ship.
  */
-const NEW_HEADING = '## Related'
+export const NEW_HEADING = '## Related'
 const NEW_BULLET = '- '
 
 /** Where the body starts: after the frontmatter block, or at 0. */

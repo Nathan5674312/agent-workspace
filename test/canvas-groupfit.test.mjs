@@ -127,6 +127,47 @@ test('a page already on the interior line needs no fit at all', () => {
   assert.deepEqual(box, { x: g.x, y: g.y, width: g.width, height: g.height })
 })
 
+// ── a group carries what it holds ─────────────────────────────────
+
+test('dragging a group moves the pages inside it', () => {
+  // A group that moved alone was a rectangle you could slide off its own
+  // contents, and auto-fit could not rescue it: a dragged group is exempt from
+  // its own fit, or fitting would pull it straight back onto the pages.
+  const view = readSource('CanvasView.tsx')
+  // The end anchor is searched FROM the start index: `setPointerCapture` also
+  // appears earlier in the file, and a backwards slice is silently empty.
+  const from = view.indexOf('const additive =')
+  const start = view.slice(from, view.indexOf('setPointerCapture', from))
+  assert.ok(start.length > 0, 'the drag start no longer has the shape this test reads')
+  assert.match(start, /const movers = new Set<CanvasNode>\(/, 'no drag set is assembled')
+  assert.match(
+    start,
+    /n\.type === 'group' && doc\) for \(const m of groupMembers\(n, doc\.nodes\)\) movers\.add\(m\)/,
+    'a dragged group no longer collects its members',
+  )
+  assert.match(start, /movers\.delete\(target\)/, 'the held node would be moved twice')
+})
+
+test('membership is snapshot at press, not recomputed mid-drag', () => {
+  // Recomputing per frame would let a group adopt pages it swept over and drop
+  // the ones it left, so what you released would depend on the path you took.
+  const view = readSource('CanvasView.tsx')
+  const move = view.slice(view.indexOf('if (drag.current) {'), view.indexOf('const snapX ='))
+  assert.doesNotMatch(move, /groupMembers\(/, 'membership is being recomputed during the drag')
+})
+
+test('a moving group snaps by its interior, not its outline', () => {
+  // The other half of the rule a stationary group already followed. Matching on
+  // the outline made a group lock to arbitrary positions, which reads worse
+  // than not locking at all - the board looks like it found something real.
+  const view = readSource('CanvasView.tsx')
+  assert.match(
+    view,
+    /held\.node\.type === 'group' \? groupInterior\(box\) : box/,
+    'a dragged group matches on its own outline again',
+  )
+})
+
 // ── the wiring ────────────────────────────────────────────────────
 
 test('the fit runs before the write, so it shares the save and the undo', () => {

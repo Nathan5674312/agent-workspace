@@ -1701,6 +1701,29 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     const inGroup = selected.has(target.id) && selected.size > 1
     if (additive || !inGroup) selectNode(target.id, additive)
 
+    /**
+     * EVERYTHING THIS GESTURE MOVES, target excluded — the selection, plus
+     * whatever any group in it is holding.
+     *
+     * A group used to move alone, which made it a rectangle you could slide off
+     * its own contents: the label and the box went one way and the pages it was
+     * drawn around stayed put. Auto-fit could not save that either, because a
+     * group is deliberately exempt from its own fit — fitting it would drag it
+     * back onto the pages and it would read as refusing to move.
+     *
+     * MEMBERSHIP IS SNAPSHOT HERE, at press, and never recomputed during the
+     * drag. Recomputing per frame would let a group adopt pages it happened to
+     * sweep over and drop the ones it left behind, so what you released would
+     * depend on the path you took rather than what you picked up.
+     */
+    const movers = new Set<CanvasNode>(
+      inGroup && doc ? doc.nodes.filter((n) => selected.has(n.id)) : [target],
+    )
+    for (const n of [...movers]) {
+      if (n.type === 'group' && doc) for (const m of groupMembers(n, doc.nodes)) movers.add(m)
+    }
+    movers.delete(target)
+
     // The grab offset is kept so the card does not jump its centre to the
     // cursor on the first move — the same correction GraphView documents.
     // Measured against the TARGET, so a duplicate keeps its offset from the
@@ -1719,13 +1742,12 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
        * is only the group when the page pressed was already in one.
        *
        * Empty for an Alt+drag. That gesture is dragging a fresh copy, and
-       * duplicating a whole selection is a different feature from moving one.
+       * duplicating a whole selection — or a whole group's contents — is a
+       * different feature from moving one.
        */
       others:
-        target === node && inGroup && doc
-          ? doc.nodes
-              .filter((other) => other !== target && selected.has(other.id))
-              .map((other) => ({ node: other, dx: p.x - other.x, dy: p.y - other.y }))
+        target === node
+          ? [...movers].map((other) => ({ node: other, dx: p.x - other.x, dy: p.y - other.y }))
           : [],
     }
     ;(e.currentTarget as HTMLElement).setPointerCapture(e.pointerId)
@@ -1879,8 +1901,25 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
          * matched so the view can draw it, and because a test can import it
          * there instead of re-declaring it from the same constants.
          */
+        /**
+         * A GROUP ALIGNS BY ITS INTERIOR IN BOTH DIRECTIONS, and until now it
+         * only did in one. A stationary group offers `groupInterior` as the
+         * line others take, but a group being DRAGGED was matching on its own
+         * outline — the very edge this file says nothing should be flush with,
+         * because it is wherever someone left the resize handle. So a group
+         * locked onto arbitrary positions, which is worse than not locking:
+         * the board looked like it had snapped to something meaningful.
+         *
+         * Same inset both ways, so a group dragged up to a page lands with its
+         * inner wall on that page's edge — exactly where the page would have
+         * landed had it been dragged into the group instead.
+         *
+         * The offset is a constant inset, so the delta guideSnap returns for
+         * the interior is the delta the group itself must move.
+         */
+        const box = { x, y, width: held.node.width, height: held.node.height }
         const snap = guideSnap(
-          { x, y, width: held.node.width, height: held.node.height },
+          held.node.type === 'group' ? groupInterior(box) : box,
           others,
           { grid: GRID, range: SNAP_RANGE },
         )

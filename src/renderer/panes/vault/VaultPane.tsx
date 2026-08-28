@@ -91,6 +91,20 @@ export function VaultPane(): React.ReactElement {
   const layoutRef = useRef<HTMLDivElement>(null)
   const [activeRibbon, setActiveRibbon] = useState('files')
   const [selectedNote, setSelectedNote] = useState<VaultNoteBody | null>(null)
+  /**
+   * The open note's path, readable AFTER an await.
+   *
+   * `selectedNote` inside an async handler is whatever it was when the closure
+   * was made, and the write handlers below await a read and a save — the user
+   * can open a different note in that window. `handleSave` already guards its
+   * `setSelectedNote` with a functional updater for exactly this reason, but a
+   * functional updater cannot guard `setBuffer`: its `prev` is the buffer, not
+   * the note. So the current path is mirrored here and checked at the moment
+   * the write lands. Without it, note A's text is loaded under note C's
+   * identity, isDirty flips, and the next Save writes A over C.
+   */
+  const openPathRef = useRef<string | null>(null)
+  openPathRef.current = selectedNote?.path ?? null
   /** The live edit buffer. Never written to disk without an explicit click. */
   const [buffer, setBuffer] = useState('')
   const [backlinks, setBacklinks] = useState<string[]>([])
@@ -570,7 +584,11 @@ export function VaultPane(): React.ReactElement {
      * alone instead would show the old frontmatter over a file that no longer
      * says that, and the next Save would quietly undo the property edit.
      */
-    if (openHere) {
+    // `openPathRef`, not the captured `openHere`: that was true when the edit
+    // was requested, and two awaits have happened since. If the user opened
+    // another note in between, loading this text into the buffer would put note
+    // A's text under note C's identity and the next Save would write it there.
+    if (openPathRef.current === path) {
       setSelectedNote((prev) =>
         prev && prev.path === path ? { ...prev, mtime: saved.mtime, text: next } : prev,
       )
@@ -637,7 +655,12 @@ export function VaultPane(): React.ReactElement {
       const saved = await vault.saveNote(from, next, note.mtime)
       // The editor may be showing the note that just grew a line. Only
       // reachable with a clean buffer, so there is nothing of the user's here.
-      if (selectedNote?.path === from) {
+      //
+      // `openPathRef`, not the captured `selectedNote`: that is whatever was
+      // open when this handler started, and a read and a save have completed
+      // since. Opening another note in that window would otherwise load THIS
+      // note's text into the buffer under the other note's identity.
+      if (openPathRef.current === from) {
         setSelectedNote((prev) =>
           prev && prev.path === from ? { ...prev, mtime: saved.mtime, text: next } : prev,
         )

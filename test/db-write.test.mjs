@@ -36,6 +36,13 @@ const setProperty = (() => {
   return rest.slice(0, rest.indexOf('const handleSave'))
 })()
 
+const addLink = (() => {
+  const from = PANE.indexOf('const handleAddLink')
+  if (from === -1) return ''
+  const rest = PANE.slice(from)
+  return rest.slice(0, rest.indexOf('const handleSave'))
+})()
+
 test('the write goes through saveNote, so it keeps a backup and runs the guard', () => {
   // The whole argument for this feature was that a property edit is a normal
   // save, not a new kind of write. A direct file API here would be the one
@@ -67,7 +74,9 @@ test('it refuses rather than merges when the note has unsaved edits open', () =>
   // And when it does write a note that IS open, it moves the buffer with it --
   // otherwise the editor shows frontmatter the file no longer has, and the next
   // Save silently undoes the property edit.
-  assert.match(setProperty, /if \(openHere\)[\s\S]*setBuffer\(next\)/)
+  // The check that the note is still open is `openPathRef`, not the captured
+  // `openHere` -- see 'the buffer is only touched if that note is STILL open'.
+  assert.match(setProperty, /if \(openPathRef\.current === path\)[\s\S]*setBuffer\(next\)/)
 })
 
 test('a failed write reaches the cell that asked for it', () => {
@@ -102,4 +111,23 @@ test('the two editable columns are the two hand-maintained scalars', () => {
   // updated is a stamp, and tags is a list setFrontmatter will not write.
   const cells = [...DB.matchAll(/onCommit=\{\(next\) => onSetProperty\(n\.path, '(\w+)'/g)].map((m) => m[1])
   assert.deepEqual(cells.sort(), ['status', 'type'])
+})
+
+test('the buffer is only touched if that note is STILL open after the awaits', () => {
+  // Both write handlers await a read and a save; the user can open another note
+  // in that window. A captured `selectedNote` says the old one is still open,
+  // so setBuffer would load note A's text under note C's identity -- isDirty
+  // flips and the next Save writes A over C. handleSave guards its
+  // setSelectedNote with a functional updater for the same reason, but that
+  // cannot guard setBuffer: its `prev` is the buffer, not the note.
+  assert.match(PANE, /const openPathRef = useRef<string \| null>\(null\)/)
+  assert.match(PANE, /openPathRef\.current = selectedNote\?\.path \?\? null/)
+  for (const [name, body] of [['handleSetProperty', setProperty], ['handleAddLink', addLink]]) {
+    const guard = body.slice(body.indexOf('saveNote'))
+    assert.match(guard, /openPathRef\.current === (path|from)/, `${name} guards setBuffer on a stale capture`)
+    assert.ok(
+      guard.indexOf('openPathRef.current') < guard.indexOf('setBuffer'),
+      `${name} sets the buffer before checking what is open`,
+    )
+  }
 })

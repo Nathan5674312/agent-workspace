@@ -76,7 +76,10 @@ test('failures land on the banner — a pointer handler cannot catch a rejection
 test('the editor buffer moves with the file when it is showing that note', () => {
   // Otherwise the editor shows a note without the link the file now has, and
   // the next Save quietly removes it again.
-  assert.match(addLink, /if \(selectedNote\?\.path === from\)[\s\S]{0,400}setBuffer\(next\)/)
+  // Checked against `openPathRef`, not the captured `selectedNote`: a read and
+  // a save have completed since this handler started, and the user can open
+  // another note in that window. See db-write's 'STILL open after the awaits'.
+  assert.match(addLink, /if \(openPathRef\.current === from\)[\s\S]{0,400}setBuffer\(next\)/)
 })
 
 test('the link spelling is chosen with the editor\'s own resolver', () => {

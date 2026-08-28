@@ -185,12 +185,42 @@ The refresh needed a second look. A first run showed the UI stuck at `4 notes, 4
 
 ---
 
-## Open decisions for Nathan
+## Decisions — settled 2026-08-27
 
-1. **`## Related` or `## Links`** for a section created fresh. Recommendation `## Related`; the data is close.
-2. **Bullet or `·` line** for a section created fresh. Recommendation bullet.
-3. **Should the edge be bidirectional?** A wikilink is one-way, and B gains a backlink automatically. Writing into both files doubles the blast radius of a mis-drag. Recommendation: one direction, source → target, and let backlinks do the rest.
-4. **Alt+drag, or wait for a keyboard/picker path first?** The gesture is discoverable only if something says so; the graph has no help text today.
+**1. `## Related`, not `## Links`.** The raw vault-wide count argues the other way (39 to 28). It loses on *where* those live:
+
+| Area | `## Related` | `## Links` |
+|---|---|---|
+| `Fate/` | **28** | 23 |
+| `Transcripts/` | 0 | 13 |
+| `Templates/` | 0 | 3 |
+
+`## Links` leads only because two areas use it exclusively, and neither is where notes get written and linked — `Fate/` holds 847 of the vault's links across 81 linked notes, and there `## Related` is ahead. Tiebreak: "Links" is already taken three times in this app. The database has **Links** and **Backlinks** columns counting outbound and inbound wikilinks, and the graph footer reads "N notes, M links". A section named after a number the app displays elsewhere, meaning something different, is a collision worth not creating.
+
+**2. A bullet, not a `·` line.** Here the data does *not* decide it — inside `Fate/` sections it is 32 bullet lines to 33 `·` ones, a near-perfect split. So it comes down to which is safer to *write*, and that is not close:
+
+- Appending a bullet is a **line insert**. Appending to a `·` line is a **string edit inside a line the user wrote**. This runs against notes nobody has open, so the two failure modes are not equal: a stray line is obvious and deletable, a mangled sentence is neither.
+- `·` lines do not wrap or scale. The longest in this vault is already 9 links (`Fate/SMB Agent Agency - GTM.md`), and a writer that only ever appends makes them longer.
+
+Both apply **only** when the note has no section — 1742 of 1900 notes, so this is the common path rather than a fallback. When a note has one, its own shape wins and neither constant is consulted. They live as two constants in `wikilink.ts`; if this ever ships to someone whose vault says otherwise, derive them by counting that vault's own headings at write time rather than growing a preferences screen.
+
+### Dry run against the real vault, with the settled defaults
+
+Read-only, nothing written. Linking every non-skill note at `Fate/Agent Workspace - Task Queue.md`:
+
+| | |
+|---|---|
+| would get a new `## Related` section | 143 |
+| appended into an existing section | 57 |
+| already linked, left untouched | 11 |
+| bytes added | 9019 total, avg 45/note |
+
+Link written: `[[Agent Workspace - Task Queue]]` — the short form, correct, since that stem is unique. All three section shapes behaved: a bullet list got a bullet, a `·` line got ` · [[…]]` on the same line, and a **bare** link line got its own new line rather than a `·` after its prose.
+
+## Still open
+
+1. **Should the edge be bidirectional?** A wikilink is one-way, and B gains a backlink automatically. Writing into both files doubles the blast radius of a mis-drag. Recommendation: one direction, source → target, and let backlinks do the rest. **Built one-way.**
+2. **Discoverability.** Alt+drag is unguessable and the graph has no help text. Nothing announces the gesture today.
 
 ## Explicitly out of scope
 

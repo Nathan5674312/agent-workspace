@@ -166,12 +166,41 @@ const BULLET = /^(\s*)([-*+])\s/
 /**
  * What a section created from scratch is called, and how its first line looks.
  *
- * BOTH ARE OPEN DECISIONS, deliberately left as two constants so settling them
- * is a one-line edit rather than a rewrite. The vault is genuinely split:
- * `## Related` 28 vs `## Links` 23 across Fate/, and 60 bullet lines against 33
- * `·`-separated ones. These are only ever used when the note has NO section
- * yet — when it has one, its own shape wins, which is why the split does not
- * have to be resolved before this can ship.
+ * SETTLED 2026-08-27, having been two open constants until then. They matter
+ * more than their size suggests: 1742 of 1900 notes have no such section, so
+ * this is the common path, not the fallback. When a note HAS a section its own
+ * shape wins and neither of these is consulted.
+ *
+ * `## Related`, and the raw vault-wide count argues the other way — `## Links`
+ * 39 to 28. It loses on WHERE those live. Broken down by area:
+ *
+ *     Fate/          ## Related 28   ## Links 23
+ *     Transcripts/   ## Related  0   ## Links 13
+ *     Templates/     ## Related  0   ## Links  3
+ *
+ * `## Links` leads only because two areas use it exclusively, and neither is
+ * where notes get written and linked: Fate/ holds 847 of the vault's links
+ * across 81 linked notes, and there `## Related` is ahead. The tiebreak is that
+ * "Links" is already taken three times over in this app — the database has
+ * Links and Backlinks columns counting outbound and inbound wikilinks, and the
+ * graph footer says "N notes, M links". A section named after a number the app
+ * displays elsewhere, meaning something else, is a collision worth avoiding.
+ *
+ * A BULLET, and here the data does not decide it: inside Fate/ sections it is
+ * 32 bullet lines to 33 `·` ones. Near-perfect split, so it comes down to which
+ * is safer to WRITE, and that is not close:
+ *
+ *   - Appending a bullet is a line insert. Appending to a `·` line is a string
+ *     edit inside a line the user wrote. This function runs against notes
+ *     nobody has open, so the failure modes are not equal — a stray line is
+ *     obvious and deletable, a mangled sentence is neither.
+ *   - `·` lines do not wrap or scale. The longest in this vault is already 9
+ *     links (`Fate/SMB Agent Agency - GTM.md`), and a writer that appends only
+ *     makes them longer.
+ *
+ * ponytail: two constants, not settings. If this ever ships to someone whose
+ * vault says otherwise, derive them by counting that vault's own headings at
+ * write time rather than growing a preferences screen for it.
  */
 export const NEW_HEADING = '## Related'
 const NEW_BULLET = '- '

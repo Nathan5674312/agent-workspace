@@ -513,11 +513,18 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
    * second while you drag would make the box breathe under the pointer, and the
    * only moment the answer matters is the one where you let go.
    *
-   * `skip` is the load-bearing argument. A group the user just dragged or
-   * resized THEMSELVES must be left exactly where they put it: fitting it would
-   * pull it straight back onto its contents, and the box would read as refusing
-   * to move. So direct manipulation of a group wins, and the fit only ever
-   * answers for what happened to the pages.
+   * `skip` is the load-bearing argument FOR THE GESTURE IN FLIGHT. A group the
+   * user is dragging or resizing right now must be left exactly where they put
+   * it: fitting it would pull it straight back onto its contents, and the box
+   * would read as refusing to move.
+   *
+   * `skip` alone is not enough, because it lasts exactly one release. A group
+   * sized by hand was pulled back onto its contents by the NEXT gesture
+   * anywhere on the board — drag one unrelated page and every deliberately
+   * roomy box on the board snapped shut. So the size the user set is also
+   * recorded on the group, and `groupFit` is handed it as a floor it may not
+   * shrink inside. See `sized` below and the `floor` argument in
+   * shared/canvas.ts.
    *
    * Mutates in place and reports whether anything moved, so the caller can
    * decide about the write — this runs on gestures that may not have changed a
@@ -528,7 +535,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     let changed = false
     for (const g of d.nodes) {
       if (g.type !== 'group' || skip.has(g)) continue
-      const box = groupFit(groupMembers(g, d.nodes), GROUP_PAD)
+      const box = groupFit(groupMembers(g, d.nodes), GROUP_PAD, g.sized ? g : null)
       if (!box) continue
       if (box.x === g.x && box.y === g.y && box.width === g.width && box.height === g.height) {
         continue
@@ -541,6 +548,43 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       changed = true
     }
     return changed
+  }
+
+  /**
+   * Puts a new page on the board, and lets whatever group it landed in take it.
+   *
+   * ONE PLACE, because there are five ways to make a page — the toolbar, the
+   * board menu's "New page here", Paste, Duplicate, and a note dragged out of
+   * the tree — and every one of them was a bare `doc.nodes.push`. So a page
+   * DRAGGED into a group grew the group to hold it and a page CREATED in the
+   * same spot did not, which made the group's behaviour depend on which door
+   * the page came through. A note dropped from the tree onto a group is the
+   * single most obvious way to fill one, and it was the case that did nothing.
+   *
+   * `groupMembers` decides by the page's centre, so this is exactly the
+   * membership the drag path would have produced had the page arrived that way.
+   *
+   * Nothing is skipped: the page is new, so no group on the board is mid-gesture
+   * and every one of them should answer for what it now holds.
+   *
+   * NOT used by `addGroupAt`. A group is never a member of a group, so a new one
+   * changes nothing about what any other group holds — and running the fit there
+   * would tighten the brand new box onto whatever it happened to be drawn over,
+   * which is the opposite of drawing a region to fill later.
+   *
+   * Declared HERE, beside `fitGroups`, rather than in the authoring section with
+   * most of its callers. `duplicateNode` and `pasteNode` are written well above
+   * that section, so it would be a `const` referenced from before its own
+   * declaration — harmless in fact, since every caller is an event handler and
+   * cannot run until long after this line has executed, but that is a fact about
+   * when handlers fire rather than about this file. GraphView carries a scar
+   * from the same reasoning (see the note on `dragging` there, where the
+   * accessor DID run during the call it was passed to). Declared above every
+   * caller, there is no ordering left to be right about.
+   */
+  const place = (d: CanvasDoc, node: CanvasNode) => {
+    d.nodes.push(node)
+    fitGroups(d, new Set())
   }
 
   /**
@@ -876,7 +920,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       x: Math.round(node.x + DUPLICATE_OFFSET),
       y: Math.round(node.y + DUPLICATE_OFFSET),
     }
-    doc.nodes.push(copy)
+    place(doc, copy)
     selectNode(copy.id, false)
     repaint()
     void persist(doc)
@@ -895,7 +939,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     copy.id = canvasId()
     copy.x = Math.round(wx - copy.width / 2)
     copy.y = Math.round(wy - copy.height / 2)
-    doc.nodes.push(copy)
+    place(doc, copy)
     selectNode(copy.id, false)
     repaint()
     void persist(doc)
@@ -1206,6 +1250,18 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     // A no-op must not write the file: every save takes a backup first, so
     // pressing this twice would fill .backups/ with identical copies.
     if (!changed) return
+    /**
+     * The groups have to answer for it too.
+     *
+     * This is the largest size change the board has — every page at once — and
+     * it was the only one that never fitted a group. So the button whose whole
+     * job is tidying left every group on the board carrying the shape of the
+     * pages it USED to hold, with the new ones hanging out of it. Resizing one
+     * page by hand already grew its group; resizing forty did not.
+     *
+     * Nothing is skipped: no gesture is in flight, this is a menu command.
+     */
+    fitGroups(doc, new Set())
     repaint()
     void persist(doc)
   }
@@ -1248,7 +1304,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       y: Math.round(p.y - PAGE_SIZE.height / 2),
       ...PAGE_SIZE,
     }
-    doc.nodes.push(node)
+    place(doc, node)
     // Straight into editing: an empty page with no cursor in it gives the user
     // nothing to act on and reads as a page that failed to be created.
     setEditing(node.id)
@@ -1357,7 +1413,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       // would be an acre of empty card under a single URL.
       height: LINK_HEIGHT,
     }
-    doc.nodes.push(node)
+    place(doc, node)
     selectNode(node.id, false)
     repaint()
     void persist(doc)
@@ -1422,7 +1478,7 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       y: Math.round(p.y - PAGE_SIZE.height / 2),
       ...PAGE_SIZE,
     }
-    doc.nodes.push(node)
+    place(doc, node)
     // Selected on arrival: the card is the thing the user is now working with,
     // and it is what a following Delete or Ctrl+Z should act on.
     selectNode(node.id, false)
@@ -1813,8 +1869,17 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
        * EXACTLY. Two pages that merely look the same size are the thing that
        * makes a board feel sloppy, and no amount of careful dragging lands on
        * the same integer twice.
+       *
+       * NOT FOR A GROUP, and the loop below already half knew it — it skips
+       * groups as candidates to match, but nothing stopped a group being the
+       * node BEING resized. So Shift on a group's grip forced US Letter
+       * proportions onto a region that has no house shape, and then snapped it
+       * to the exact size of some page, which is the one size a group must not
+       * be: a box the size of a page holds no page, because the padding it owes
+       * its contents does not fit inside it. Both halves of this answer "make
+       * this page the right shape", and a group is not a page.
        */
-      if (e.shiftKey && doc) {
+      if (e.shiftKey && doc && r.node.type !== 'group') {
         const ratio = PAGE_SIZE.width / PAGE_SIZE.height
         if (Math.abs(w - r.w0) >= Math.abs(h - r.h0)) h = Math.round(w / ratio)
         else w = Math.round(h * ratio)
@@ -2037,6 +2102,20 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       // Only when the size actually changed. A press on the grip that never
       // travelled is not an edit and must not write the file.
       if (doc && (r.node.width !== r.w0 || r.node.height !== r.h0)) {
+        /**
+         * THE SIZE WAS SET BY HAND, and that fact has to outlive the gesture.
+         *
+         * `sized` rides the spec's index signature exactly as `locked` does, so
+         * it survives the round trip through Obsidian rather than being dropped
+         * — and it has to be in the FILE, not in a ref, because the group must
+         * still be the size you left it after the board is closed and reopened.
+         *
+         * Skipping the node below only protects it from THIS release. Without
+         * the mark, the next drag of any page anywhere on the board refits every
+         * group and takes the box straight back to hugging its contents, which
+         * is the whole complaint: a group you widened did not stay widened.
+         */
+        if (r.node.type === 'group') r.node.sized = true
         // A page grown inside a group grows the group with it. The resized node
         // is skipped, which is what makes a GROUP still resizable by hand: fit
         // it here and the handle would spring back to the contents every time.

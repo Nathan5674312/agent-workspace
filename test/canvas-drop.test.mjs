@@ -108,9 +108,22 @@ test('the node a drop builds is one a canvas file can actually hold', () => {
 })
 
 test('a dropped card is added to the document, never rebuilt into a new one', () => {
-  const drop = VIEW.slice(VIEW.indexOf('const onDrop ='), VIEW.indexOf('const addEdge ='))
-  // The preservation rule: pushing onto the array parseCanvas returned keeps
-  // every group, colour and unknown field the file arrived with.
-  assert.match(drop, /doc\.nodes\.push\(node\)/, 'a drop rebuilds the document')
+  const from = VIEW.indexOf('const onDrop =')
+  const drop = VIEW.slice(from, VIEW.indexOf('const addEdge =', from))
+  assert.ok(drop.length > 0, 'onDrop no longer has the shape this test reads')
+  /*
+   * The preservation rule: the new node is PUSHED onto the array parseCanvas
+   * returned, which keeps every group, colour and unknown field the file
+   * arrived with. The push moved into `place()` when creation paths were
+   * routed through one helper, so this now checks the drop reaches that helper
+   * and that the helper is the thing that pushes. Asserting the literal
+   * `doc.nodes.push` inside onDrop failed on a refactor that never broke the
+   * rule it was guarding.
+   */
+  assert.match(drop, /place\(doc, node\)/, 'a drop no longer goes through place()')
   assert.match(drop, /void persist\(doc\)/, 'a dropped card is never saved')
+  const placeFrom = VIEW.indexOf('const place =')
+  assert.ok(placeFrom > 0, 'place() no longer exists')
+  const place = VIEW.slice(placeFrom, placeFrom + 200)
+  assert.match(place, /d\.nodes\.push\(node\)/, 'place() rebuilds the document')
 })

@@ -127,6 +127,66 @@ test('a page already on the interior line needs no fit at all', () => {
   assert.deepEqual(box, { x: g.x, y: g.y, width: g.width, height: g.height })
 })
 
+// ── the box somebody sized on purpose ─────────────────────────────
+
+/*
+ * Nathan's report: a group resized by hand does not stay resized.
+ *
+ * It stayed for exactly one release. `fitGroups` skips the node the gesture had
+ * hold of, so letting go of the handle left the box alone — and then the NEXT
+ * drag of any page anywhere on the board refitted every group on it and pulled
+ * the box straight back onto its contents. So the size survived the gesture that
+ * set it and nothing after that, which reads as the resize having been undone by
+ * something unrelated a moment later.
+ *
+ * `floor` is the durable half. CanvasView marks a group it watched the user
+ * resize and hands the mark back here as a box the fit may not shrink inside.
+ */
+
+test('a group sized by hand is not pulled back onto its contents', () => {
+  const roomy = { x: -200, y: -200, width: 900, height: 900 }
+  // One small page in the corner. Unfloored this collapses to 196x196.
+  assert.deepEqual(groupFit([page('a', 0, 0)], PAD, roomy), roomy)
+})
+
+test('a group sized by hand still grows to reach a page that has left it', () => {
+  // The half that must NOT be withheld. Growing answers for something the user
+  // just did to the pages; shrinking overrules something they did to the box.
+  const roomy = { x: 0, y: 0, width: 400, height: 400 }
+  const box = groupFit([page('a', 600, 100)], PAD, roomy)
+  assert.equal(box.x, 0, 'the hand-set left wall moved')
+  assert.equal(box.y, 0, 'the hand-set top wall moved')
+  // The page spans 600..700, so the right wall has to reach 748.
+  assert.equal(box.width, 748, 'the box did not reach the page outside it')
+  assert.equal(box.height, 400, 'a side the contents had not outgrown moved anyway')
+})
+
+test('the floored box always contains both', () => {
+  // The property, stated directly rather than left implied by the two cases
+  // above: whatever the members do, the hand-set walls are still inside.
+  const roomy = { x: -50, y: -50, width: 300, height: 300 }
+  for (const p of [page('a', 0, 0), page('a', 900, 900), page('a', -900, 40)]) {
+    const box = groupFit([p], PAD, roomy)
+    assert.ok(box.x <= roomy.x && box.y <= roomy.y, 'a wall moved inward')
+    assert.ok(box.x + box.width >= roomy.x + roomy.width, 'the right wall moved inward')
+    assert.ok(box.y + box.height >= roomy.y + roomy.height, 'the bottom wall moved inward')
+  }
+})
+
+test('an empty group is left alone even when it was sized by hand', () => {
+  // Emptiness wins over the floor, and it has to: the answer for an empty group
+  // is already "do not touch it", so a floor would be a longer way to say the
+  // same thing and a second rule to keep in agreement with the first.
+  assert.equal(groupFit([], PAD, { x: 0, y: 0, width: 500, height: 500 }), null)
+})
+
+test('with no floor the fit owns the box completely, exactly as before', () => {
+  // The ordinary case is unchanged, and this is what pins that the argument is
+  // an exemption rather than a change of behaviour for every group.
+  const members = [page('a', 0, 0)]
+  assert.deepEqual(groupFit(members, PAD, null), groupFit(members, PAD))
+})
+
 // ── a group carries what it holds ─────────────────────────────────
 
 /*
@@ -231,5 +291,91 @@ test('the fit is passed the same padding a group is built from', () => {
   // Not a literal 48. The inset the snap uses, the room a new group leaves and
   // the wall this fit puts up are one measurement, and a copy is how they start
   // to disagree.
-  assert.match(VIEW, /groupFit\(groupMembers\(g, d\.nodes\), GROUP_PAD\)/)
+  // `[,)]` because the fit gained a third argument — the floor a hand-sized
+  // group may not shrink inside. The padding is what this test is about and it
+  // is still the second one.
+  assert.match(VIEW, /groupFit\(groupMembers\(g, d\.nodes\), GROUP_PAD[,)]/)
+})
+
+test('a group resized by hand is marked, so a later gesture cannot undo it', () => {
+  // The mark goes on the NODE, which means it goes in the file. It has to: the
+  // group must still be the size you left it after the board is closed and
+  // reopened, and a ref does not survive that. `locked` is the precedent for
+  // riding the spec's index signature, and Obsidian carries both through.
+  const up = VIEW.slice(VIEW.indexOf('const onUp = () => {'))
+  assert.match(
+    up,
+    /if \(r\.node\.type === 'group'\) r\.node\.sized = true/,
+    'a hand resize is forgotten again the moment the gesture ends',
+  )
+})
+
+test('the mark is what the fit is handed as its floor', () => {
+  assert.match(
+    VIEW,
+    /groupFit\(groupMembers\(g, d\.nodes\), GROUP_PAD, g\.sized \? g : null\)/,
+    'the mark is recorded but never consulted',
+  )
+})
+
+test("Shift does not force a page's shape onto a group", () => {
+  // The loop inside already skipped groups as candidates to MATCH; nothing
+  // stopped a group being the node being resized. So Shift on a group's grip
+  // gave a region US Letter proportions and then snapped it to the exact size
+  // of some page — the one size a group cannot be, since the padding it owes
+  // its contents does not fit inside it.
+  assert.match(
+    VIEW,
+    /if \(e\.shiftKey && doc && r\.node\.type !== 'group'\) \{/,
+    'Shift treats a group like a page again',
+  )
+})
+
+test('the uniform-size sweep fits the groups too', () => {
+  // The largest size change the board has — every page at once — and the only
+  // one that never fitted a group, so the button whose job is tidying left every
+  // group carrying the shape of the pages it used to hold.
+  const fn = VIEW.slice(VIEW.indexOf('const uniformSize ='), VIEW.indexOf('const toWorld ='))
+  assert.ok(fn.length > 0, 'uniformSize no longer has the shape this test reads')
+  assert.match(fn, /fitGroups\(doc, new Set\(\)\)/, 'the sweep resizes every page and fits nothing')
+})
+
+/*
+ * A page DRAGGED into a group grew the group to hold it and a page CREATED in
+ * the same spot did not, so what a group did depended on which door the page
+ * came through. A note dropped from the tree onto a group is the most obvious
+ * way there is to fill one, and it was the case that did nothing.
+ */
+for (const [name, start, end] of [
+  ['addCardAt', 'const addCardAt =', 'const addCard ='],
+  ['duplicateNode', 'const duplicateNode =', 'const pasteNode ='],
+  ['pasteNode', 'const pasteNode =', 'const setNodeColor ='],
+  ['addLink', 'const addLink =', 'const addGroup ='],
+  ['onDrop', 'const onDrop =', 'const addEdge ='],
+]) {
+  test(`${name} lets the group its page landed in take it`, () => {
+    const src = VIEW.slice(VIEW.indexOf(start), VIEW.indexOf(end))
+    assert.ok(src.length > 0, `${name} no longer has the shape this test reads`)
+    assert.match(src, /place\(doc, /, `${name} skips the fit`)
+    assert.doesNotMatch(src, /doc\.nodes\.push\(/, `${name} still pushes straight onto the doc`)
+  })
+}
+
+test('a new GROUP is not fitted on creation', () => {
+  // The exception, and it is deliberate twice over. A group is never a member of
+  // a group, so a new one changes nothing about what any other group holds — and
+  // fitting it would tighten the brand new box onto whatever it was drawn over,
+  // which is the opposite of drawing a region to fill later.
+  const src = VIEW.slice(VIEW.indexOf('const addGroupAt ='), VIEW.indexOf('const addLink ='))
+  assert.ok(src.length > 0, 'addGroupAt no longer has the shape this test reads')
+  assert.match(src, /doc\.nodes\.push\(node\)/, 'a new group is now fitted to its contents')
+  assert.doesNotMatch(src, /place\(doc, /)
+})
+
+test('the Alt+drag copy is fitted by the release, not at the press', () => {
+  // It is created and then DRAGGED, so fitting at the press would grow a group
+  // around a copy that is about to be pulled out of it. The release already
+  // covers it — `created` is in the condition that runs the fit.
+  const up = VIEW.slice(VIEW.indexOf('const onUp = () => {'))
+  assert.match(up, /drag\.current\?\.moved \|\| drag\.current\?\.created/)
 })

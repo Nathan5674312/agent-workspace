@@ -380,9 +380,35 @@ export function setFrontmatter(text: string, key: string, value: string): string
  * would make the one note the table touched look machine-written.
  * `JSON.stringify` is the double-quoted YAML form for ordinary text, and it is
  * exactly what `parseFrontmatter` strips back off.
+ *
+ * THE DENYLIST WAS INCOMPLETE, and this app's own reader could never have shown
+ * it: `parseFrontmatter` takes every line as a string, so a value a REAL YAML
+ * parser mangles still round-trips perfectly here. Measured 2026-08-29 by
+ * feeding this function's output to js-yaml, and four of the misses did not
+ * mis-read one value — they made the WHOLE BLOCK fail to load, which in
+ * Obsidian is a note showing no properties at all:
+ *
+ *   `- item` `? maybe` `-`  block-sequence and complex-key indicators. Only
+ *                           indicators when followed by a space or the end of
+ *                           the line, so `-item` stays bare and correct.
+ *   `ends:`                 a trailing colon. `:\s` never matched end-of-line,
+ *                           and `a:b` mid-value is legal and still goes bare.
+ *   `#tag`                  the `: ` supplies the space that starts a comment,
+ *                           so the value read back as null.
+ *   `true` `null` `~` …     plain-resolved to a boolean or null instead of the
+ *                           string that was typed. The YAML 1.1 set, not 1.2's:
+ *                           js-yaml 4 reads `no` as a string, PyYAML reads it
+ *                           as False, and this vault is read by both.
+ *
+ * Numbers and dates are deliberately NOT in that last group. `updated:
+ * 2026-08-27` becoming a date and `42` becoming a number is what a human typing
+ * the same line gets, it is the convention in these notes, and quoting them
+ * would be the machine-written look this function exists to avoid.
  */
 function scalar(v: string): string {
-  return /^[>|&*!%@`'"[{]|:\s|\s#/.test(v) ? JSON.stringify(v) : v
+  return /^[>|&*!%@`'"[{#]|^[-?](?:\s|$)|:(?:\s|$)|\s#|^(?:true|false|yes|no|on|off|null|~)$/i.test(v)
+    ? JSON.stringify(v)
+    : v
 }
 
 /** The body after the frontmatter block, or the whole text when there is none. */

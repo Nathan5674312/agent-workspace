@@ -108,8 +108,30 @@ test('a value that would parse back as something else is quoted, and only then',
     assert.match(setFrontmatter(NOTE, 'status', plain), new RegExp(`status: ${plain.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}\n`))
   }
   // Quoted, because these do not survive bare.
-  for (const tricky of ['[draft]', '{a}', '*star', '&anchor', '>fold', 'a: b', 'x #tag', '"quoted"']) {
-    assert.equal(round(tricky), tricky, `round trip failed for ${tricky}`)
+  //
+  // ASSERTED ON THE QUOTING, not only on the round trip, because the round trip
+  // through this app's own reader passes for every one of these even when the
+  // quoting is missing — `parseFrontmatter` takes any line as a string. Every
+  // value below was measured through js-yaml on 2026-08-29; the four marked
+  // BLOCK made the entire frontmatter block fail to parse, i.e. a note that
+  // shows no properties at all in Obsidian.
+  const tricky = [
+    '[draft]', '{a}', '*star', '&anchor', '>fold', 'a: b', 'x #tag', '"quoted"',
+    '- item', '? maybe', '-', // BLOCK: sequence / complex-key indicators
+    'ends:', //                  BLOCK: trailing colon
+    '#tag', //                   read back as null — `: ` starts a comment
+    'true', 'false', 'null', '~', 'no', 'off', // resolve to booleans / null
+  ]
+  for (const v of tricky) {
+    assert.equal(round(v), v, `round trip failed for ${v}`)
+    assert.match(setFrontmatter(NOTE, 'status', v), /\nstatus: "/, `written bare: ${v}`)
+  }
+
+  // …and the near misses that are legal bare, so the guard is not just "quote
+  // everything". An indicator is only an indicator in the right position.
+  for (const plain of ['-item', '?maybe', 'a:b', ':leading', '2026-08-27', '42']) {
+    assert.equal(round(plain), plain, `round trip failed for ${plain}`)
+    assert.ok(setFrontmatter(NOTE, 'status', plain).includes(`\nstatus: ${plain}\n`), `needlessly quoted: ${plain}`)
   }
 })
 

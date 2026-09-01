@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import type { VaultNoteBody, VaultGraph } from '../../../shared/ipc.js'
 import { Editor } from './Editor.js'
 import { GraphView } from './GraphView.js'
@@ -80,7 +80,7 @@ export interface MainCanvasProps {
   onOpenWikilink: (link: WikilinkRef) => void
   discarded: { label: string; text: string } | null
   /** Where in the open note to land, from the link that opened it. */
-  anchor: { fragment: string; nonce: number } | null
+  anchor: { fragment?: string; line?: number; nonce: number } | null
   onBack: () => void
   onForward: () => void
   canGoBack: boolean
@@ -142,20 +142,51 @@ export function MainCanvas({
    * TTL, and is invalidated by our own saves. One cache, at the layer that
    * knows when it is stale — instead of a permanent one up here that never did.
    */
-  const handleSwitchToGraph = async () => {
-    onViewChange('graph')
-    try {
-      setLoadingGraph(true)
-      setGraphError(null)
-      // Read-only. The graph is a rebuildable cache derived from wikilinks and
-      // is never written back from this pane.
-      const g = await getGraph()
-      setGraph(g)
-    } catch (e) {
-      setGraphError(String(e))
-    } finally {
-      setLoadingGraph(false)
+  /**
+   * THE LOAD FOLLOWS THE VIEW, NOT THE CLICK, and that distinction is a bug fix.
+   *
+   * This used to live inside `handleSwitchToGraph`, which is the Graph TAB's
+   * onClick — so the data arrived only when the graph was reached by pressing
+   * that one control. The moment a second entry point existed (the Graph ribbon
+   * icon, which switches the view from VaultPane) the view rendered with
+   * `graph` still null and said "No graph data" over a vault with 470 nodes in
+   * it. The tab worked, the icon did not, and nothing about the code said why.
+   *
+   * Keyed on `view` alone, so every route into the graph loads it and there is
+   * only one place that can be wrong. `live` cancels a late response the same
+   * way every async effect in this pane does — leaving the graph view and
+   * coming back must not paint the first request's answer over the second's.
+   *
+   * The always-re-fetch contract below is preserved deliberately: it is cheap
+   * because the memo lives in the main process (`graph()` in vault.ts), where
+   * it has a TTL and is invalidated by our own saves. A memo up here is what
+   * used to make an added [[link]] invisible until the app restarted.
+   */
+  useEffect(() => {
+    if (view !== 'graph') return
+    let live = true
+    setLoadingGraph(true)
+    setGraphError(null)
+    // Read-only. The graph is a rebuildable cache derived from wikilinks and is
+    // never written back from this pane.
+    getGraph()
+      .then((g) => {
+        if (live) setGraph(g)
+      })
+      .catch((e: unknown) => {
+        if (live) setGraphError(String(e))
+      })
+      .finally(() => {
+        if (live) setLoadingGraph(false)
+      })
+    return () => {
+      live = false
     }
+  }, [view])
+
+  /** The tab now only changes the view; the effect above does the loading. */
+  const handleSwitchToGraph = () => {
+    onViewChange('graph')
   }
 
   /**

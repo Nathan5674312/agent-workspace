@@ -15,7 +15,6 @@ import {
   Calendar,
   History,
   SquareTerminal,
-  Blocks,
   type LucideIcon,
 } from 'lucide-react'
 
@@ -38,7 +37,21 @@ const VIEWS: { id: string; label: string; Icon: LucideIcon }[] = [
   { id: 'versions', label: 'Versions', Icon: History },
   { id: 'calendar', label: 'Daily notes', Icon: Calendar },
   { id: 'terminal', label: 'Terminal', Icon: SquareTerminal },
-  { id: 'plugins', label: 'Plugins', Icon: Blocks },
+  /**
+   * PLUGINS WAS REMOVED, and it is the one icon that was deleted rather than
+   * built. The roadmap's own entry is the reason: "the agent is the plugin
+   * system and the canvas is the render target. Building a JS plugin host would
+   * be choosing Obsidian's supply-chain risk on purpose." So this was not an
+   * unbuilt feature waiting its turn — it was a promise the product had already
+   * decided not to keep, and an icon that opens a panel saying "not built yet"
+   * for something that will never be built is the inert control this pane's
+   * review exists to forbid.
+   *
+   * The roadmap ENTRY stays. It records the position, which is worth keeping;
+   * what it no longer claims is a place in the ribbon. The extension story the
+   * entry points at is already on screen under Canvas, where boards an agent
+   * can run actually live.
+   */
 ]
 
 /**

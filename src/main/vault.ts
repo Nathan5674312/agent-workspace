@@ -58,6 +58,13 @@ import type {
 import { gate } from './consent.js'
 import { parseWikilinks } from '../shared/wikilink.ts'
 import { parseFrontmatter, parseList, type VaultNoteMeta } from '../shared/notemeta.ts'
+import {
+  isSearchable,
+  rankNotes,
+  searchText,
+  titleMatches,
+  type NoteHits,
+} from '../shared/search.ts'
 
 /**
  * The vault root on disk. Every read and every write in this file is resolved
@@ -2017,4 +2024,80 @@ async function buildIndex(): Promise<VaultIndex> {
 export async function backlinks(path: string): Promise<string[]> {
   const g = await graph()
   return [...new Set(g.links.filter((l) => l.to === path).map((l) => l.from))]
+}
+
+/**
+ * Full-text search across the vault.
+ *
+ * THE SAME WALK, THE SAME SKIPS, THE SAME SIZE CAP as `scan()`. That is the
+ * point rather than a coincidence: a note the explorer hides, the database
+ * omits and the graph does not draw must not surface here either, or search
+ * becomes the one surface that leaks `.trash`, `.backups` and every ignored
+ * folder back at the user. Sharing `tree()` and `isSkipped()` makes that true
+ * by construction instead of by a second list someone has to remember.
+ *
+ * IT RE-READS THE VAULT PER QUERY, and that is the honest first version.
+ * `scan()` cannot help: it deliberately throws each note's text away after
+ * extracting wikilink names, and its comment says why — peak memory. So there
+ * is nothing cached to grep, and caching the whole vault's text to avoid the
+ * read would trade a bounded cost for an unbounded one.
+ *
+ * Two things keep the cost bounded rather than merely small:
+ *   - the renderer debounces and will not send a query under two characters,
+ *     so this does not run per keystroke;
+ *   - `budget` stops the walk once enough notes have matched, so the common
+ *     case — a query that hits early — never reads the tail of the vault.
+ *
+ * ponytail: linear, no index. `Roadmap/02` settles on SQLite FTS5 + sqlite-vec
+ * and that is still right; this function is the one place that changes when it
+ * lands, because everything the renderer sees is already `NoteHits[]`.
+ */
+export async function search(query: string, budget = 200): Promise<NoteHits[]> {
+  if (!isSearchable(query)) return []
+
+  const { readFile, stat } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+
+  const paths: string[] = []
+  const collect = (n: VaultTreeNode): void => {
+    // Notes only. A `.canvas` is JSON and a `file` is not read at all, exactly
+    // as in scan() — searching a board's raw JSON would return card ids.
+    if (n.kind === 'note' && !isSkipped(n.path)) paths.push(n.path)
+    n.children?.forEach(collect)
+  }
+  collect(await tree())
+
+  const out: NoteHits[] = []
+  let matched = 0
+
+  // Bounded concurrency, same reason and same limit as scan(): a vault in the
+  // low thousands opens that many handles at once and takes EMFILE.
+  const LIMIT = 16
+  let cursor = 0
+  const worker = async (): Promise<void> => {
+    while (cursor < paths.length && matched < budget) {
+      const path = paths[cursor++]
+      const title = titleOf(path)
+      const titleMatch = titleMatches(title, query)
+      let text = ''
+      try {
+        const st = await stat(join(VAULT_DIR, path))
+        if (st.size <= MAX_TEXT_BYTES) text = await readFile(join(VAULT_DIR, path), 'utf8')
+      } catch {
+        // Deleted or unreadable between the walk and the read. A note that is
+        // gone is not a search failure, and failing the whole query over one
+        // file is the behaviour scan() already rejected.
+        continue
+      }
+      const { hits, truncated } = searchText(text, query)
+      // A title match with no body hits is still a result — that is how you
+      // find a note you named but never wrote in.
+      if (hits.length === 0 && !titleMatch) continue
+      out.push({ path, title, titleMatch, hits, truncated })
+      matched++
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(LIMIT, paths.length) }, worker))
+
+  return rankNotes(out)
 }

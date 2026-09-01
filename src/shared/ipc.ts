@@ -411,6 +411,7 @@ export type NetworkTrust = {
  * type without importing the parser, which is main-side work.
  */
 import type { Activity } from './transcript.js'
+import type { NoteHits } from './search.js'
 import { DEFAULT_THEME, type ThemeId } from './themes.js'
 export type { Activity }
 
@@ -420,6 +421,7 @@ export const CH = {
   vaultRead: 'vault:read',
   vaultSave: 'vault:save',
   vaultGraph: 'vault:graph',
+  vaultSearch: 'vault:search',
   vaultBacklinks: 'vault:backlinks',
   vaultVersions: 'vault:versions',
   vaultVersionText: 'vault:version-text',
@@ -477,6 +479,15 @@ export type Api = {
     read(path: string): Promise<VaultNoteBody>
     save(path: string, text: string, mtime: number): Promise<VaultNote>
     graph(): Promise<VaultGraph>
+    /**
+     * Full-text search. READ-ONLY, and it applies the same exclusions as the
+     * tree, so a note the explorer hides cannot surface here.
+     *
+     * Returns ranked notes rather than a flat line list, because the panel
+     * groups by note and a flat list would make the renderer re-derive the
+     * grouping the main process already knows.
+     */
+    search(query: string): Promise<NoteHits[]>
     backlinks(path: string): Promise<string[]>
     /** Every pre-edit copy of this note in `.backups/`, newest first. Read-only. */
     versions(path: string): Promise<NoteVersion[]>

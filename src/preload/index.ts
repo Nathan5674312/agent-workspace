@@ -22,6 +22,7 @@ function on<T extends unknown[]>(
 const api: Api = {
   vault: {
     tree: () => ipcRenderer.invoke(CH.vaultTree),
+    search: (query: string) => ipcRenderer.invoke(CH.vaultSearch, query),
     list: () => ipcRenderer.invoke(CH.vaultList),
     read: (path) => ipcRenderer.invoke(CH.vaultRead, path),
     save: (path, text, mtime) =>

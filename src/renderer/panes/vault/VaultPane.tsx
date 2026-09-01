@@ -30,6 +30,7 @@ import { SidebarPlaceholder } from './SidebarPlaceholder.js'
 import { CanvasList } from './CanvasView.js'
 import { SidebarResizer } from './SidebarResizer.js'
 import { TerminalView } from './TerminalView.js'
+import { SearchView } from './SearchView.js'
 import { BookmarksView } from './BookmarksView.js'
 import { DailyNotesView } from './DailyNotesView.js'
 import { ExplorerHeader } from './ExplorerHeader.js'
@@ -291,9 +292,29 @@ export function VaultPane(): React.ReactElement {
    * clicked in one note and consumed in another, and the editor for the second
    * one has not mounted yet at the moment of the click.
    */
-  const [anchor, setAnchor] = useState<{ fragment: string; nonce: number } | null>(
-    null,
-  )
+  const [anchor, setAnchor] = useState<{ fragment?: string; line?: number; nonce: number } | null>(null)
+
+  /**
+   * Open a search hit: the note, then the line it was found on.
+   *
+   * Goes through `openNote` like every other navigation, so an unsaved buffer
+   * still gets its confirmation and a conflict still stops the jump. The anchor
+   * is set only if the open actually happened, for the reason
+   * `handleOpenWikilink` states: landing on a line in a note the user just
+   * declined to leave would be acting on a navigation that never occurred.
+   *
+   * The view switch is not optional. Search is a SIDEBAR panel and the hit is
+   * in the editor, so without it a click loads the note behind whatever is on
+   * screen and reads as doing nothing — the same failure the calendar, the
+   * database table and the graph all document.
+   */
+  const handleOpenHit = (path: string, line: number) => {
+    void openNote(path).then((opened) => {
+      if (!opened) return
+      handleViewChange('editor')
+      setAnchor((a) => ({ line, nonce: (a?.nonce ?? 0) + 1 }))
+    })
+  }
 
   const canGoBack = nav.index > 0
   const canGoForward = nav.index >= 0 && nav.index < nav.trail.length - 1
@@ -1088,9 +1109,23 @@ export function VaultPane(): React.ReactElement {
          * versions would not be moving the feature, it would be deleting it.
          */}
         <LeftRibbon
-          activeView={view === 'versions' ? 'versions' : activeRibbon}
+          activeView={
+            view === 'versions' || view === 'graph' ? view : activeRibbon
+          }
           onViewChange={(id) => {
+            /**
+             * TWO ICONS OPEN A MAIN VIEW AND KEEP THE SIDEBAR THEY HAD, and
+             * they are the two whose feature is not a list.
+             *
+             * Versions was already here. Graph joins it because the graph is
+             * the whole canvas — its filters, forces and display controls live
+             * in the view itself (Roadmap note 10), so a sidebar copy of them
+             * would be a second set of the same knobs. Sending the icon to the
+             * view is the feature; taking the file tree away to show a panel
+             * about the view is not.
+             */
             if (id === 'versions') handleViewChange('versions')
+            else if (id === 'graph') handleViewChange('graph')
             else {
               setActiveRibbon(id)
               /**
@@ -1195,6 +1230,12 @@ export function VaultPane(): React.ReactElement {
                 onToggle={handleToggleFolder}
               />
             </>
+          ) : activeRibbon === 'search' ? (
+            /* The Search icon's first real panel. Reads through vault.search,
+               which applies the same exclusions as the tree — see the header of
+               src/shared/search.ts for why it is a linear scan and not an
+               index. */
+            <SearchView onOpenHit={handleOpenHit} />
           ) : activeRibbon === 'terminal' ? (
             /* The first ribbon icon to graduate from a placeholder to a real
                panel. The rest still describe themselves; see SidebarPlaceholder. */

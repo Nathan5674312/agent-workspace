@@ -70,6 +70,12 @@ const USER: Actor = { kind: 'user' }
 export function registerIpc(): void {
   handle(CH.vaultTree, () => vault.tree())
   handle(CH.vaultList, () => vault.list())
+  // Read-only, so no gate: it reads exactly what tree() already exposes.
+  // NO EVENT PARAMETER: `handle` above strips it and forwards only the args.
+  // Taking one here shifted every argument by one, so the query landed in the
+  // unused slot and every search ran against the empty string — which returns
+  // [] rather than throwing, so it looked like a vault with no matches in it.
+  handle(CH.vaultSearch, (query: string) => vault.search(String(query ?? '')))
   handle(CH.vaultRead, (p: string) => vault.read(p))
   handle(CH.vaultSave, (p: string, t: string, m: number) => vault.save(p, t, m, USER))
   handle(CH.vaultGraph, () => vault.graph())

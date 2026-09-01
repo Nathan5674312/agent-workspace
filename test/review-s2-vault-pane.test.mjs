@@ -71,7 +71,7 @@ test('every component named in the brief exists', () => {
   for (const f of required) assert.ok(FILES.includes(f), `missing ${f}`)
 })
 
-test('left ribbon carries all eight views', () => {
+test('left ribbon carries every view, and no icon promises a cut feature', () => {
   const code = src('LeftRibbon.tsx')
   for (const id of [
     'files',
@@ -79,11 +79,41 @@ test('left ribbon carries all eight views', () => {
     'bookmarks',
     'graph',
     'canvas',
+    'versions',
     'calendar',
     'terminal',
-    'plugins',
   ]) {
     assert.match(code, new RegExp(`id: '${id}'`), `ribbon missing ${id}`)
+  }
+  /**
+   * WAS EIGHT INCLUDING `plugins`, and dropping it is the point rather than a
+   * regression. The brief's own v1 cut bans a plugin API (see the test below),
+   * and roadmap.ts states the position: the agent is the plugin system and the
+   * canvas is the render target. An icon whose panel says "not built yet" for
+   * something that will never be built is the inert control this file exists to
+   * forbid, so it was removed rather than left as a placeholder forever.
+   *
+   * `versions` is asserted here for the first time. It was always in the list;
+   * the old spelling of this test simply predated it moving off the top strip.
+   */
+  assert.doesNotMatch(code, /id: 'plugins'/, 'plugins icon is back')
+})
+
+test('no ribbon icon falls through to the not-built placeholder', () => {
+  // THE ROADMAP'S OWN CRITERION for "Clean modern UI". Every id in the ribbon
+  // must be handled by name in the pane, or it lands in the `else` and renders
+  // SidebarPlaceholder — an icon that lights up and shows a panel about an
+  // unbuilt feature. `versions` and `graph` are handled in the ribbon's own
+  // onViewChange (they open a main view), the rest in the sidebar branch.
+  const ribbon = src('LeftRibbon.tsx')
+  const pane = src('VaultPane.tsx')
+  const ids = [...ribbon.matchAll(/id: '([a-z]+)'/g)].map((m) => m[1])
+  assert.ok(ids.length >= 8, `only ${ids.length} ribbon ids found`)
+  for (const id of ids) {
+    assert.ok(
+      pane.includes(`activeRibbon === '${id}'`) || pane.includes(`id === '${id}'`),
+      `ribbon '${id}' is not handled in VaultPane, so it renders the placeholder`,
+    )
   }
 })
 

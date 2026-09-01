@@ -65,7 +65,12 @@ test('the placeholder titles itself with the ribbon\'s own label', () => {
 
 test('featureForRibbon binds icons to roadmap entries, and only real ones', () => {
   assert.equal(featureForRibbon('search')?.label, 'Fast search')
-  assert.equal(featureForRibbon('plugins')?.label, 'API / plugin ecosystem')
+  // `plugins` no longer binds: the icon was removed 2026-08-31 and the roadmap
+  // entry dropped its `surface` with it. The entry still EXISTS — it records the
+  // position that a JS plugin host will not be built — it simply no longer
+  // claims a place in the ribbon, and this is the assertion that would have
+  // caught it if only one half had been changed.
+  assert.equal(featureForRibbon('plugins'), undefined)
   assert.equal(featureForRibbon('canvas')?.label, 'Whiteboard / canvas view')
   // Bookmarks USED to be the no-entry case and is now a built feature with its
   // own panel, so `graph` carries that half of the contract: no entry is not a
@@ -76,10 +81,10 @@ test('featureForRibbon binds icons to roadmap entries, and only real ones', () =
 
 test('no ribbon: surface points at an id the ribbon does not have', () => {
   const ids = [...src('LeftRibbon.tsx').matchAll(/id: '([a-z]+)'/g)].map((m) => m[1])
-  // Nine since Versions moved off the top strip and into the rail. Still an
-  // EXACT count rather than a floor: the point is that adding or dropping an
-  // icon is a deliberate act that shows up here.
-  assert.equal(ids.length, 9, 'expected the nine ribbon views')
+  // EIGHT. It was nine until `plugins` was removed on 2026-08-31, and it stays
+  // an EXACT count rather than a floor for the reason it always was: adding or
+  // dropping an icon should be a deliberate act that shows up right here.
+  assert.equal(ids.length, 8, 'expected the eight ribbon views')
   for (const f of ALL_FEATURES.filter((f) => f.surface?.startsWith('ribbon:'))) {
     const id = f.surface.slice('ribbon:'.length)
     assert.ok(ids.includes(id), `roadmap points at ribbon:${id}, which no icon declares`)

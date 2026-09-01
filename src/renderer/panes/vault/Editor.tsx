@@ -39,7 +39,7 @@ export interface EditorProps {
    * the effect below would not re-run, because neither the note nor the
    * fragment changed. The nonce is what makes "again" a different value.
    */
-  anchor: { fragment: string; nonce: number } | null
+  anchor: { fragment?: string; line?: number; nonce: number } | null
 }
 
 export function Editor({
@@ -80,9 +80,30 @@ export function Editor({
   useEffect(() => {
     setNotice(null)
     if (!anchor) return
-    const line = anchorLine(text, anchor.fragment)
-    if (line === null) {
-      setNotice(`Nothing in this note is marked #${anchor.fragment}.`)
+    /**
+     * TWO WAYS TO NAME A LINE, and only one of them can fail.
+     *
+     * A wikilink names a `#heading` or `#^block-id`, which has to be RESOLVED
+     * against the text and may match nothing — that is the notice below. A
+     * search hit already knows the line number, because the main process found
+     * it there, so it is used directly. Resolving it a second time here would
+     * mean re-running the match in the renderer and getting a different answer
+     * whenever the file changed underneath.
+     *
+     * Clamped, not trusted: the note can have been edited between the search
+     * and the click, and `setSelectionRange` past the end selects nothing at
+     * all, which reads as the click having done nothing.
+     */
+    let line: number | null
+    if (anchor.line !== undefined) {
+      line = Math.min(Math.max(anchor.line, 0), text.split('\n').length - 1)
+    } else if (anchor.fragment !== undefined) {
+      line = anchorLine(text, anchor.fragment)
+      if (line === null) {
+        setNotice(`Nothing in this note is marked #${anchor.fragment}.`)
+        return
+      }
+    } else {
       return
     }
     const textarea = textareaRef.current

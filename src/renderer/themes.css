@@ -76,75 +76,86 @@
   --success: #8d9b63; /* 6.25:1 */
 }
 
-/* MIDNIGHT — deep navy. The darkest ground in the set (#0b1020), which is the
-   point: it is the low-light theme, meant for a dark room where even Ink reads
-   as bright. Labels carry real blue rather than grey, so it stays a colour
-   scheme instead of a dimmer. */
-:root[data-theme='midnight'] {
-  --scrim-rgb: 11, 16, 32;
-  --bg-app: #0b1020;
-  --bg-elevated: #131a2e;
-  --bg-sunken: #070b16;
-  --material-heavy: rgba(11, 16, 32, 0.82);
-  --material-regular: rgba(19, 26, 46, 0.68);
-  --material-light: rgba(204, 211, 228, 0.06);
-  --fill-hover: rgba(204, 211, 228, 0.07);
-  --fill-active: rgba(204, 211, 228, 0.12);
-  --fill-selected: rgba(204, 211, 228, 0.10);
-  --label: #b2bdd5; /* 10.04:1 */
-  --label-secondary: #92a2c5; /* 7.39:1 */
-  --label-tertiary: #6e83b1; /* 5.00:1 */
-  --label-quaternary: #566da1; /* 3.69:1 */
-  --label-on-accent: #0b1020;
-  --separator: rgba(204, 211, 228, 0.08);
-  --separator-opaque: #2c3752;
-  --edge-highlight: rgba(204, 211, 228, 0.14);
-  --accent: #ccd3e4; /* 12.63:1 */
-  --accent-pressed: #b2bdd5;
+/* MIDNIGHT - near pitch black, and NEUTRAL. Ground #060607, sunken pure #000.
 
-  /* Semantic. HUES ARE FIXED at the founder's 15 / 31 / 75 and only the
-     lightness is solved, because a status colour has to stay the colour it
-     is named after. Pulling them toward the theme hue was tried and thrown
-     away: on a warm ground danger and warning both land near 28 and become
-     the same swatch, which is worse than looking slightly foreign. */
-  --danger: #bc5d3c; /* 4.30:1 */
-  --warning: #d09352; /* 7.19:1 */
-  --success: #8c9b63; /* 6.30:1 */
+   REBUILT 2026-08-31. It was a deep navy, which made it a second blue theme
+   rather than the dark end of the scale. The pair now divides by DEPTH, not by
+   hue: Dark is for people who want grey, Midnight for people who want as close
+   to black as a UI can get and still show a hairline. Sunken is #000000 - on an
+   OLED panel those pixels are off.
+
+   Text runs near-white rather than tinted, because at this depth any tint reads
+   as a colour cast over the whole app. That also buys the highest contrast in
+   the set: body text at 17.3:1. */
+:root[data-theme='midnight'] {
+  --scrim-rgb: 6, 6, 7;
+  --bg-app: #060607;
+  --bg-elevated: #101012;
+  --bg-sunken: #000000;
+  --material-heavy: rgba(6, 6, 7, 0.82);
+  --material-regular: rgba(16, 16, 18, 0.68);
+  --material-light: rgba(255, 255, 255, 0.06);
+  --fill-hover: rgba(255, 255, 255, 0.07);
+  --fill-active: rgba(255, 255, 255, 0.12);
+  --fill-selected: rgba(255, 255, 255, 0.10);
+  --label: #ededed; /* 17.30:1 */
+  --label-secondary: #c2c2c2; /* 11.37:1 */
+  --label-tertiary: #8d8d8d; /* 6.10:1 */
+  --label-quaternary: #6a6a6a; /* 3.74:1 */
+  --label-on-accent: #060607;
+  --separator: rgba(255, 255, 255, 0.08);
+  --separator-opaque: #303032;
+  --edge-highlight: rgba(255, 255, 255, 0.14);
+  --accent: #ffffff; /* 20.25:1 */
+  --accent-pressed: #ededed;
+  --danger: #e06c5a; /* 6.23:1 */
+  --warning: #e0a45c; /* 9.29:1 */
+  --success: #9aab6a; /* 8.11:1 */
 }
 
-/* SLATE — cool blue-grey, and the LIGHTEST of the dark grounds. The one to
-   reach for on a bright screen in daylight, where a near-black app forces the
-   display's own contrast to do the work. */
-:root[data-theme='slate'] {
-  --scrim-rgb: 20, 24, 29;
-  --bg-app: #14181d;
-  --bg-elevated: #1e242b;
-  --bg-sunken: #0e1114;
-  --material-heavy: rgba(20, 24, 29, 0.82);
-  --material-regular: rgba(30, 36, 43, 0.68);
-  --material-light: rgba(213, 217, 222, 0.06);
-  --fill-hover: rgba(213, 217, 222, 0.07);
-  --fill-active: rgba(213, 217, 222, 0.12);
-  --fill-selected: rgba(213, 217, 222, 0.10);
-  --label: #bbc2ca; /* 9.92:1 */
-  --label-secondary: #9ea9b3; /* 7.45:1 */
-  --label-tertiary: #7b8a98; /* 5.03:1 */
-  --label-quaternary: #667481; /* 3.72:1 */
-  --label-on-accent: #14181d;
-  --separator: rgba(213, 217, 222, 0.08);
-  --separator-opaque: #353d44;
-  --edge-highlight: rgba(213, 217, 222, 0.14);
-  --accent: #d5d9de; /* 12.57:1 */
-  --accent-pressed: #bbc2ca;
+/* NORD - the arctic palette by Arctic Ice Studio (nordtheme.com, MIT), used
+   with its own values: nord0 #2e3440 as the ground, nord1 elevated, the Snow
+   Storm ramp for text, Aurora for the semantics.
 
-  /* Semantic. HUES ARE FIXED at the founder's 15 / 31 / 75 and only the
-     lightness is solved, because a status colour has to stay the colour it
-     is named after. Pulling them toward the theme hue was tried and thrown
-     away: on a warm ground danger and warning both land near 28 and become
-     the same swatch, which is worse than looking slightly foreign. */
-  --danger: #c2613f; /* 4.31:1 */
-  --warning: #d29a5d; /* 7.23:1 */
-  --success: #929f69; /* 6.27:1 */
+   REPLACES 'slate', which was the same idea done badly. Slate was one hue at
+   one saturation with only the lightness solved, and that is exactly what makes
+   a palette look mechanical - a real one varies hue AND saturation across the
+   ramp, which is the work Nord already did.
+
+   TWO DEVIATIONS, both forced and both minimal:
+   - The accent is pure white. Nord's ground is the lightest in this set, so
+     nothing in Snow Storm reaches the 12:1 the accent role requires here
+     (nord6 manages 10.84). Nord's own accent, nord8 #88c0d0, is a HUE, and this
+     app's accent is deliberately not one - see tokens.css section 4b.
+   - Aurora red nord11 #bf616a is only 3.05:1 on nord0, under the danger floor.
+     Lightened to #cd848b with the hue held at 354, so it is still Aurora's red.
+
+   Tertiary is interpolated: Nord jumps from nord3 (1.6:1) straight to nord4,
+   with nothing at the AA step this app needs. */
+:root[data-theme='nord'] {
+  --scrim-rgb: 46, 52, 64;
+  --bg-app: #2e3440;
+  --bg-elevated: #3b4252;
+  --bg-sunken: #272c36;
+  --material-heavy: rgba(46, 52, 64, 0.82);
+  --material-regular: rgba(59, 66, 82, 0.68);
+  --material-light: rgba(255, 255, 255, 0.06);
+  --fill-hover: rgba(255, 255, 255, 0.07);
+  --fill-active: rgba(255, 255, 255, 0.12);
+  --fill-selected: rgba(255, 255, 255, 0.10);
+  --label: #eceff4; /* 10.84:1 */
+  --label-secondary: #d8dee9; /* 9.25:1 */
+  --label-tertiary: #a7b1c2; /* 5.78:1 */
+  --label-quaternary: #8b96a8; /* 4.18:1 */
+  --label-on-accent: #2e3440;
+  --separator: rgba(255, 255, 255, 0.08);
+  --separator-opaque: #475163;
+  --edge-highlight: rgba(255, 255, 255, 0.14);
+  --accent: #ffffff; /* 12.49:1 */
+  --accent-pressed: #eceff4;
+  --danger: #cd848b; /* 4.32:1 */
+  --warning: #ebcb8b; /* 8.00:1 */
+  --success: #a3be8c; /* 6.13:1 */
 }
 
 /* FOREST — deep green. Furthest from the founder's warmth while keeping the
@@ -183,39 +194,42 @@
   --success: #8d9b63; /* 6.24:1 */
 }
 
-/* PLUM — deep violet. The founder's warmth pushed off its hue rather than
-   drained out of it, so it stays in the same family of moods as the default
-   without being a second brown. */
-:root[data-theme='plum'] {
-  --scrim-rgb: 21, 14, 26;
-  --bg-app: #150e1a;
-  --bg-elevated: #201528;
-  --bg-sunken: #0e0912;
-  --material-heavy: rgba(21, 14, 26, 0.82);
-  --material-regular: rgba(32, 21, 40, 0.68);
-  --material-light: rgba(220, 207, 224, 0.06);
-  --fill-hover: rgba(220, 207, 224, 0.07);
-  --fill-active: rgba(220, 207, 224, 0.12);
-  --fill-selected: rgba(220, 207, 224, 0.10);
-  --label: #c9b5d0; /* 9.92:1 */
-  --label-secondary: #b499bd; /* 7.42:1 */
-  --label-tertiary: #9b76a8; /* 5.00:1 */
-  --label-quaternary: #865f94; /* 3.68:1 */
-  --label-on-accent: #150e1a;
-  --separator: rgba(220, 207, 224, 0.08);
-  --separator-opaque: #44304b;
-  --edge-highlight: rgba(220, 207, 224, 0.14);
-  --accent: #dccfe0; /* 12.66:1 */
-  --accent-pressed: #c9b5d0;
+/* ROSE PINE - rosepinetheme.com (MIT). Base #191724 and surface #1f1d2e as the
+   grounds, the text/subtle/muted ramp for labels, love and gold for semantics.
 
-  /* Semantic. HUES ARE FIXED at the founder's 15 / 31 / 75 and only the
-     lightness is solved, because a status colour has to stay the colour it
-     is named after. Pulling them toward the theme hue was tried and thrown
-     away: on a warm ground danger and warning both land near 28 and become
-     the same swatch, which is worse than looking slightly foreign. */
-  --danger: #bc5d3c; /* 4.30:1 */
-  --warning: #d09352; /* 7.19:1 */
-  --success: #8c9b63; /* 6.29:1 */
+   REPLACES 'plum', which was a single violet with the lightness solved and
+   nothing else - flat in exactly the way this palette is not. Rose Pine's ground
+   is violet but its text carries a different tint again, and that is what stops
+   it reading as one colour at three brightnesses.
+
+   ONE SUBSTITUTION: Rose Pine has NO green. Its success role is `pine` #31748f,
+   a teal, which fails the "is this actually green" check the semantic test
+   makes. Rather than borrow another palette's green, one is solved in this
+   palette's own terms at hue 95. */
+:root[data-theme='rosepine'] {
+  --scrim-rgb: 25, 23, 36;
+  --bg-app: #191724;
+  --bg-elevated: #1f1d2e;
+  --bg-sunken: #12101c;
+  --material-heavy: rgba(25, 23, 36, 0.82);
+  --material-regular: rgba(31, 29, 46, 0.68);
+  --material-light: rgba(242, 240, 255, 0.06);
+  --fill-hover: rgba(242, 240, 255, 0.07);
+  --fill-active: rgba(242, 240, 255, 0.12);
+  --fill-selected: rgba(242, 240, 255, 0.10);
+  --label: #e0def4; /* 13.39:1 */
+  --label-secondary: #c3bfdd; /* 9.94:1 */
+  --label-tertiary: #9d98bd; /* 6.44:1 */
+  --label-quaternary: #7f7a9e; /* 4.36:1 */
+  --label-on-accent: #191724;
+  --separator: rgba(242, 240, 255, 0.08);
+  --separator-opaque: #3a3750;
+  --edge-highlight: rgba(242, 240, 255, 0.14);
+  --accent: #f2f0ff; /* 15.71:1 */
+  --accent-pressed: #e0def4;
+  --danger: #eb6f92; /* 6.07:1 */
+  --warning: #f6c177; /* 10.77:1 */
+  --success: #7aa75b; /* 6.31:1 */
 }
 
 /* PARCHMENT — the one LIGHT theme, and the only palette here that inverts the

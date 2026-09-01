@@ -18,9 +18,9 @@ export type ThemeId =
   | 'founders'
   | 'dark'
   | 'midnight'
-  | 'slate'
+  | 'nord'
   | 'forest'
-  | 'plum'
+  | 'rosepine'
   | 'parchment'
 
 export type Theme = {
@@ -37,11 +37,19 @@ export const THEMES: Theme[] = [
     label: "Founder's",
     hint: 'The owner-supplied warm browns. The palette the app was designed in.',
   },
-  { id: 'dark', label: 'Dark', hint: 'Neutral graphite, no hue of its own.' },
-  { id: 'midnight', label: 'Midnight', hint: 'Deep navy. The darkest ground, for a dark room.' },
-  { id: 'slate', label: 'Slate', hint: 'Cool blue-grey, and the lightest of the darks.' },
+  { id: 'dark', label: 'Dark', hint: "Neutral graphite. The grey one, next to Midnight's black." },
+  {
+    id: 'midnight',
+    label: 'Midnight',
+    hint: 'Near pitch black, neutral. The deep end of the scale; Dark is the grey one.',
+  },
+  { id: 'nord', label: 'Nord', hint: 'The arctic blue-grey palette, at its own values.' },
   { id: 'forest', label: 'Forest', hint: 'Deep green. Furthest from the default warmth.' },
-  { id: 'plum', label: 'Plum', hint: 'Deep violet. The warmth moved off its hue, not drained.' },
+  {
+    id: 'rosepine',
+    label: 'Rosé Pine',
+    hint: 'Muted rose and violet on a soft dark ground.',
+  },
   {
     id: 'parchment',
     label: 'Parchment',

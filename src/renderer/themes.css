@@ -65,6 +65,15 @@
   --edge-highlight: rgba(213, 212, 211, 0.14);
   --accent: #d5d4d3; /* 12.66:1 */
   --accent-pressed: #bebcbb;
+
+  /* Semantic. HUES ARE FIXED at the founder's 15 / 31 / 75 and only the
+     lightness is solved, because a status colour has to stay the colour it
+     is named after. Pulling them toward the theme hue was tried and thrown
+     away: on a warm ground danger and warning both land near 28 and become
+     the same swatch, which is worse than looking slightly foreign. */
+  --danger: #bd5d3c; /* 4.28:1 */
+  --warning: #d09554; /* 7.23:1 */
+  --success: #8d9b63; /* 6.25:1 */
 }
 
 /* MIDNIGHT — deep navy. The darkest ground in the set (#0b1020), which is the
@@ -92,6 +101,15 @@
   --edge-highlight: rgba(204, 211, 228, 0.14);
   --accent: #ccd3e4; /* 12.63:1 */
   --accent-pressed: #b2bdd5;
+
+  /* Semantic. HUES ARE FIXED at the founder's 15 / 31 / 75 and only the
+     lightness is solved, because a status colour has to stay the colour it
+     is named after. Pulling them toward the theme hue was tried and thrown
+     away: on a warm ground danger and warning both land near 28 and become
+     the same swatch, which is worse than looking slightly foreign. */
+  --danger: #bc5d3c; /* 4.30:1 */
+  --warning: #d09352; /* 7.19:1 */
+  --success: #8c9b63; /* 6.30:1 */
 }
 
 /* SLATE — cool blue-grey, and the LIGHTEST of the dark grounds. The one to
@@ -118,6 +136,15 @@
   --edge-highlight: rgba(213, 217, 222, 0.14);
   --accent: #d5d9de; /* 12.57:1 */
   --accent-pressed: #bbc2ca;
+
+  /* Semantic. HUES ARE FIXED at the founder's 15 / 31 / 75 and only the
+     lightness is solved, because a status colour has to stay the colour it
+     is named after. Pulling them toward the theme hue was tried and thrown
+     away: on a warm ground danger and warning both land near 28 and become
+     the same swatch, which is worse than looking slightly foreign. */
+  --danger: #c2613f; /* 4.31:1 */
+  --warning: #d29a5d; /* 7.23:1 */
+  --success: #929f69; /* 6.27:1 */
 }
 
 /* FOREST — deep green. Furthest from the founder's warmth while keeping the
@@ -145,6 +172,15 @@
   --edge-highlight: rgba(197, 216, 207, 0.14);
   --accent: #c5d8cf; /* 12.57:1 */
   --accent-pressed: #a6c3b5;
+
+  /* Semantic. HUES ARE FIXED at the founder's 15 / 31 / 75 and only the
+     lightness is solved, because a status colour has to stay the colour it
+     is named after. Pulling them toward the theme hue was tried and thrown
+     away: on a warm ground danger and warning both land near 28 and become
+     the same swatch, which is worse than looking slightly foreign. */
+  --danger: #be5e3c; /* 4.33:1 */
+  --warning: #d09555; /* 7.23:1 */
+  --success: #8d9b63; /* 6.24:1 */
 }
 
 /* PLUM — deep violet. The founder's warmth pushed off its hue rather than
@@ -171,6 +207,15 @@
   --edge-highlight: rgba(220, 207, 224, 0.14);
   --accent: #dccfe0; /* 12.66:1 */
   --accent-pressed: #c9b5d0;
+
+  /* Semantic. HUES ARE FIXED at the founder's 15 / 31 / 75 and only the
+     lightness is solved, because a status colour has to stay the colour it
+     is named after. Pulling them toward the theme hue was tried and thrown
+     away: on a warm ground danger and warning both land near 28 and become
+     the same swatch, which is worse than looking slightly foreign. */
+  --danger: #bc5d3c; /* 4.30:1 */
+  --warning: #d09352; /* 7.19:1 */
+  --success: #8c9b63; /* 6.29:1 */
 }
 
 /* PARCHMENT — the one LIGHT theme, and the only palette here that inverts the
@@ -201,6 +246,15 @@
   --edge-highlight: rgba(50, 37, 27, 0.14);
   --accent: #32251b; /* 12.74:1 */
   --accent-pressed: #473526;
+
+  /* Semantic. HUES ARE FIXED at the founder's 15 / 31 / 75 and only the
+     lightness is solved, because a status colour has to stay the colour it
+     is named after. Pulling them toward the theme hue was tried and thrown
+     away: on a warm ground danger and warning both land near 28 and become
+     the same swatch, which is worse than looking slightly foreign. */
+  --danger: #b7502c; /* 4.30:1 */
+  --warning: #6e4416; /* 7.21:1 */
+  --success: #515b35; /* 6.23:1 */
 }
 
 

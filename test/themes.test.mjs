@@ -105,6 +105,10 @@ const REQUIRED = [
   '--label', '--label-secondary', '--label-tertiary', '--label-quaternary',
   '--label-on-accent', '--separator', '--separator-opaque', '--edge-highlight',
   '--accent', '--accent-pressed',
+  // Semantic. Unthemed, these stayed the founder's warm amber on every palette
+  // — the Roadmap status pills were the visible symptom, and on Parchment
+  // --warning fell to about 2:1 on paper, which is unreadable rather than ugly.
+  '--danger', '--warning', '--success',
 ]
 
 test('no theme is half-written — every one sets the full colour set', () => {
@@ -196,6 +200,58 @@ test('the elevated and sunken grounds stay near the app ground, never a step of 
       assert.ok(r < 1.8, `${id} ${key} is ${r.toFixed(2)}:1 from --bg-app, too much separation`)
     }
   }
+})
+
+const HUE = (hex) => {
+  const [r, g, b] = parseHex(hex)
+  const mx = Math.max(r, g, b), mn = Math.min(r, g, b), d = mx - mn
+  if (!d) return null
+  const h = mx === r ? ((g - b) / d) % 6 : mx === g ? (b - r) / d + 2 : (r - g) / d + 4
+  return (h * 60 + 360) % 360
+}
+
+test('semantic colours are readable on every ground, including the light one', () => {
+  // The founder's own ratios are the bar: danger 4.30, warning 7.23, success
+  // 6.29 against Ink. Floors sit just under those — danger is only 4.30 in the
+  // default, so a 4.5 floor would fail the palette the app ships in.
+  const FLOORS = [['--danger', 4.2], ['--warning', 7.0], ['--success', 6.0]]
+  for (const [id, tokens] of P) {
+    for (const [key, floor] of FLOORS) {
+      const r = ratio(tokens.get(key), tokens.get('--bg-app'))
+      assert.ok(r >= floor, `${id} ${key} is ${r.toFixed(2)}:1, needs ${floor}`)
+    }
+  }
+})
+
+test('danger, warning and success stay three DIFFERENT colours', () => {
+  // THE GUARD ON A MISTAKE THAT WAS ACTUALLY MADE. Seating the semantics in
+  // each theme's family by pulling their hue toward the theme hue collapses
+  // them: on a warm ground danger and warning both land near 28 and render as
+  // the same swatch, so "Partial" and "Stop" become indistinguishable. Hues are
+  // therefore FIXED at the founder's and only lightness is solved. A status
+  // colour that is seated but unreadable is worse than one that looks foreign.
+  for (const [id, tokens] of P) {
+    const d = HUE(tokens.get('--danger'))
+    const w = HUE(tokens.get('--warning'))
+    const s = HUE(tokens.get('--success'))
+    const gap = (a, b) => Math.abs(((a - b + 180) % 360) - 180)
+    assert.ok(gap(d, w) >= 12, `${id} danger(${d|0}) and warning(${w|0}) are the same hue`)
+    assert.ok(gap(w, s) >= 12, `${id} warning(${w|0}) and success(${s|0}) are the same hue`)
+    // And each still IS the colour its name promises.
+    assert.ok(d < 25 || d > 340, `${id} --danger at hue ${d | 0} is not red`)
+    assert.ok(w >= 25 && w <= 50, `${id} --warning at hue ${w | 0} is not amber`)
+    assert.ok(s >= 60 && s <= 160, `${id} --success at hue ${s | 0} is not green`)
+  }
+})
+
+test("no stylesheet hardcodes a semantic colour behind the token's back", () => {
+  // Two panels wrote --danger and --warning out as literal rgba at low alpha,
+  // so they kept the founder's amber under every theme. The rest of app.css
+  // already used color-mix over the token; these now do too.
+  const css = read('src/renderer/app.css')
+  assert.doesNotMatch(css, /rgba\(196,\s*85,\s*47/, 'hardcoded --danger')
+  assert.doesNotMatch(css, /rgba\(217,\s*142,\s*60/, 'hardcoded --warning')
+  assert.doesNotMatch(css, /rgba\(138,\s*154,\s*91/, 'hardcoded --success')
 })
 
 test('the scrim follows the ground, or a brown film lands on a green app', () => {

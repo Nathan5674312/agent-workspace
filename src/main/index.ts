@@ -28,6 +28,12 @@ function createWindow(): BrowserWindow {
     minWidth: 1100,
     minHeight: 700,
     show: false,
+    // Unpackaged only. A packaged Windows build takes its window icon from the
+    // exe's own resource, which electron-builder writes from build/icon.ico, and
+    // build/ is not in the `files` allowlist so this path does not exist inside
+    // the asar. Without it `npm run dev` shows the default Electron atom, which
+    // is the icon a developer actually looks at all day.
+    ...(app.isPackaged ? {} : { icon: join(__dirname, '../../build/icon.png') }),
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       // Non-negotiable. The renderer runs page-authored code; it gets no node,

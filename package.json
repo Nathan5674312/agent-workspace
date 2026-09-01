@@ -10,7 +10,8 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --no-warnings --test test/",
-    "dist": "npm run build && electron-builder"
+    "dist": "npm run build && electron-builder",
+    "icons": "electron scripts/make-icons.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.77",
@@ -34,7 +35,9 @@
   "build": {
     "appId": "com.divineconstruc.fate",
     "productName": "Fate",
-    "directories": { "output": "dist" },
+    "directories": {
+      "output": "dist"
+    },
     "files": [
       "out/**",
       "package.json",
@@ -43,10 +46,30 @@
     "asarUnpack": [
       "node_modules/@anthropic-ai/claude-agent-sdk/**"
     ],
-    "win": { "target": ["nsis", "zip"] },
+    "win": {
+      "target": [
+        "nsis",
+        "zip"
+      ],
+      "icon": "build/icon.ico"
+    },
     "nsis": {
       "oneClick": false,
-      "allowToChangeInstallationDirectory": true
+      "allowToChangeInstallationDirectory": true,
+      "installerIcon": "build/icon.ico",
+      "uninstallerIcon": "build/icon.ico",
+      "installerHeaderIcon": "build/icon.ico"
+    },
+    "mac": {
+      "icon": "build/icon.png",
+      "category": "public.app-category.productivity"
+    },
+    "linux": {
+      "icon": "build/icon.png",
+      "target": [
+        "AppImage"
+      ],
+      "category": "Office"
     }
   }
 }

@@ -22,6 +22,7 @@ import {
   type Approvals,
   type AppSettings,
 } from '../shared/ipc.js'
+import { THEME_IDS } from '../shared/themes.js'
 import { checkRoots, getVaultDir, setVaultDir } from './vault.js'
 import { getApprovalsPolicy, setApprovalsPolicy } from './consent.js'
 import type { Handle } from './ipc.js'
@@ -114,6 +115,12 @@ function sanitize(v: unknown): Appearance {
     allowed.includes(value as T) ? (value as T) : fallback
   const opacity = o.artworkOpacity
   return {
+    // An unknown theme becomes the founder's rather than being kept: a
+    // `data-theme` this build has no block for would paint the default palette
+    // anyway, so storing it would leave Settings showing a theme the app is not
+    // in. Same posture as `mode` in the approvals policy — normalise to the
+    // safe value, do not preserve the junk.
+    theme: pick(o.theme, THEME_IDS, DEFAULT_APPEARANCE.theme),
     transparency: pick(
       o.transparency,
       ['system', 'reduced'] as const,

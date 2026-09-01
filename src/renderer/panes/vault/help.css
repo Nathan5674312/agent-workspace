@@ -35,7 +35,7 @@
 }
 
 .help-overlay::backdrop {
-  background: rgba(22, 12, 8, 0.6);
+  background: rgba(var(--scrim-rgb), 0.6);
   backdrop-filter: var(--blur-regular);
   -webkit-backdrop-filter: var(--blur-regular);
 }

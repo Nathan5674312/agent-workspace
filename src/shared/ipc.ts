@@ -192,6 +192,12 @@ export type VaultGraph = { nodes: string[]; links: VaultLink[] }
  * commits to.
  */
 export type Appearance = {
+  /**
+   * Which palette. `'founders'` sets NO `data-theme` attribute, because that
+   * palette IS tokens.css — see src/shared/themes.ts. Colour only: a theme
+   * never changes type, rhythm, shape or motion.
+   */
+  theme: ThemeId
   /** `'reduced'` mirrors `@media (prefers-reduced-transparency: reduce)`. */
   transparency: 'system' | 'reduced'
   /** `'reduced'` mirrors `@media (prefers-reduced-motion: reduce)`. */
@@ -213,6 +219,7 @@ export const ARTWORK_OPACITY_MAX = 0.2
 
 /** Matches tokens.css: artwork on at `--canvas-art-opacity: 0.16`. */
 export const DEFAULT_APPEARANCE: Appearance = {
+  theme: DEFAULT_THEME,
   transparency: 'system',
   motion: 'system',
   artwork: true,
@@ -404,6 +411,7 @@ export type NetworkTrust = {
  * type without importing the parser, which is main-side work.
  */
 import type { Activity } from './transcript.js'
+import { DEFAULT_THEME, type ThemeId } from './themes.js'
 export type { Activity }
 
 export const CH = {

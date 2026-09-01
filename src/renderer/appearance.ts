@@ -9,6 +9,7 @@
  * appearance.css and the custom properties in tokens.css both live.
  */
 import { ARTWORK_OPACITY_MAX, type Appearance } from '../shared/ipc.js'
+import { DEFAULT_THEME } from '../shared/themes.js'
 
 /**
  * `null` REMOVES the attribute, and that is the whole design rather than a
@@ -27,6 +28,10 @@ export function applyAppearance(a: Appearance): void {
   // fall out of sync with appearance.css — only the 'system' case to drop.
   // No data-contrast: the in-app contrast override was removed, and
   // `@media (prefers-contrast: more)` in app.css covers it from the OS.
+  // The founder's palette IS tokens.css, so it sets no attribute and nothing in
+  // themes.css matches — the same reason 'system' sets none above. This is what
+  // keeps the owner's measured palette from existing in two places.
+  attr('data-theme', a.theme === DEFAULT_THEME ? null : a.theme)
   attr('data-transparency', a.transparency === 'system' ? null : a.transparency)
   attr('data-motion', a.motion === 'system' ? null : a.motion)
   attr('data-artwork', a.artwork ? null : 'off')

@@ -1,0 +1,242 @@
+/**
+ * THEMES. Imported by main.tsx after tokens.css.
+ *
+ * A theme redefines COLOUR TOKENS AND NOTHING ELSE. Type, rhythm, shape, depth
+ * and motion are the product's, not the theme's — a picker that changed the
+ * radii or the easing would make six apps instead of six palettes.
+ *
+ * THE FOUNDER'S THEME IS NOT IN THIS FILE, and its absence is the design. It is
+ * the palette in tokens.css, so selecting it sets NO `data-theme` attribute at
+ * all and nothing here matches. Exactly the rule appearance.css states for
+ * `'system'`: the default is the stylesheet, and an override is a thing laid on
+ * top of it. Writing `[data-theme='founders'] { ... }` would mean a second copy
+ * of the owner's palette, free to drift from the one the contrast note measures.
+ *
+ * Specificity: `:root[data-theme=x]` is one attribute selector above the bare
+ * `:root` in tokens.css, so these win wherever they are in the cascade.
+ *
+ * ── EVERY RATIO IN THIS FILE WAS MEASURED, NOT ESTIMATED ──
+ *
+ * tokens.css requires it, and the ratios in its comments were reproduced to two
+ * decimal places by the same WCAG maths before any palette below was designed,
+ * so the tool is checked against the owner's own numbers. Each theme was then
+ * SOLVED, not picked: for each hue, a binary search over lightness found the
+ * colour whose contrast against that theme's own background equals the
+ * founder's, so every theme carries the same measured ratios rather than merely
+ * looking similar.
+ *
+ *   label 9.9:1 AAA · secondary 7.4:1 AAA · tertiary 5.0:1 AA · accent 12.6:1
+ *   quaternary ~3.7:1 — decorative ONLY, never body text, exactly as in tokens.css
+ *
+ * test/themes.test.mjs re-measures every value below on every run, so a hand-
+ * edited hex that drops a label under its bar fails the suite rather than
+ * shipping. It also fails if a theme is missing a token, which is what stops a
+ * half-defined theme inheriting a stray brown from tokens.css.
+ *
+ * Each theme keeps the founder's structure: labels are SOLID colours rather
+ * than an opacity ramp (tokens.css §2), films over the ground are tinted with
+ * that theme's own accent rather than white, and there is no separate accent
+ * HUE — emphasis is luminance, so the accent is simply the brightest thing in
+ * the palette.
+ */
+
+/* DARK — neutral graphite. The conventional dark theme, and the only one here
+   with no hue of its own: saturation 0.03 keeps it a hair warm so it does not
+   read as blue-grey next to Slate, which is the theme it is most confusable
+   with. Pick this when the browns are the thing you did not want. */
+:root[data-theme='dark'] {
+  --scrim-rgb: 18, 18, 18;
+  --bg-app: #121212;
+  --bg-elevated: #1c1c1c;
+  --bg-sunken: #0b0b0b;
+  --material-heavy: rgba(18, 18, 18, 0.82);
+  --material-regular: rgba(28, 28, 28, 0.68);
+  --material-light: rgba(213, 212, 211, 0.06);
+  --fill-hover: rgba(213, 212, 211, 0.07);
+  --fill-active: rgba(213, 212, 211, 0.12);
+  --fill-selected: rgba(213, 212, 211, 0.10);
+  --label: #bebcbb; /* 9.90:1 */
+  --label-secondary: #a5a2a0; /* 7.38:1 */
+  --label-tertiary: #878480; /* 5.03:1 */
+  --label-quaternary: #716d6a; /* 3.66:1 */
+  --label-on-accent: #121212;
+  --separator: rgba(213, 212, 211, 0.08);
+  --separator-opaque: #393836;
+  --edge-highlight: rgba(213, 212, 211, 0.14);
+  --accent: #d5d4d3; /* 12.66:1 */
+  --accent-pressed: #bebcbb;
+}
+
+/* MIDNIGHT — deep navy. The darkest ground in the set (#0b1020), which is the
+   point: it is the low-light theme, meant for a dark room where even Ink reads
+   as bright. Labels carry real blue rather than grey, so it stays a colour
+   scheme instead of a dimmer. */
+:root[data-theme='midnight'] {
+  --scrim-rgb: 11, 16, 32;
+  --bg-app: #0b1020;
+  --bg-elevated: #131a2e;
+  --bg-sunken: #070b16;
+  --material-heavy: rgba(11, 16, 32, 0.82);
+  --material-regular: rgba(19, 26, 46, 0.68);
+  --material-light: rgba(204, 211, 228, 0.06);
+  --fill-hover: rgba(204, 211, 228, 0.07);
+  --fill-active: rgba(204, 211, 228, 0.12);
+  --fill-selected: rgba(204, 211, 228, 0.10);
+  --label: #b2bdd5; /* 10.04:1 */
+  --label-secondary: #92a2c5; /* 7.39:1 */
+  --label-tertiary: #6e83b1; /* 5.00:1 */
+  --label-quaternary: #566da1; /* 3.69:1 */
+  --label-on-accent: #0b1020;
+  --separator: rgba(204, 211, 228, 0.08);
+  --separator-opaque: #2c3752;
+  --edge-highlight: rgba(204, 211, 228, 0.14);
+  --accent: #ccd3e4; /* 12.63:1 */
+  --accent-pressed: #b2bdd5;
+}
+
+/* SLATE — cool blue-grey, and the LIGHTEST of the dark grounds. The one to
+   reach for on a bright screen in daylight, where a near-black app forces the
+   display's own contrast to do the work. */
+:root[data-theme='slate'] {
+  --scrim-rgb: 20, 24, 29;
+  --bg-app: #14181d;
+  --bg-elevated: #1e242b;
+  --bg-sunken: #0e1114;
+  --material-heavy: rgba(20, 24, 29, 0.82);
+  --material-regular: rgba(30, 36, 43, 0.68);
+  --material-light: rgba(213, 217, 222, 0.06);
+  --fill-hover: rgba(213, 217, 222, 0.07);
+  --fill-active: rgba(213, 217, 222, 0.12);
+  --fill-selected: rgba(213, 217, 222, 0.10);
+  --label: #bbc2ca; /* 9.92:1 */
+  --label-secondary: #9ea9b3; /* 7.45:1 */
+  --label-tertiary: #7b8a98; /* 5.03:1 */
+  --label-quaternary: #667481; /* 3.72:1 */
+  --label-on-accent: #14181d;
+  --separator: rgba(213, 217, 222, 0.08);
+  --separator-opaque: #353d44;
+  --edge-highlight: rgba(213, 217, 222, 0.14);
+  --accent: #d5d9de; /* 12.57:1 */
+  --accent-pressed: #bbc2ca;
+}
+
+/* FOREST — deep green. Furthest from the founder's warmth while keeping the
+   same solid-label discipline. Green sits at the eye's luminance peak, so this
+   palette needed the least lightness to reach its ratios — the labels look
+   softer than the numbers suggest, which is the measurement working. */
+:root[data-theme='forest'] {
+  --scrim-rgb: 11, 20, 16;
+  --bg-app: #0b1410;
+  --bg-elevated: #122019;
+  --bg-sunken: #070e0b;
+  --material-heavy: rgba(11, 20, 16, 0.82);
+  --material-regular: rgba(18, 32, 25, 0.68);
+  --material-light: rgba(197, 216, 207, 0.06);
+  --fill-hover: rgba(197, 216, 207, 0.07);
+  --fill-active: rgba(197, 216, 207, 0.12);
+  --fill-selected: rgba(197, 216, 207, 0.10);
+  --label: #a6c3b5; /* 9.89:1 */
+  --label-secondary: #83ac97; /* 7.41:1 */
+  --label-tertiary: #5e8e76; /* 5.00:1 */
+  --label-quaternary: #4f7763; /* 3.70:1 */
+  --label-on-accent: #0b1410;
+  --separator: rgba(197, 216, 207, 0.08);
+  --separator-opaque: #283d32;
+  --edge-highlight: rgba(197, 216, 207, 0.14);
+  --accent: #c5d8cf; /* 12.57:1 */
+  --accent-pressed: #a6c3b5;
+}
+
+/* PLUM — deep violet. The founder's warmth pushed off its hue rather than
+   drained out of it, so it stays in the same family of moods as the default
+   without being a second brown. */
+:root[data-theme='plum'] {
+  --scrim-rgb: 21, 14, 26;
+  --bg-app: #150e1a;
+  --bg-elevated: #201528;
+  --bg-sunken: #0e0912;
+  --material-heavy: rgba(21, 14, 26, 0.82);
+  --material-regular: rgba(32, 21, 40, 0.68);
+  --material-light: rgba(220, 207, 224, 0.06);
+  --fill-hover: rgba(220, 207, 224, 0.07);
+  --fill-active: rgba(220, 207, 224, 0.12);
+  --fill-selected: rgba(220, 207, 224, 0.10);
+  --label: #c9b5d0; /* 9.92:1 */
+  --label-secondary: #b499bd; /* 7.42:1 */
+  --label-tertiary: #9b76a8; /* 5.00:1 */
+  --label-quaternary: #865f94; /* 3.68:1 */
+  --label-on-accent: #150e1a;
+  --separator: rgba(220, 207, 224, 0.08);
+  --separator-opaque: #44304b;
+  --edge-highlight: rgba(220, 207, 224, 0.14);
+  --accent: #dccfe0; /* 12.66:1 */
+  --accent-pressed: #c9b5d0;
+}
+
+/* PARCHMENT — the one LIGHT theme, and the only palette here that inverts the
+   system rather than re-hueing it. Dark ink on warm paper, solved against the
+   paper the same way every dark theme is solved against its ground.
+
+   THREE THINGS DO NOT SURVIVE THE INVERSION and are fixed below the block:
+   the shadows, the glass edge highlight, and the canvas artwork. Everything
+   else is the same token set doing the same job. */
+:root[data-theme='parchment'] {
+  --scrim-rgb: 244, 237, 225;
+  --bg-app: #f4ede1;
+  --bg-elevated: #fffaf2;
+  --bg-sunken: #e6dccb;
+  --material-heavy: rgba(244, 237, 225, 0.82);
+  --material-regular: rgba(255, 250, 242, 0.68);
+  --material-light: rgba(50, 37, 27, 0.06);
+  --fill-hover: rgba(50, 37, 27, 0.07);
+  --fill-active: rgba(50, 37, 27, 0.12);
+  --fill-selected: rgba(50, 37, 27, 0.10);
+  --label: #473526; /* 10.00:1 */
+  --label-secondary: #5f4733; /* 7.41:1 */
+  --label-tertiary: #7e5f44; /* 5.00:1 */
+  --label-quaternary: #987252; /* 3.71:1 */
+  --label-on-accent: #fffaf2;
+  --separator: rgba(50, 37, 27, 0.08);
+  --separator-opaque: #d0bba8;
+  --edge-highlight: rgba(50, 37, 27, 0.14);
+  --accent: #32251b; /* 12.74:1 */
+  --accent-pressed: #473526;
+}
+
+
+/* ── parchment corrections ────────────────────────────────────
+   Three tokens whose VALUE is a direction, not a colour, so flipping the ground
+   flips what they have to be. Kept beside the palette rather than inside it so
+   it is obvious these are consequences of the inversion.
+
+   1. SHADOWS. tokens.css casts black at 0.30–0.55, which is tuned to disappear
+      into a near-black ground. The same shadow on paper is a bruise. Same
+      geometry, a third of the weight.
+   2. EDGE HIGHLIGHT. The bright top edge is what makes a translucent surface
+      read as glass, and "bright" means lighter than the material. On every dark
+      theme that is the accent; here the accent is nearly black, so the generated
+      value would draw a dark line where the light one belongs. White. */
+:root[data-theme='parchment'] {
+  --shadow-sm: 0 1px 2px rgba(60, 44, 30, 0.10);
+  --shadow-md: 0 4px 16px rgba(60, 44, 30, 0.14);
+  --shadow-lg: 0 12px 40px rgba(60, 44, 30, 0.20);
+  --edge-highlight: rgba(255, 255, 255, 0.75);
+
+  /* 3. THE ARTWORK. `canvas-art-treated.jpg` is not a neutral image with an
+        opacity on it — tokens.css bakes a duotone LUT running Ink -> Sand into
+        the file, so it is made of the DARK palette and is near-black where the
+        paper should show. Laid over parchment it is a grey smear, and no
+        opacity value rescues it because the treatment is in the pixels.
+
+        So the slot is emptied, exactly as `[data-artwork='off']` does it, and
+        `none` is a valid background-image — tokens.css calls this a slot and
+        ships it empty, so the scrim sibling and the stacking context in
+        .vault-main::before are untouched.
+
+        HONEST CONSEQUENCE: the Background artwork switch in Settings has no
+        visible effect while Parchment is selected. Re-treating the master with
+        the recipe in tokens.css inverted (skip step 2, duotone Paper -> Umber)
+        would give this theme its own artwork; that is a new asset, not a token,
+        so it is not done here. */
+  --canvas-art: none;
+}

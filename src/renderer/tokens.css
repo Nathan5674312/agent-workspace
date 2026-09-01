@@ -34,6 +34,20 @@
      deliberately near-indistinguishable. Separation is the job of the hairline
      separators and the light labels, never of the ground itself — the note is
      explicit that stacking darks for contrast is how text vanishes. */
+  /**
+   * THE GROUND, AS CHANNELS, for the places that need it at an alpha.
+   *
+   * Four surfaces darken what is behind them rather than covering it — the
+   * canvas scrim over the artwork, and the three modal backdrops. Each one had
+   * `rgba(22, 12, 8, x)` written into it by hand, which is Ink spelled out, and
+   * those copies are invisible to a theme: `themes.css` can redefine every
+   * colour in this file and the app would still lay a BROWN scrim over a green
+   * or a paper ground. Found by looking at Parchment, not by reading.
+   *
+   * Kept as bare channels because that is the only form `rgba()` can take an
+   * alpha with. Any theme that sets --bg-app must set this to match.
+   */
+  --scrim-rgb: 22, 12, 8; /* Ink */
   --bg-app: #160c08; /* Ink */
   --bg-elevated: #26160b; /* Bistre */
   --bg-sunken: #0f0805; /* Ink, one step down. Decorative separation only. */

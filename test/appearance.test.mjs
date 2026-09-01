@@ -22,6 +22,7 @@ process.env.TEST_USER_DATA = USER_DATA
 
 const settings = await import('../src/main/settings.ts')
 const { DEFAULT_APPEARANCE, ARTWORK_OPACITY_MAX, CH } = await import('../src/shared/ipc.ts')
+const { THEME_IDS } = await import('../src/shared/themes.ts')
 
 // Leave the environment as it was found; later suites import other modules.
 if (PREV_USER_DATA === undefined) delete process.env.TEST_USER_DATA
@@ -38,6 +39,7 @@ const set = (a) => H.get(CH.settingsSetAppearance)(a)
 const onDisk = () => JSON.parse(readFileSync(SETTINGS_FILE, 'utf8'))
 
 const VALID = {
+  theme: 'midnight',
   transparency: 'reduced',
   motion: 'reduced',
   artwork: false,
@@ -53,6 +55,19 @@ test('a vault with no settings.json reports the documented defaults', () => {
 test('a valid appearance round-trips through disk', () => {
   assert.deepEqual(set(VALID).appearance, VALID)
   assert.deepEqual(onDisk().appearance, VALID)
+})
+
+test('an unknown theme falls back to the default rather than being kept', () => {
+  // A `data-theme` this build has no block for would paint the founder's
+  // palette anyway, so keeping the string would leave Settings naming a theme
+  // the app is not actually in.
+  assert.equal(set({ ...VALID, theme: 'chartreuse' }).appearance.theme, DEFAULT_APPEARANCE.theme)
+  assert.equal(set({ ...VALID, theme: 42 }).appearance.theme, DEFAULT_APPEARANCE.theme)
+  // And every id the picker offers survives the trip.
+  for (const id of THEME_IDS) {
+    assert.equal(set({ ...VALID, theme: id }).appearance.theme, id, `${id} did not round-trip`)
+    assert.equal(onDisk().appearance.theme, id)
+  }
 })
 
 test('opacity above the ceiling is clamped, not rejected', () => {

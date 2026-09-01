@@ -9,6 +9,10 @@ import './app.css'
 // After tokens.css on purpose: these selectors override token defaults, and a
 // tie is settled by source order.
 import './appearance.css'
+// Same rule, and it must stay after app.css too: a theme redefines the colour
+// tokens, and app.css reads them rather than restating them, so a palette swap
+// needs no change there.
+import './themes.css'
 
 /**
  * Appearance is read and applied BEFORE the first render, not in an effect.

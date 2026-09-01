@@ -38,6 +38,7 @@ import {
   type AppSettings,
 } from '../../../shared/ipc.js'
 import { applyAppearance } from '../../appearance.js'
+import { THEMES } from '../../../shared/themes.js'
 import './settings.css'
 
 /**
@@ -468,7 +469,8 @@ export function SettingsDialog({ isOpen, onClose, isDirty }: SettingsDialogProps
             {/* "System" is not a third styling — it is the ABSENCE of an override,
                 which leaves the OS preference and the @media blocks in charge. */}
             <p className="settings-hint">
-              System follows your OS accessibility settings. Changes apply immediately.
+              Theme changes colour only. On the rows below, System follows your OS
+              accessibility settings. Changes apply immediately.
             </p>
 
             {/* No role="group" and no heading of its own any more: the tabpanel
@@ -478,6 +480,47 @@ export function SettingsDialog({ isOpen, onClose, isDirty }: SettingsDialogProps
               {/* No Contrast row. `@media (prefers-contrast: more)` in app.css
                   still answers the OS preference; the in-app High override was
                   removed because it was a second copy of those values. */}
+              {/* Its own row rather than a <Choice>: that component is System +
+                  ONE named override, which is the shape of an accessibility
+                  escape hatch. A theme is neither an accessibility setting nor
+                  binary, so it gets a plain labelled <select> with one option
+                  per palette — same element, same keyboard and screen-reader
+                  behaviour, no new control invented for it.
+
+                  The hint under it changes with the selection, because "Deep
+                  navy, for a dark room" is the thing that makes a name like
+                  Midnight mean something before you click it. */}
+              <div className="settings-appearance-row">
+                <div className="settings-appearance-text">
+                  <label className="settings-appearance-label" htmlFor="settings-theme">
+                    Theme
+                  </label>
+                  <span className="settings-appearance-hint">
+                    {THEMES.find((t) => t.id === appearance.theme)?.hint ?? ''}
+                  </span>
+                </div>
+                <select
+                  id="settings-theme"
+                  className="settings-appearance-select"
+                  value={appearance.theme}
+                  disabled={!settings}
+                  onChange={(e) => {
+                    // Narrowed against the list rather than cast: the value of a
+                    // <select> is a string as far as the DOM is concerned, and
+                    // main sanitises anyway, but a bad id must not travel as a
+                    // ThemeId through the optimistic apply in update().
+                    const next = THEMES.find((t) => t.id === e.target.value)
+                    if (next) void update({ theme: next.id })
+                  }}
+                >
+                  {THEMES.map((t) => (
+                    <option key={t.id} value={t.id}>
+                      {t.label}
+                    </option>
+                  ))}
+                </select>
+              </div>
+
               <Choice
                 id="settings-transparency"
                 label="Transparency"

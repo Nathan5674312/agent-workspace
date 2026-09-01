@@ -16,10 +16,13 @@ import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs'
 import { join, relative } from 'node:path'
 import {
   addWikilink,
+  ambiguousStems,
+  indexNotesByName,
   linkTextFor,
   normTarget,
   parseWikilinks,
   parseWikilinkRefs,
+  resolveWikilink,
 } from '../src/shared/wikilink.ts'
 
 // --------------------------------------------------------------- linkTextFor
@@ -381,4 +384,37 @@ test('no real note loses its final newline or gains a mixed ending', { skip: !ex
   }
   assert.ok(checked > 100, `only ${checked} notes checked`)
   console.log(`      ${checked} real notes, ${crlfNotes} of them CRLF — tails intact`)
+})
+
+test('a shared stem is refused the short form under BOTH resolvers', () => {
+  // The app has two resolvers and they disagree. indexNotesByName is FIRST-WINS
+  // by tree order; the graph builder in src/main/vault.ts resolves by PROXIMITY
+  // (same folder, then nearest ancestor). On a unique stem they agree; on a
+  // shared one they routinely do not, so a short link checked against only the
+  // renderer's resolver can be drawn as an edge to a different note.
+  const tree = {
+    name: 'v', path: '', kind: 'folder',
+    children: [
+      { name: 'Decisions.md', path: 'Fate/Decisions.md', kind: 'note' },
+      { name: '_Index.md', path: 'Templates/_Index.md', kind: 'note' },
+      { name: '_Index.md', path: 'Playbooks/_Index.md', kind: 'note' },
+    ],
+  }
+  const shared = ambiguousStems(tree)
+  assert.deepEqual([...shared], ['_index'], 'only the shared stem is listed')
+
+  const index = indexNotesByName(tree)
+  const strict = (name) =>
+    shared.has(normTarget(name)) ? null : resolveWikilink(name, index)
+
+  // Unique: short form, and both resolvers agree because there is one candidate.
+  assert.equal(linkTextFor('Fate/Decisions.md', strict), '[[Decisions]]')
+  // Shared: the path form, for BOTH of them, not just the loser of first-wins.
+  assert.equal(linkTextFor('Templates/_Index.md', strict), '[[Templates/_Index.md|_Index]]')
+  assert.equal(linkTextFor('Playbooks/_Index.md', strict), '[[Playbooks/_Index.md|_Index]]')
+
+  // Without the strictness the first-wins winner keeps the short form, which is
+  // the bug: proximity would send it elsewhere depending on the linking note.
+  const loose = (name) => resolveWikilink(name, index)
+  assert.equal(linkTextFor('Templates/_Index.md', loose), '[[_Index]]')
 })

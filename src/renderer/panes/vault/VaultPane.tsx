@@ -77,7 +77,13 @@ import {
 } from './helpers.js'
 import type { VaultNoteBody } from '../../../shared/ipc.js'
 import { setFrontmatter } from '../../../shared/notemeta.js'
-import { addWikilink, linkTextFor, NEW_HEADING } from '../../../shared/wikilink.js'
+import {
+  addWikilink,
+  ambiguousStems,
+  linkTextFor,
+  normTarget,
+  NEW_HEADING,
+} from '../../../shared/wikilink.js'
 import './split.css'
 
 export function VaultPane(): React.ReactElement {
@@ -294,6 +300,12 @@ export function VaultPane(): React.ReactElement {
   const isDirty = isBufferDirty(selectedNote?.text ?? null, buffer)
 
   const noteIndex = useMemo(() => indexNotesByName(vault.tree), [vault.tree])
+  /**
+   * Stems shared by more than one note. Only `handleAddLink` reads this, to
+   * refuse the short link form for a name the two resolvers in this app do not
+   * agree about — see `ambiguousStems`.
+   */
+  const sharedStems = useMemo(() => ambiguousStems(vault.tree), [vault.tree])
 
   /**
    * The tree as the explorer draws it. A memo because this pane re-renders on
@@ -638,7 +650,16 @@ export function VaultPane(): React.ReactElement {
           `"${selectedNote.title}" is open in the editor with unsaved edits. Save or discard them first.`,
         )
       }
-      const link = linkTextFor(to, (name) => resolveWikilink(name, noteIndex))
+      /**
+       * The resolver handed over DECLINES any shared stem, so it falls back to
+       * the path form. Checking only `resolveWikilink` was not enough: that is
+       * first-wins, the graph builder resolves by proximity, and on a shared
+       * stem they disagree — so the edge drawn could point at a different note
+       * than the one dragged to. A unique stem is the only case both agree on.
+       */
+      const link = linkTextFor(to, (name) =>
+        sharedStems.has(normTarget(name)) ? null : resolveWikilink(name, noteIndex),
+      )
       const note = await vault.readNote(from)
       const next = addWikilink(note.text, link)
       // Already linked. Silent, not an error — dragging A to B twice is a

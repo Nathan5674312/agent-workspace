@@ -82,10 +82,21 @@ test('the editor buffer moves with the file when it is showing that note', () =>
   assert.match(addLink, /if \(openPathRef\.current === from\)[\s\S]{0,400}setBuffer\(next\)/)
 })
 
-test('the link spelling is chosen with the editor\'s own resolver', () => {
+test("the link spelling is chosen with the editor's own resolver", () => {
   // Not a home-made lookup: the check has to be "would clicking this land on
-  // the note I mean", and the name index is first-wins on a shared stem.
-  assert.match(addLink, /linkTextFor\(to, \(name\) => resolveWikilink\(name, noteIndex\)\)/)
+  // the note I mean".
+  assert.match(addLink, /linkTextFor\(to, \(name\) =>[\s\S]{0,120}resolveWikilink\(name, noteIndex\)/)
+})
+
+test('a shared stem is refused the short form, because the resolvers differ', () => {
+  // The name index is FIRST-WINS on a shared stem; the graph builder in
+  // src/main/vault.ts resolves by PROXIMITY. Passing resolveWikilink alone let
+  // a short link through that the graph would then draw as an edge to a
+  // DIFFERENT note — the exact failure linkTextFor exists to prevent. Declining
+  // every shared stem drops those to the path form; unique stems are untouched,
+  // because there both resolvers agree by construction.
+  assert.match(addLink, /sharedStems\.has\(normTarget\(name\)\) \? null :/)
+  assert.match(PANE, /const sharedStems = useMemo\(\(\) => ambiguousStems\(vault\.tree\)/)
 })
 
 // --------------------------------------------------------------- the gesture

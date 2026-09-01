@@ -124,6 +124,46 @@ export function resolveWikilink(name: string, index: Map<string, string>): strin
 }
 
 /**
+ * Filename stems shared by two or more notes — the ones a short `[[Stem]]`
+ * cannot address unambiguously.
+ *
+ * THIS EXISTS BECAUSE THE APP HAS TWO RESOLVERS AND THEY DISAGREE. The index
+ * above is FIRST-WINS by tree-walk order; the graph builder in
+ * `src/main/vault.ts` resolves by PROXIMITY (`choose()`: same folder, then
+ * nearest ancestor, then shallowest). On a unique stem they always agree. On a
+ * shared one they routinely do not — so a link written after checking only the
+ * renderer's resolver can be drawn by the graph as an edge to a different note
+ * than the one dragged to, which is precisely the failure `linkTextFor` claims
+ * to prevent.
+ *
+ * Rather than teach the writer both rules, `linkTextFor` is given a resolver
+ * that DECLINES every shared stem, so those fall back to the unambiguous path
+ * form. `choose()` short-circuits on `cands.length === 1`, so for a unique stem
+ * both resolvers return the same note by construction and no third rule is
+ * introduced.
+ *
+ * ponytail: the real repair is one resolver, shared, which means moving
+ * `choose()`/`dirOf` and the byFile/byAlias/bySuffix tiers in here. That is a
+ * bigger change than a bug fix and it is written up in
+ * `docs/graph-connections.md`; this closes the hole without pretending to.
+ */
+export function ambiguousStems(node: VaultTreeNode | null): Set<string> {
+  const seen = new Set<string>()
+  const shared = new Set<string>()
+  const walk = (n: VaultTreeNode | null): void => {
+    if (!n) return
+    if (n.kind === 'note') {
+      const k = normTarget(n.name)
+      if (seen.has(k)) shared.add(k)
+      else seen.add(k)
+    }
+    for (const child of n.children ?? []) walk(child)
+  }
+  walk(node)
+  return shared
+}
+
+/**
  * Wikilink targets in order of first appearance, trimmed, deduplicated.
  *
  * Unchanged output, and it must stay unchanged: this is what the graph builder

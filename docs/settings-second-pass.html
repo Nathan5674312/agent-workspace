@@ -1,0 +1,512 @@
+<title>Settings, Second Pass</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@600;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+
+<style>
+/* ─────────────────────────────────────────────────────────────
+   Palette is the subject's own. Dark is agent-workspace's
+   Founder's theme (Ink → Sand, Cream accent); light is its
+   Parchment theme. Both lifted from tokens.css / themes.css,
+   where every ratio was measured rather than picked.
+   ───────────────────────────────────────────────────────────── */
+:root {
+  --ground: #f4ede1;
+  --raised: #fffaf2;
+  --sunken: #e6dccb;
+  --ink: #473526;
+  --ink-2: #5f4733;
+  --ink-3: #7e5f44;
+  --ink-4: #987252;
+  --accent: #32251b;
+  --accent-soft: #8a6a49;
+  --rule: rgba(50, 37, 27, 0.13);
+  --rule-firm: rgba(50, 37, 27, 0.28);
+  --chip: rgba(50, 37, 27, 0.06);
+  --danger: #b7502c;
+  --warning: #6e4416;
+  --success: #515b35;
+  --shadow: 0 1px 2px rgba(60, 44, 30, 0.08), 0 12px 32px rgba(60, 44, 30, 0.09);
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --ground: #160c08;
+    --raised: #26160b;
+    --sunken: #0f0805;
+    --ink: #d8b493;
+    --ink-2: #ba9b7d;
+    --ink-3: #987d65;
+    --ink-4: #806854;
+    --accent: #f0cba5;
+    --accent-soft: #ba9b7d;
+    --rule: rgba(240, 203, 165, 0.11);
+    --rule-firm: rgba(240, 203, 165, 0.24);
+    --chip: rgba(240, 203, 165, 0.07);
+    --danger: #c4552f;
+    --warning: #d98e3c;
+    --success: #8a9a5b;
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 14px 36px rgba(0, 0, 0, 0.5);
+  }
+}
+:root[data-theme="dark"] {
+  --ground: #160c08;
+  --raised: #26160b;
+  --sunken: #0f0805;
+  --ink: #d8b493;
+  --ink-2: #ba9b7d;
+  --ink-3: #987d65;
+  --ink-4: #806854;
+  --accent: #f0cba5;
+  --accent-soft: #ba9b7d;
+  --rule: rgba(240, 203, 165, 0.11);
+  --rule-firm: rgba(240, 203, 165, 0.24);
+  --chip: rgba(240, 203, 165, 0.07);
+  --danger: #c4552f;
+  --warning: #d98e3c;
+  --success: #8a9a5b;
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.4), 0 14px 36px rgba(0, 0, 0, 0.5);
+}
+
+* { box-sizing: border-box; }
+
+body {
+  background: var(--ground);
+  color: var(--ink-2);
+  font-family: "IBM Plex Sans", ui-sans-serif, system-ui, -apple-system, sans-serif;
+  font-size: 16px;
+  line-height: 1.62;
+  -webkit-font-smoothing: antialiased;
+}
+
+.wrap {
+  max-width: 62rem;
+  margin: 0 auto;
+  padding: clamp(2rem, 5vw, 4.5rem) clamp(1.1rem, 4vw, 2.5rem) 5rem;
+  display: flex;
+  flex-direction: column;
+  gap: clamp(2.75rem, 5vw, 4rem);
+}
+
+h1, h2, h3 {
+  font-family: Archivo, ui-sans-serif, system-ui, sans-serif;
+  color: var(--ink);
+  text-wrap: balance;
+  margin: 0;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+  line-height: 1.14;
+}
+h1 { font-size: clamp(2.1rem, 5.2vw, 3.1rem); }
+h2 { font-size: clamp(1.35rem, 2.9vw, 1.72rem); }
+h3 { font-size: 1.02rem; letter-spacing: -0.01em; }
+p { margin: 0; max-width: 66ch; }
+
+code, .mono {
+  font-family: "IBM Plex Mono", ui-monospace, "Cascadia Mono", Consolas, monospace;
+  font-size: 0.855em;
+}
+code {
+  background: var(--chip);
+  padding: 0.1em 0.36em;
+  border-radius: 3px;
+  color: var(--ink);
+}
+strong { color: var(--ink); font-weight: 600; }
+a { color: var(--ink); text-decoration-color: var(--rule-firm); text-underline-offset: 3px; }
+a:focus-visible, summary:focus-visible {
+  outline: 2px solid var(--accent-soft);
+  outline-offset: 3px;
+  border-radius: 3px;
+}
+
+/* ── eyebrow ─────────────────────────────────────────────── */
+.eyebrow {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.7rem;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+}
+
+/* ── header ──────────────────────────────────────────────── */
+header { display: flex; flex-direction: column; gap: 1.15rem; }
+.lede { font-size: 1.09rem; color: var(--ink-2); max-width: 60ch; }
+
+.sources { display: flex; flex-wrap: wrap; gap: 0.4rem; padding-top: 0.4rem; }
+.src {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.715rem;
+  letter-spacing: 0.02em;
+  padding: 0.24rem 0.56rem;
+  border-radius: 3px;
+  border: 1px solid var(--rule);
+  color: var(--ink-3);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  background: var(--raised);
+}
+.src::before {
+  content: "";
+  width: 5px; height: 5px; border-radius: 50%;
+  background: var(--ink-4);
+  flex: none;
+}
+/* A file read off disk outranks a docs page, and the dot says which. */
+.src[data-kind="file"]::before { background: var(--success); }
+.src[data-kind="file"] { color: var(--ink-2); border-color: var(--rule-firm); }
+
+/* ── headline finding ────────────────────────────────────── */
+.headline {
+  background: var(--raised);
+  border: 1px solid var(--rule);
+  border-left: 3px solid var(--accent-soft);
+  border-radius: 4px;
+  padding: clamp(1.3rem, 3vw, 1.9rem);
+  box-shadow: var(--shadow);
+  display: flex;
+  flex-direction: column;
+  gap: 0.85rem;
+}
+.headline h2 { font-size: clamp(1.25rem, 2.6vw, 1.5rem); }
+
+.absent {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 0.5rem;
+  margin-top: 0.3rem;
+}
+.absent span {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.76rem;
+  color: var(--ink-3);
+  padding: 0.5rem 0.6rem;
+  background: var(--sunken);
+  border-radius: 3px;
+  text-align: center;
+  text-decoration: line-through;
+  text-decoration-color: var(--danger);
+  text-decoration-thickness: 1px;
+}
+
+/* ── findings ────────────────────────────────────────────── */
+.findings { display: flex; flex-direction: column; gap: 0; }
+.finding {
+  display: grid;
+  grid-template-columns: 5.4rem 1fr;
+  gap: 0 1.3rem;
+  padding: 1.25rem 0;
+  border-top: 1px solid var(--rule);
+  align-items: start;
+}
+.finding:last-child { border-bottom: 1px solid var(--rule); }
+.finding > div { display: flex; flex-direction: column; gap: 0.42rem; }
+
+.tag {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.66rem;
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+  padding: 0.2rem 0;
+  border-top: 2px solid currentColor;
+  text-align: left;
+  margin-top: 0.28rem;
+}
+.tag[data-t="defect"] { color: var(--danger); }
+.tag[data-t="gap"] { color: var(--warning); }
+.tag[data-t="fixed"] { color: var(--success); }
+
+.evidence {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.775rem;
+  color: var(--ink-3);
+  background: var(--sunken);
+  border-radius: 3px;
+  padding: 0.55rem 0.7rem;
+  align-self: start;
+  max-width: 100%;
+  overflow-x: auto;
+}
+
+/* ── tiers ───────────────────────────────────────────────── */
+.tier { display: flex; flex-direction: column; gap: 1rem; }
+.tier-head { display: flex; flex-direction: column; gap: 0.3rem; }
+
+.tablewrap { overflow-x: auto; border: 1px solid var(--rule); border-radius: 4px; background: var(--raised); }
+table { border-collapse: collapse; width: 100%; min-width: 33rem; }
+th, td { text-align: left; padding: 0.68rem 0.9rem; border-bottom: 1px solid var(--rule); vertical-align: top; }
+thead th {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.68rem;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  color: var(--ink-4);
+  font-weight: 500;
+  background: var(--sunken);
+  white-space: nowrap;
+}
+tbody tr:last-child td { border-bottom: none; }
+td.num {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-variant-numeric: tabular-nums;
+  color: var(--ink-4);
+  width: 2.4rem;
+}
+td.what { color: var(--ink); font-weight: 500; }
+td.where {
+  font-family: "IBM Plex Mono", ui-monospace, monospace;
+  font-size: 0.78rem;
+  color: var(--ink-3);
+  white-space: nowrap;
+}
+
+/* ── excluded ────────────────────────────────────────────── */
+.excluded {
+  border: 1px dashed var(--rule-firm);
+  border-radius: 4px;
+  padding: clamp(1.1rem, 2.6vw, 1.5rem);
+  display: flex;
+  flex-direction: column;
+  gap: 0.7rem;
+}
+
+footer {
+  border-top: 1px solid var(--rule);
+  padding-top: 1.4rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.55rem;
+  color: var(--ink-3);
+  font-size: 0.88rem;
+}
+footer ul { margin: 0; padding-left: 1.1rem; display: flex; flex-direction: column; gap: 0.4rem; }
+
+@media (max-width: 34rem) {
+  .finding { grid-template-columns: 1fr; gap: 0.55rem; }
+  .tag { border-top: none; border-left: 2px solid currentColor; padding-left: 0.5rem; margin-top: 0; }
+}
+</style>
+
+<div class="wrap">
+
+  <header>
+    <span class="eyebrow">agent-workspace · docs/SETTINGS-RESEARCH.md · 31 Aug 2026</span>
+    <h1>Settings, Second Pass</h1>
+    <p class="lede">
+      The first survey covered an agent app and a notes app. Widening it to a desktop
+      shell, a modern editor and two reference taxonomies turned up a category the app
+      has nothing of — and two things that are defects rather than gaps.
+    </p>
+    <div class="sources">
+      <span class="src" data-kind="file">Hermes · source</span>
+      <span class="src" data-kind="file">Obsidian · asar</span>
+      <span class="src" data-kind="file">Notion · state.json</span>
+      <span class="src" data-kind="file">Zed · default.json</span>
+      <span class="src">VS Code · docs</span>
+      <span class="src">Logseq · docs</span>
+    </div>
+    <p style="font-size:0.86rem;color:var(--ink-3);">
+      A filled dot means the rows were read off a real file on this machine. Hollow means
+      documentation only — a weaker source, and labelled as such.
+    </p>
+  </header>
+
+  <section class="headline">
+    <span class="eyebrow">The finding</span>
+    <h2>The first pass surveyed what a document configures. It missed what a window configures.</h2>
+    <p>
+      Notion and Zed both carry a layer underneath the document settings: the desktop
+      shell. This app has none of it. Verified by grep across <code>src/main/</code> —
+      every one of these is absent, and <code>index.ts</code> hardcodes
+      <code>width: 1600, height: 1000</code> with no persistence.
+    </p>
+    <div class="absent">
+      <span>autoUpdater</span>
+      <span>Tray</span>
+      <span>globalShortcut</span>
+      <span>setLoginItemSettings</span>
+      <span>disableHardwareAcceleration</span>
+      <span>window bounds</span>
+    </div>
+    <p style="font-size:0.9rem;color:var(--ink-3);">
+      Window bounds is the one to build first: cheapest, most universally expected, and
+      the only one here a person notices on every single launch.
+    </p>
+  </section>
+
+  <section class="tier">
+    <div class="tier-head">
+      <span class="eyebrow">Six more findings</span>
+      <h2>Two are defects, not gaps</h2>
+    </div>
+    <div class="findings">
+
+      <article class="finding">
+        <span class="tag" data-t="defect">Defect</span>
+        <div>
+          <h3>The secret-blocking claim has no implementation</h3>
+          <p>
+            Zed ships <code>private_files</code> and <code>redact_private_values</code>.
+            This app needs that <em>more</em> than Zed does — it spawns agents against the
+            vault root via <code>claude.ts</code>, and a shell via <code>terminal.ts</code>.
+            The machine's own CLAUDE.md says secrets are blocked from agent file tools
+            "by design". Nothing in this repo implements that. The list belongs beside
+            <code>HIDDEN</code> and <code>SKIP</code>, which already exist and already work.
+          </p>
+          <p class="evidence">Zed default: <strong>**/.env*, **/*.pem, **/*.key, **/*.cert, **/secrets.yml</strong></p>
+        </div>
+      </article>
+
+      <article class="finding">
+        <span class="tag" data-t="defect">Defect</span>
+        <div>
+          <h3>Backups grow forever</h3>
+          <p>
+            <code>save()</code> writes a pre-edit copy on every save and nothing prunes —
+            <code>versions.ts</code> says so in its own header. No reference app has a
+            retention setting because none of them keeps a copy per save, so this one was
+            found by <em>absence</em> rather than precedent.
+          </p>
+          <p class="evidence">Measured on the real vault: <strong>187 files · 871 KB</strong> in .backups/</p>
+        </div>
+      </article>
+
+      <article class="finding">
+        <span class="tag" data-t="gap">Gap</span>
+        <div>
+          <h3>Updates are missing, and shipping depends on them</h3>
+          <p>
+            Roadmap note 11 settles on Developer ID and notarization with
+            download-from-the-site. That has no store to push updates through, so the
+            updater <em>is</em> the delivery mechanism rather than a nicety. The setting is
+            small; the machinery behind it is a shipping decision.
+          </p>
+        </div>
+      </article>
+
+      <article class="finding">
+        <span class="tag" data-t="gap">Gap</span>
+        <div>
+          <h3>UI scale and editor font size are two settings, not one</h3>
+          <p>
+            The first pass proposed "editor font size". Zed separates
+            <code>ui_font_size</code> from <code>buffer_font_size</code>; Notion has
+            <code>zoomFactor</code> for the whole UI. Different blast radii: one reflows
+            every pane and is an accessibility control, the other affects prose only.
+            UI scale is nearly free here — <code>tokens.css</code> is already in
+            <code>rem</code> so the layout scales with it.
+          </p>
+        </div>
+      </article>
+
+      <article class="finding">
+        <span class="tag" data-t="gap">Gap</span>
+        <div>
+          <h3>Telemetry should be a statement, not a toggle</h3>
+          <p>
+            Zed ships two telemetry switches; VS Code has a whole group. This app should
+            ship neither. Nothing under <code>src/</code> calls fetch, axios, XHR,
+            WebSocket, <code>http.request</code> or <code>createServer</code>, and
+            <code>index.html</code> enforces <code>connect-src 'none'</code>. A toggle
+            implies something to turn off, and would be the only dishonest control in the app.
+          </p>
+        </div>
+      </article>
+
+      <article class="finding">
+        <span class="tag" data-t="fixed">Overturned</span>
+        <div>
+          <h3>The ban on themes was right, and has been satisfied</h3>
+          <p>
+            The first pass excluded themes because "arbitrary themes discard the
+            measurement". Seven palettes shipped the same day, and the objection was met
+            rather than ignored: each is <em>solved</em> to the founder's own contrast
+            ratios, and the suite re-measures all of them on every run. What was wrong was
+            assuming a theme picker implies arbitrary themes.
+          </p>
+        </div>
+      </article>
+
+    </div>
+  </section>
+
+  <section class="tier">
+    <div class="tier-head">
+      <span class="eyebrow">Tier 1 — build now</span>
+      <h2>Cheap, expected, nothing new underneath</h2>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th></th><th>Setting</th><th>Section</th><th>Why now</th></tr></thead>
+        <tbody>
+          <tr><td class="num">1</td><td class="what">Window size + position</td><td class="where">no UI</td><td>Not a setting at all — just persistence. Noticed every launch.</td></tr>
+          <tr><td class="num">2</td><td class="what">UI scale</td><td class="where">Appearance</td><td>Everything is already <code>rem</code>; one root property.</td></tr>
+          <tr><td class="num">3</td><td class="what">Editor font size</td><td class="where">Editor · new</td><td>Its own token, live-applied like the rest of appearance.</td></tr>
+          <tr><td class="num">4</td><td class="what">Readable line length</td><td class="where">Editor · new</td><td><code>max-width</code> on the textarea. Width nests under the toggle.</td></tr>
+          <tr><td class="num">5</td><td class="what">Spellcheck</td><td class="where">Editor · new</td><td>One attribute. Chromium does the rest.</td></tr>
+          <tr><td class="num">6</td><td class="what">Export / Import / Reset</td><td class="where">About · new</td><td>One object, one sanitiser, <code>save(defaults)</code>.</td></tr>
+          <tr><td class="num">7</td><td class="what">About panel</td><td class="where">About · new</td><td>Version, vault path, settings path, and the no-network statement.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="tier">
+    <div class="tier-head">
+      <span class="eyebrow">Tier 2 — real machinery</span>
+      <h2>Higher value, touches the main process</h2>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th></th><th>Setting</th><th>Why</th></tr></thead>
+        <tbody>
+          <tr><td class="num">8</td><td class="what">Backup retention + prune on write</td><td>Unbounded growth today. Count or age.</td></tr>
+          <tr><td class="num">9</td><td class="what">Secret exclusion list</td><td>The claim and the code disagree.</td></tr>
+          <tr><td class="num">10</td><td class="what">Restore session on startup</td><td>Open tabs are lost on quit.</td></tr>
+          <tr><td class="num">11</td><td class="what">Trusted networks — review + revoke</td><td>The store exists in <code>network.ts</code>; there is no UI.</td></tr>
+          <tr><td class="num">12</td><td class="what">Daily notes — folder, format, template</td><td>Vault facts hardcoded in <code>daily.ts</code>. Logseq precedent.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="tier">
+    <div class="tier-head">
+      <span class="eyebrow">Tier 3 — needs a decision first</span>
+      <h2>Blocked on something that isn't code</h2>
+    </div>
+    <div class="tablewrap">
+      <table>
+        <thead><tr><th></th><th>Setting</th><th>Blocked on</th></tr></thead>
+        <tbody>
+          <tr><td class="num">13</td><td class="what">Close to tray + tray icon</td><td>A product call: agents run in the background, so this changes what quitting <em>means</em>.</td></tr>
+          <tr><td class="num">14</td><td class="what">Start on login</td><td>Follows 13.</td></tr>
+          <tr><td class="num">15</td><td class="what">Auto-update + channel</td><td>Needs the updater to exist — roadmap note 11.</td></tr>
+          <tr><td class="num">16</td><td class="what">Hardware acceleration off</td><td>Needs a restart-required pattern; <code>vaultDir</code> already has one to copy.</td></tr>
+          <tr><td class="num">17</td><td class="what">Global hotkey</td><td>Needs a command registry. There isn't one.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+
+  <section class="excluded">
+    <span class="eyebrow">Still excluded</span>
+    <p>
+      Everything the first pass ruled out, except themes. The eight CodeMirror-dependent
+      editor settings — line numbers, vim bindings, live preview, folding, auto-pair, tab
+      size and the rest — remain <strong>one decision, not eight settings</strong>. That is
+      the roadmap's Markdown-support project, not a settings task.
+    </p>
+  </section>
+
+  <footer>
+    <span class="eyebrow">Notes for whoever builds this</span>
+    <ul>
+      <li>Sections become <strong>Vault · Editor · Appearance · Agent · About</strong>. Two new.</li>
+      <li>The dialog is a real <code>&lt;dialog&gt;</code> with <code>showModal()</code>, so focus trap, Escape, focus restore and top layer are the platform's job. A nav rewrite must not turn it back into a div.</li>
+      <li>Dependent settings <em>nest</em> rather than grey out, past the second one — Obsidian's rule, and it scales where disabling does not.</li>
+      <li>Every new key needs a row in <code>sanitize()</code>. That function is the single trust boundary, and an unvalidated key is how junk from a hand-edited <code>settings.json</code> reaches the renderer.</li>
+    </ul>
+  </footer>
+
+</div>

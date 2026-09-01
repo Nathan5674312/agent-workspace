@@ -250,6 +250,13 @@ platform's job. A nav rewrite must not quietly turn it back into a div.
 
 # Second pass — 2026-08-31
 
+> Also published as a page: `docs/settings-second-pass.html`, and live at
+> <https://claude.ai/code/artifact/241a5343-bcdd-42a0-84f9-1c4f0fa5974f>. That
+> page is the readable summary — the findings and the three tiers. **This file
+> stays the source of truth**, because it carries the provenance, the per-app
+> key tables and the exclusions, and it is the one versioned next to the code.
+> Edit this first; the page is regenerated from it.
+
 The first pass surveyed an agent app (Hermes) and a notes app (Obsidian). Asked
 to widen it, this pass added a **desktop shell** (Notion), a **modern editor**
 (Zed), and two reference taxonomies (VS Code, Logseq).

@@ -1,4 +1,4 @@
-# Settings research — Hermes and Obsidian
+# Settings research — Hermes, Obsidian, Notion, Zed, VS Code, Logseq
 
 Status: **inventory and mapping, no code.** Every row below was read off a real
 file, not recalled. Where a candidate turned out not to apply to this app, it is
@@ -13,6 +13,10 @@ are as explicit as the inclusions.
 | Obsidian | `%LOCALAPPDATA%\Programs\Obsidian\resources\obsidian.asar`, grepped for the i18n key space `setting.<section>.option-*`. Authoritative — these are the keys the settings UI renders from |
 | This vault's Obsidian config | `Universal Vault\.obsidian\{app,appearance,core-plugins,graph}.json` |
 | agent-workspace | `src/main/settings.ts`, `src/shared/ipc.ts`, `src/renderer/panes/vault/SettingsDialog.tsx` |
+| **Notion desktop** | `%APPDATA%\Notion\state.json` — the LIVE preference object this machine's install has written, plus `resources\app.asar` grepped for `spellCheck`. Second pass, 2026-08-31 |
+| **Zed** | `zed-industries/zed` → `assets/settings/default.json`, the shipped defaults file. Second pass, 2026-08-31 |
+| **VS Code** | `code.visualstudio.com/docs/getstarted/settings` plus the settings-editor group list. Docs, not a file — VS Code is not installed here, and that is a weaker source than the rows above |
+| **Logseq** | `config.edn` documentation. Docs, not a file — not installed here |
 
 A note on the vault's own config: `appearance.json` is `{}` and `app.json` holds
 only `promptDelete: false` and three `userIgnoreFilters`. So the *live* vault
@@ -110,8 +114,26 @@ is off) and it works, but the nesting scales better past two.
 
 ## 3. What agent-workspace has today
 
-Six settings, one flat modal (`SettingsDialog.tsx`), persisted by
-`src/main/settings.ts` to `settings.json` in `userData`.
+> **Stale as written, corrected 2026-08-31.** Three things below changed since
+> the first pass, and the differences matter because §5 was a prediction about a
+> modal that no longer exists:
+>
+> - **The flat modal is gone.** `SettingsDialog.tsx` already has the left nav §5
+>   recommended, with sections **Vault · Appearance · Agent**. The restructure
+>   happened in the order §5 asked for — before the second batch, not after.
+> - **`appearance.contrast` was removed**, deliberately: it duplicated
+>   `@media (prefers-contrast: more)` in app.css by hand. The media query still
+>   answers the OS; the in-app copy was the liability.
+> - **Excluded folders, approvals mode and approvals timeout all shipped**, so
+>   three rows of §4 are done. `appearance.theme` shipped too — seven palettes —
+>   which reopens a §4 exclusion; see §9.6.
+
+Persisted by `src/main/settings.ts` to `settings.json` in `userData`. The real
+shape on 2026-08-31 is `vaultDir` · `pendingVaultDir` · `rootMismatch` ·
+`appearance{theme, transparency, motion, artwork, artworkOpacity}` ·
+`approvals{mode, timeoutMs}`.
+
+The original six, for the record:
 
 | Setting | Applies |
 |---|---|
@@ -223,3 +245,225 @@ onto a modal that has already grown is the more expensive order.
 One thing to preserve if it does: the dialog is a real `<dialog>` +
 `showModal()`, so the focus trap, Escape, focus restore and top layer are the
 platform's job. A nav rewrite must not quietly turn it back into a div.
+
+---
+
+# Second pass — 2026-08-31
+
+The first pass surveyed an agent app (Hermes) and a notes app (Obsidian). Asked
+to widen it, this pass added a **desktop shell** (Notion), a **modern editor**
+(Zed), and two reference taxonomies (VS Code, Logseq).
+
+**It found one whole category the first pass missed, and it is the category this
+app has least of.** Everything below is again read off a real file where the app
+was installed, and marked docs-only where it was not.
+
+## 6. Notion desktop — the settings a WINDOW needs
+
+Notion's page-level settings are server-rendered and not on disk, so the asar is
+not the interesting part. `%APPDATA%\Notion\state.json` is: it is the live
+preference object, written by this machine's own install.
+
+| Key | Value here | What it controls |
+|---|---|---|
+| `isOpenAtLoginEnabled` | `true` | Start with the OS |
+| `onStartup` | `"continue"` | Restore the previous session vs a fresh window |
+| `isHideLastWindowOnCloseEnabled` | `true` | Close button hides vs quits |
+| `isMenuBarIconEnabled` | `true` | Tray / menu-bar icon |
+| `isHardwareAccelerationDisabled` | `false` | GPU rendering — the standard escape hatch for driver bugs |
+| `isAutoUpdaterDisabled`, `updaterChannel` | `false`, `null` | Update policy and channel |
+| `zoomFactor` | `~1.0` | Whole-UI scale, distinct from any font size |
+| `quickSearchShortcut` | `Shift+CommandOrControl+K` | A GLOBAL hotkey, live while the app is unfocused |
+| `notionAiShortcut` | `shift+ctrl+j` | The same, for the agent surface |
+| `isNavigationHistoryEnabled` | `true` | Back / forward |
+| `locale` | `en-US` | Language |
+| `contrastMode`, `osHighContrastEnabled` | `standard`, `false` | Accessibility, read from the OS |
+| `spellCheck` | 8 hits in the asar | Spellcheck |
+
+## 7. Zed — the defaults file
+
+`assets/settings/default.json`, the shipped defaults. Application-level keys
+only; the per-language and LSP half does not apply here.
+
+| Key | Default | Note |
+|---|---|---|
+| `theme` | `{mode: "system", light, dark}` | **A theme PAIR plus a mode**, not one name — see §9.6 |
+| `ui_font_size` / `buffer_font_size` | `16` / `15` | **Two scales, not one** — see §9.5 |
+| `buffer_line_height` | `"comfortable"` | Named, not numeric |
+| `restore_on_startup` | `"last_session"` | Session restore |
+| `confirm_quit` | `false` | Guard on exit |
+| `autosave` | `"off"` | Zed also defaults to manual saving |
+| `auto_update` | `true` | |
+| `telemetry` | `{diagnostics, metrics}` | Two independent toggles, not one |
+| `private_files` | `["**/.env*", "**/*.pem", "**/*.key", "**/*.cert", "**/secrets.yml"]` | **See §9.4 — the highest-value row in this document** |
+| `redact_private_values` | `false` | |
+| `file_scan_exclusions`, `file_scan_depth` | `.git`, `.DS_Store`, … / `5` | Confirms the first pass's exclusion work |
+| `accessible_mode` | `false` | |
+| `cursor_blink`, `scrollbar.show`, `hide_mouse` | | Presentation detail |
+
+## 8. VS Code and Logseq — taxonomy only
+
+Neither is installed here, so these are docs and rank below every row above.
+
+**VS Code** groups its settings editor as *Commonly Used · Editor · Workbench ·
+Window · Files · Update · Telemetry · Terminal · Extensions · Features*, plus
+per-language. Two ideas are worth taking and neither is a setting:
+
+1. **A "Commonly Used" group at the top** — a ranked entry point, not a category.
+2. **Some settings are user-scope ONLY and cannot be set per workspace**, because
+   they name an executable. Security expressed as *scope*, not as a checkbox.
+
+**Logseq** contributes one thing the others do not: the journal / daily note is
+configured rather than hardcoded — `:journal/page-title-format` (default
+`MMM do, yyyy`), a default journal template, and a preferred format. That is the
+direct precedent for the daily-notes row already in §4.
+
+---
+
+## 9. What the wider survey actually adds
+
+Seven findings. The first is the big one.
+
+### 9.1 There is a whole category this app has NOTHING of: the desktop shell
+
+The first pass surveyed what a *document* app configures. Notion and Zed both
+show a second layer underneath: what a *window* configures. Verified by grep on
+2026-08-31 — `src/main/` contains **no** `autoUpdater`, **no** `Tray`, **no**
+`globalShortcut`, **no** `setLoginItemSettings`, **no**
+`disableHardwareAcceleration`, and `index.ts` hardcodes `width: 1600,
+height: 1000` with no persistence.
+
+| Missing | Precedent | Consequence today |
+|---|---|---|
+| Window size and position remembered | universal | Every launch is 1600×1000 wherever the OS puts it |
+| Restore session on startup | Notion `onStartup`, Zed `restore_on_startup` | Open tabs are lost on quit |
+| Start on login | Notion `isOpenAtLoginEnabled` | — |
+| Close to tray vs quit | Notion `isHideLastWindowOnCloseEnabled` | Closing kills running agents |
+| Tray icon | Notion `isMenuBarIconEnabled` | No surface while unfocused, though agents run in the background |
+| Hardware acceleration off | Notion `isHardwareAccelerationDisabled` | No escape hatch for a GPU driver bug, on a GTX 1660 SUPER |
+| Global hotkey | Notion `quickSearchShortcut` | — |
+
+**Window bounds is the one to build first.** Cheapest, most universally
+expected, and the only one here a user notices every single launch.
+
+### 9.2 Updates are absent, and roadmap note 11 needs them
+
+No `autoUpdater`, no channel, no "check for updates". Notion, Zed and VS Code all
+carry it. `Fate/Roadmap/11 - Shipping the App` settles on Developer ID +
+notarization with download-from-the-site, and that distribution has no store to
+push updates — so the updater IS the delivery mechanism, not a nicety. The
+setting is small; the machinery behind it is a shipping decision.
+
+### 9.3 Telemetry: the honest answer is a STATEMENT, not a toggle
+
+Zed ships `telemetry.{diagnostics, metrics}`; VS Code has a Telemetry group.
+This app should ship **neither**, and should say so where a user looks for it.
+`roadmap.ts` records the measurement: nothing under `src/` calls fetch, axios,
+XHR, WebSocket, `http.request` or `createServer`, and `index.html` enforces
+`connect-src 'none'` under `default-src 'none'`. A toggle implies something to
+turn off and would be the only dishonest control in the app. **A line in About
+is the correct build.**
+
+### 9.4 Secret redaction — the highest-value row in this document
+
+Zed ships `private_files` (`**/.env*`, `**/*.pem`, `**/*.key`, `**/*.cert`,
+`**/secrets.yml`) and `redact_private_values`. This app has **no equivalent**,
+and it matters more here than in Zed, because this app spawns agents that read
+the vault: `claude.ts` starts the user's own CLI against the vault root, and
+`terminal.ts` spawns a shell.
+
+The gap is sharper than "a missing feature". The machine's own `CLAUDE.md`
+states that secrets *are* blocked from agent file tools "by design". Nothing in
+this repo implements that. The claim and the code disagree, and the survey is
+what surfaced it. Whether the fix is a setting, a hardcoded list, or a main-side
+filter in `vault.ts`'s `walk()` is a design question — but the exclusion list
+belongs beside `HIDDEN` / `SKIP`, which already exist and already work.
+
+### 9.5 The first pass conflated two different font sizes
+
+§4 proposes "editor font size". Zed separates `ui_font_size` from
+`buffer_font_size`; Notion has `zoomFactor` for the whole UI. They are different
+settings with different blast radii: UI scale reflows every pane and is an
+accessibility control; editor size affects prose only and is a reading-comfort
+control. tokens.css already sizes everything in `rem` "so a larger system text
+size scales the layout with it", which makes **UI scale nearly free** — one
+property on the root — while editor size needs its own token.
+
+### 9.6 A §4 exclusion has been overturned, correctly
+
+§4 rules out themes: "the palette's contrast ratios are measured, and
+docs/ACCESSIBILITY.md treats them as a commitment. Arbitrary themes discard the
+measurement." Seven palettes shipped on 2026-08-31 and the objection was met
+rather than ignored — every palette is *solved* to the founder's own ratios and
+`test/themes.test.mjs` re-measures all of them on every run. The rule the
+exclusion protected is intact; what was wrong was assuming a theme picker
+implies *arbitrary* themes. Zed's `theme` shape — a light/dark pair plus
+`mode: system` — is the next step if this app ever follows the OS.
+
+### 9.7 One gap no reference app has, found by absence
+
+`.backups/` grows forever. `save()` writes a pre-edit copy on **every** save and
+nothing prunes: measured on the real vault, 187 files / 871 KB, and `versions.ts`
+says in its own header that it "creates nothing, prunes nothing". None of the
+four reference apps has a retention setting, because none of them keeps a copy
+per save — Obsidian's file recovery has an interval and a retention period, which
+is the nearest thing. This is an app-specific need the survey surfaced by *not*
+finding it: **backup retention (count or age), with prune on write.**
+
+---
+
+## 10. Revised build list
+
+Supersedes §4's ordering. §4's "Does not apply" exclusions all still stand
+except themes (§9.6).
+
+### Tier 1 — cheap, expected, nothing new underneath
+
+| # | Setting | Section | Why now |
+|---|---|---|---|
+| 1 | **Window size + position remembered** | (no UI) | Noticed every launch. Not a setting at all — just persistence |
+| 2 | **UI scale** | Appearance | Everything is already `rem`; one root property |
+| 3 | **Editor font size** | Editor (new) | Its own token, live-applied like appearance |
+| 4 | **Readable line length** + width | Editor | `max-width` on the textarea |
+| 5 | **Spellcheck** | Editor | One attribute; Chromium does the rest |
+| 6 | **Export / Import / Reset config** | About (new) | One object, one sanitiser, `save(defaults)` |
+| 7 | **About**: version, vault path, settings path, "no telemetry, no network" | About | §9.3 |
+
+### Tier 2 — real machinery, high value
+
+| # | Setting | Why |
+|---|---|---|
+| 8 | **Backup retention** + prune on write | §9.7. Unbounded growth today |
+| 9 | **Secret exclusion list** | §9.4. The claim and the code disagree |
+| 10 | **Restore session on startup** | Open tabs are lost on quit |
+| 11 | **Trusted networks review + revoke** | §4. Store exists, no UI |
+| 12 | **Daily notes**: folder, format, template | §4 + Logseq precedent. Vault facts living in source |
+
+### Tier 3 — needs a decision first
+
+| # | Setting | Blocked on |
+|---|---|---|
+| 13 | Close-to-tray + tray icon | Product call: agents run in the background, so this changes what quitting MEANS |
+| 14 | Start on login | Follows 13 |
+| 15 | Auto-update + channel | Needs the updater to exist — roadmap note 11 |
+| 16 | Hardware acceleration off | Needs a restart-required pattern; `vaultDir` already has one to copy |
+| 17 | Global hotkey | Needs a command registry — same blocker as hotkeys in §4 |
+
+### Still excluded
+
+Everything in §4's "Does not apply" except themes. The eight CodeMirror-dependent
+editor settings remain one decision (adopt an editor component), not eight
+settings — that is the roadmap's **Markdown support** item, not a settings task.
+
+### Structural notes for whoever builds this
+
+- Sections become **Vault · Editor · Appearance · Agent · About**. Two new.
+- §5's warning still applies and is now load-bearing: the dialog is a real
+  `<dialog>` + `showModal()`, so focus trap, Escape, focus restore and top layer
+  are the platform's job. **A nav rewrite must not turn it back into a div.**
+- Adopt Obsidian's nesting rule from §2 at Tier 1: readable-line *length* nests
+  under readable-line, as artwork opacity already sits beside artwork. Past two
+  dependent settings, nesting scales and disabling does not.
+- Every new key needs a row in `sanitize()` in `src/main/settings.ts`. That
+  function is the single trust boundary, and an unvalidated key is how junk from
+  a hand-edited `settings.json` reaches the renderer.

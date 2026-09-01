@@ -77,6 +77,7 @@ import {
 } from './helpers.js'
 import type { VaultNoteBody } from '../../../shared/ipc.js'
 import { setFrontmatter } from '../../../shared/notemeta.js'
+import { listTemplates, type Template } from '../../../shared/templates.js'
 import {
   addWikilink,
   ambiguousStems,
@@ -306,6 +307,9 @@ export function VaultPane(): React.ReactElement {
    * agree about — see `ambiguousStems`.
    */
   const sharedStems = useMemo(() => ambiguousStems(vault.tree), [vault.tree])
+
+  /** `Templates/`, for the explorer's split button. Empty means no control. */
+  const templates = useMemo(() => listTemplates(vault.tree), [vault.tree])
 
   /**
    * The tree as the explorer draws it. A memo because this pane re-renders on
@@ -826,6 +830,35 @@ export function VaultPane(): React.ReactElement {
   }
 
   /**
+   * The same create, seeded with a template's text.
+   *
+   * READ THEN WRITE, and the read is what makes this worth its own handler: the
+   * template's body is not in the tree, which carries names and paths only. It
+   * goes through `vault.readNote` — the same channel the editor opens a note
+   * with — so a template deleted between the menu being drawn and a row being
+   * clicked fails on the READ, before anything is created, rather than leaving
+   * an empty Untitled.md behind.
+   *
+   * `nextUntitledPath` and `saveNote(…, 0)` are shared with `handleNewNote`
+   * deliberately. The name is a separate problem this app already answers the
+   * same way everywhere, and a template is not a reason to invent a second
+   * naming rule or a second write door.
+   */
+  const handleNewFromTemplate = async (template: Template) => {
+    const path = nextUntitledPath(vault.tree, targetFolder())
+    try {
+      const source = await vault.readNote(template.path)
+      await vault.saveNote(path, source.text, 0)
+      vault.reload()
+      await openNote(path)
+    } catch (e) {
+      setOpenError(
+        `Could not create ${path} from ${template.name}: ${e instanceof Error ? e.message : String(e)}`,
+      )
+    }
+  }
+
+  /**
    * Create a folder and reveal it.
    *
    * THIS USED TO CALL `window.prompt` AND DO NOTHING AT ALL.
@@ -1084,6 +1117,8 @@ export function VaultPane(): React.ReactElement {
                 onExpand={handleExpandAll}
                 sort={sort}
                 onSortChange={setSort}
+                templates={templates}
+                onNewFromTemplate={(t) => void handleNewFromTemplate(t)}
               />
               <FolderTree
                 root={sortedTree}

@@ -169,6 +169,15 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   flex-wrap: wrap;               /* was clipping "Sort" under the tab bar */
 }
 .vault-explorer-header select { padding: var(--space-1) var(--space-2); font-size: var(--text-xs); }
+/* The template chevron, joined to "+ Note" so the pair reads as one split
+   control rather than two buttons that happen to be adjacent. Pulled back over
+   the flex `gap` and narrowed, because it carries an icon and no label. */
+.vault-header-button--split {
+  margin-left: calc(var(--space-1) * -1);
+  padding-left: var(--space-1); padding-right: var(--space-1);
+  display: inline-flex; align-items: center;
+  color: var(--label-tertiary);
+}
 .vault-folder-tree { flex: 1; min-height: 0; overflow-y: auto; padding: var(--space-3) var(--space-2); }
 
 .vault-tree-item {

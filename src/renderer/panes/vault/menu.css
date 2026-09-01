@@ -224,3 +224,10 @@
 #vault-sort-menu {
   position-anchor: --vault-sort-menu;
 }
+
+[popovertarget='vault-template-menu']:not(.pane-menu-item) {
+  anchor-name: --vault-template-menu;
+}
+#vault-template-menu {
+  position-anchor: --vault-template-menu;
+}

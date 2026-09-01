@@ -13,9 +13,11 @@
  * merely inert: a control that looks live and silently does nothing is worse
  * than one that admits it cannot act.
  */
-import { Minus } from 'lucide-react'
+import { ChevronDown, Minus } from 'lucide-react'
+import { PaneMenu, PaneMenuItem } from './PaneMenu.js'
 import { SelectMenu } from './SelectMenu.js'
 import type { TreeSort } from './helpers.js'
+import type { Template } from '../../../shared/templates.js'
 
 export interface ExplorerHeaderProps {
   onNewNote: () => void
@@ -24,6 +26,9 @@ export interface ExplorerHeaderProps {
   onExpand: () => void
   sort: TreeSort
   onSortChange: (sort: TreeSort) => void
+  /** From `Templates/`. Empty in a vault without that folder. */
+  templates: Template[]
+  onNewFromTemplate: (template: Template) => void
 }
 
 /**
@@ -52,6 +57,8 @@ export function ExplorerHeader({
   onExpand,
   sort,
   onSortChange,
+  templates,
+  onNewFromTemplate,
 }: ExplorerHeaderProps) {
   return (
     <div className="vault-explorer-header">
@@ -62,6 +69,30 @@ export function ExplorerHeader({
       >
         + Note
       </button>
+      {/* A SPLIT BUTTON, not a menu replacing "+ Note".
+          Making "+ Note" itself a menu would cost every existing use a second
+          click to reach the empty note, which is the common case and the one
+          the control is named after. The chevron carries the rarer choice.
+
+          Rendered only when there ARE templates: with none, this is a menu
+          whose every row would be absent, and a trigger that opens an empty
+          panel is the same lie as a dead button. A vault with no `Templates/`
+          folder simply does not grow the control. */}
+      {templates.length > 0 && (
+        <PaneMenu
+          id="vault-template-menu"
+          className="vault-header-button vault-header-button--split"
+          label="New note from a template"
+          panelClass="pane-menu--start"
+          icon={<ChevronDown size={13} aria-hidden="true" />}
+        >
+          {templates.map((t) => (
+            <PaneMenuItem key={t.path} onClick={() => onNewFromTemplate(t)}>
+              {t.name}
+            </PaneMenuItem>
+          ))}
+        </PaneMenu>
+      )}
       <button
         className="vault-header-button"
         onClick={onNewFolder}

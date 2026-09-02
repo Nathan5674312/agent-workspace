@@ -2042,11 +2042,18 @@ export async function backlinks(path: string): Promise<string[]> {
  * is nothing cached to grep, and caching the whole vault's text to avoid the
  * read would trade a bounded cost for an unbounded one.
  *
- * Two things keep the cost bounded rather than merely small:
- *   - the renderer debounces and will not send a query under two characters,
- *     so this does not run per keystroke;
- *   - `budget` stops the walk once enough notes have matched, so the common
- *     case — a query that hits early — never reads the tail of the vault.
+ * What bounds it, stated honestly rather than optimistically:
+ *   - the renderer searches on ENTER and will not send a query under two
+ *     characters, so this does not run per keystroke;
+ *   - `budget` stops the walk once enough notes have matched, which bounds a
+ *     BROAD query — one that hits early never reads the tail of the vault.
+ *
+ * The inverse is the case that is NOT bounded by the budget, and an earlier
+ * version of this comment had it backwards: a rare term or a typo never fills
+ * the budget, so it stats and reads every note in the vault. The ceiling is
+ * therefore the vault, once, per query — which is the same walk `scan()` does
+ * on every index build, and is why that is an acceptable ceiling rather than a
+ * hidden one.
  *
  * ponytail: linear, no index. `Roadmap/02` settles on SQLite FTS5 + sqlite-vec
  * and that is still right; this function is the one place that changes when it
@@ -2066,6 +2073,26 @@ export async function search(query: string, budget = 200): Promise<NoteHits[]> {
     n.children?.forEach(collect)
   }
   collect(await tree())
+
+  /**
+   * TITLE MATCHES ARE READ FIRST, and that is what makes the ranking mean
+   * anything under a budget.
+   *
+   * `rankNotes` promises name matches come first, but it can only rank what it
+   * is given, and the budget below stops the walk once enough notes have
+   * matched — in TREE-WALK ORDER. So on a broad query the budget filled from
+   * the top of the vault and a note literally named after the query, sitting
+   * late in the walk, never entered the result set at all. The user saw two
+   * hundred body hits and not the note they were looking for.
+   *
+   * Sorting here costs nothing: the title comes from the PATH, so deciding this
+   * needs no file read. It only reorders which notes are read first.
+   */
+  paths.sort((a, b) => {
+    const at = titleMatches(titleOf(a), query) ? 0 : 1
+    const bt = titleMatches(titleOf(b), query) ? 0 : 1
+    return at - bt
+  })
 
   const out: NoteHits[] = []
   let matched = 0

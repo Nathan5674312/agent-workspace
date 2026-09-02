@@ -111,6 +111,31 @@ test('CRLF does not leave a carriage return in the result row', () => {
   assert.ok(!hit.text.includes('\r'))
 })
 
+test('the offset survives a lowercase that CHANGES LENGTH', () => {
+  // 'İ'.toLowerCase() is two UTF-16 code units, so a fast lowercased indexOf
+  // reports an index into a longer string. Measured before the fix: offset 7 in
+  // a 7-character line, which rendered an EMPTY highlight — the match was not
+  // marked at all. The renderer slices on this number, so it has to index the
+  // string it is slicing.
+  const line = 'İİİ abc'
+  const [hit] = searchText(line, 'abc').hits
+  assert.equal(hit.text.slice(hit.at, hit.at + hit.length), 'abc')
+  // And the query itself can contain one.
+  const [h2] = searchText('x İstanbul y', 'İst').hits
+  assert.equal(h2.text.slice(h2.at, h2.at + h2.length).toLowerCase(), 'i̇st'.toLowerCase())
+})
+
+test('a late match on a SHORT line is still windowed into view', () => {
+  // The row is one clipped line in a narrow sidebar. Windowing only lines over
+  // SNIPPET_MAX left the common case broken: an ordinary prose line whose match
+  // sits 60 characters in showed 25 characters of unrelated text and no mark.
+  const line = 'a'.repeat(60) + 'needle tail'
+  const [hit] = searchText(line, 'needle').hits
+  assert.ok(hit.at <= 12, `match sits ${hit.at} chars in, too far to be visible`)
+  assert.equal(hit.text.slice(hit.at, hit.at + hit.length), 'needle')
+  assert.ok(hit.text.startsWith('…'), 'a windowed head says it was cut')
+})
+
 // ------------------------------------------------------------------- capping
 
 test('hits past the per-note cap are COUNTED, not dropped silently', () => {
@@ -141,13 +166,21 @@ test('truncated hits count toward the ranking, or a capped note sinks unfairly',
   assert.deepEqual(rankNotes([few, many]).map((n) => n.path), ['many.md', 'few.md'])
 })
 
-test('countHits totals the shown and the truncated', () => {
+test('countHits totals the shown, the truncated, and the name-only match', () => {
+  // The name-only row used to count ZERO, so a query matching a filename and
+  // nothing in its body printed "0 results in 1 note" directly above a
+  // clickable result. It is a result; it counts as one.
   assert.equal(
     countHits([
       { path: 'a', title: 'a', titleMatch: false, hits: [{}, {}], truncated: 3 },
       { path: 'b', title: 'b', titleMatch: true, hits: [], truncated: 0 },
     ]),
-    5,
+    6,
+  )
+  // A name match that ALSO has body hits is not double-counted.
+  assert.equal(
+    countHits([{ path: 'c', title: 'c', titleMatch: true, hits: [{}, {}], truncated: 0 }]),
+    2,
   )
 })
 

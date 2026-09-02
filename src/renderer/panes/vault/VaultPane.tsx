@@ -96,7 +96,22 @@ export function VaultPane(): React.ReactElement {
    * edit buffer and re-renders on every keystroke already.
    */
   const layoutRef = useRef<HTMLDivElement>(null)
+  /**
+   * The sidebar's section, and separately the icon that is LIT.
+   *
+   * Two states because two questions. `activeRibbon` is which panel the sidebar
+   * shows; `ribbonPressed` is which icon you last pressed, and Graph and
+   * Versions are pressable without owning a sidebar — they open a main view and
+   * leave the sidebar alone.
+   *
+   * Deriving the highlight from the view instead was wrong in a way only
+   * clicking finds: with the graph open, pressing Files swapped the sidebar but
+   * left Graph lit and left `aria-pressed=false` on the icon just pressed,
+   * because the main view was still the graph. The screen then disagreed with
+   * itself about what was selected.
+   */
   const [activeRibbon, setActiveRibbon] = useState('files')
+  const [ribbonPressed, setRibbonPressed] = useState('files')
   const [selectedNote, setSelectedNote] = useState<VaultNoteBody | null>(null)
   /**
    * The open note's path, readable AFTER an await.
@@ -1108,9 +1123,7 @@ export function VaultPane(): React.ReactElement {
          * versions would not be moving the feature, it would be deleting it.
          */}
         <LeftRibbon
-          activeView={
-            view === 'versions' || view === 'graph' ? view : activeRibbon
-          }
+          activeView={ribbonPressed}
           onViewChange={(id) => {
             /**
              * TWO ICONS OPEN A MAIN VIEW AND KEEP THE SIDEBAR THEY HAD, and
@@ -1123,6 +1136,7 @@ export function VaultPane(): React.ReactElement {
              * view is the feature; taking the file tree away to show a panel
              * about the view is not.
              */
+            setRibbonPressed(id)
             if (id === 'versions') handleViewChange('versions')
             else if (id === 'graph') handleViewChange('graph')
             else {

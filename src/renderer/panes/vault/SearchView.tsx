@@ -43,7 +43,14 @@ function HitLine({ hit, onOpen }: { hit: SearchHit; onOpen: () => void }) {
   const match = hit.text.slice(hit.at, hit.at + hit.length)
   const after = hit.text.slice(hit.at + hit.length)
   return (
-    <button className="search-hit" onClick={onOpen} title={`Line ${hit.line + 1}`}>
+    /* The row is ONE clipped line, so the tooltip has to carry the text — the
+       stylesheet says as much and this used to show only the line number,
+       which meant a clipped row had nowhere to reveal what it had matched. */
+    <button
+      className="search-hit"
+      onClick={onOpen}
+      title={`Line ${hit.line + 1}: ${hit.text}`}
+    >
       <span className="search-hit-line">{hit.line + 1}</span>
       <span className="search-hit-text">
         {before}

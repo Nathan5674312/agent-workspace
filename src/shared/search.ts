@@ -52,7 +52,19 @@ export type NoteHits = {
  * cut is centred on the match rather than taken from the start, or a hit at
  * column 9 000 would show 200 characters that do not contain it.
  */
-export const SNIPPET_MAX = 240
+export const SNIPPET_MAX = 120
+
+/**
+ * How much of the line to keep BEFORE the match.
+ *
+ * Small, and that is the whole point. `.search-hit-text` is one clipped line in
+ * a 15rem sidebar — about 25 characters — so a match sitting 60 characters into
+ * an ordinary prose line is scrolled off the right edge and the row shows 25
+ * characters of unrelated text with no visible highlight. Windowing only when
+ * the line exceeded SNIPPET_MAX was not enough: most lines are shorter than
+ * that and still far wider than the column they are drawn in.
+ */
+const LEAD = 10
 
 /** Ellipsis characters, counted so the caller need not know the shape. */
 const ELLIPSIS = '…'
@@ -80,7 +92,26 @@ export function isSearchable(q: string): boolean {
  * the highlight is drawn from.
  */
 function indexOfCI(haystack: string, needle: string, from = 0): number {
-  return haystack.toLowerCase().indexOf(needle.toLowerCase(), from)
+  const lower = haystack.toLowerCase()
+  const q = needle.toLowerCase()
+  /**
+   * THE FAST PATH IS ONLY VALID WHILE LOWERCASING PRESERVES LENGTH, and for a
+   * few characters it does not: `'İ'.toLowerCase()` is TWO UTF-16 code units,
+   * so every one of them before the match shifts the index by one. Measured:
+   * `searchText('İİİ abc', 'abc')` reported offset 7 in a 7-character string,
+   * and the renderer slices on that offset — so the highlight came out empty
+   * and the match was not marked at all. The old comment here claimed the
+   * offsets stayed valid, which was the actual defect.
+   *
+   * Equal lengths mean every index still lines up, which covers effectively
+   * every real query; otherwise fall back to comparing a window of the
+   * ORIGINAL string, where the index is by construction an index into it.
+   */
+  if (lower.length === haystack.length) return lower.indexOf(q, from)
+  for (let i = Math.max(0, from); i + needle.length <= haystack.length; i++) {
+    if (haystack.slice(i, i + needle.length).toLowerCase() === q) return i
+  }
+  return -1
 }
 
 /** Does this note's name match? Checked separately so a rename is findable. */
@@ -96,14 +127,28 @@ export function titleMatches(title: string, query: string): boolean {
  * highlights by offset and a naive slice silently invalidates every one.
  */
 function snippet(line: string, at: number): { text: string; at: number } {
-  if (line.length <= SNIPPET_MAX) return { text: line, at }
+  // Only when the whole line fits AND the match is already near the start. A
+  // short line with a late match still has to be windowed, or the visible
+  // column shows text either side of nothing.
+  if (line.length <= SNIPPET_MAX && at <= LEAD) return { text: line, at }
 
-  // Keep a third of the window before the match so it has context on both sides.
-  const lead = Math.floor(SNIPPET_MAX / 3)
-  let start = Math.max(0, at - lead)
-  let end = Math.min(line.length, start + SNIPPET_MAX)
-  // Ran off the end: pull the window back rather than returning a short one.
-  if (end - start < SNIPPET_MAX) start = Math.max(0, end - SNIPPET_MAX)
+  const start = Math.max(0, at - LEAD)
+  const end = Math.min(line.length, start + SNIPPET_MAX)
+  /**
+   * THERE USED TO BE A PULL-BACK HERE and it had to go, because it fought the
+   * line above. When the window ran off the end of the line it slid `start`
+   * down to keep the window a full SNIPPET_MAX wide — but sliding start down
+   * moves the match RIGHT, which is the one thing LEAD exists to prevent.
+   *
+   * On the case that caught it — a 71-character line with the match 60 in — it
+   * slid start all the way to 0 and handed back an offset of 60 for a column
+   * that shows about 25 characters. The match was outside the visible strip and
+   * nothing was highlighted, which is exactly the bug LEAD was added to fix.
+   *
+   * A short window at the end of a line is not a defect. Padding it with
+   * leading context the user cannot see, at the cost of the match they are
+   * looking for, is.
+   */
 
   const head = start > 0 ? ELLIPSIS : ''
   const tail = end < line.length ? ELLIPSIS : ''
@@ -165,7 +210,17 @@ export function rankNotes(notes: NoteHits[]): NoteHits[] {
   })
 }
 
-/** Total lines across a result set, for the "N results in M notes" line. */
+/**
+ * Total results, for the "N results in M notes" line.
+ *
+ * A NOTE MATCHED ONLY BY ITS NAME COUNTS AS ONE. `search()` deliberately keeps
+ * a note whose title matches even when its body has no hits — that is how you
+ * find a note you named and never wrote in — and summing lines alone reported
+ * "0 results in 1 note" directly above a clickable row.
+ */
 export function countHits(notes: NoteHits[]): number {
-  return notes.reduce((n, x) => n + x.hits.length + x.truncated, 0)
+  return notes.reduce(
+    (n, x) => n + Math.max(x.hits.length + x.truncated, x.titleMatch ? 1 : 0),
+    0,
+  )
 }

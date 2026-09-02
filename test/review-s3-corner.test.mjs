@@ -544,6 +544,25 @@ test('nothing is interpolated into a child-process invocation', () => {
   assert.match(NETWORK_CODE, /isIpv4\(/)
 })
 
+test('several default routes pick ONE gateway, not the whole blob', () => {
+  // A machine with a VPN, a second NIC or Hyper-V has more than one default
+  // route, so Get-NetRoute returns a list. This was scenario 3 of the
+  // root-level probe3.mjs scratch file, and the only thing those probes
+  // exercised that no test did; they are deleted, so it is asserted here.
+  //
+  // Two failure modes, both real. Handing the whole multi-line blob onward is
+  // how the old code built a malformed arp command. Taking line one blindly
+  // hands on 0.0.0.0, which means "on-link" and is not a gateway at all.
+  assert.ok(
+    NETWORK_CODE.includes('.find((line) => isIpv4(line)'),
+    'one route line is chosen, rather than the blob being passed on',
+  )
+  assert.ok(
+    NETWORK_CODE.includes("line !== '0.0.0.0'"),
+    'an on-link 0.0.0.0 route is not a gateway and must be skipped',
+  )
+})
+
 test('network detection does not block the main thread', () => {
   // A synchronous probe here freezes every window in the app: register()
   // exposes this on an IPC channel, so the renderer could hang the UI for the

@@ -101,10 +101,16 @@ test('left ribbon carries every view, and no icon promises a cut feature', () =>
 
 test('no ribbon icon falls through to the not-built placeholder', () => {
   // THE ROADMAP'S OWN CRITERION for "Clean modern UI". Every id in the ribbon
-  // must be handled by name in the pane, or it lands in the `else` and renders
-  // SidebarPlaceholder — an icon that lights up and shows a panel about an
-  // unbuilt feature. `versions` and `graph` are handled in the ribbon's own
-  // onViewChange (they open a main view), the rest in the sidebar branch.
+  // must be handled by name in the pane. `versions` and `graph` are handled in
+  // the ribbon's own onViewChange (they open a main view), the rest in the
+  // sidebar branch.
+  //
+  // The stake went UP when the placeholder was deleted. An unhandled id used to
+  // land in the else and render SidebarPlaceholder — an icon that lit up and
+  // described an unbuilt feature, which was wrong but was not blank. Every icon
+  // has a real panel now, the placeholder is gone, and that else renders null.
+  // So this test is the only thing standing between a new ribbon icon and the
+  // empty sidebar the placeholder was built to prevent.
   const ribbon = src('LeftRibbon.tsx')
   const pane = src('VaultPane.tsx')
   const ids = [...ribbon.matchAll(/id: '([a-z]+)'/g)].map((m) => m[1])

@@ -2999,8 +2999,10 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
 }
 
 /**
- * The Canvas panel in the left ribbon — the fourth icon to graduate from
- * SidebarPlaceholder, after Bookmarks, Daily Notes and Terminal.
+ * The Canvas panel in the left ribbon — the fourth icon to get a real panel of
+ * its own, after Bookmarks, Daily Notes and Terminal. It graduated from the
+ * shared "not built yet" placeholder, which was itself deleted once Search took
+ * the last icon off it.
  *
  * It reads the boards straight out of `vault.tree()` rather than asking the
  * disk again, which is the same choice DailyNotesView made and for the same

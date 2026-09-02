@@ -25,8 +25,7 @@
  */
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVault } from './useVault.js'
-import { LeftRibbon, ribbonLabel } from './LeftRibbon.js'
-import { SidebarPlaceholder } from './SidebarPlaceholder.js'
+import { LeftRibbon } from './LeftRibbon.js'
 import { CanvasList } from './CanvasView.js'
 import { SidebarResizer } from './SidebarResizer.js'
 import { TerminalView } from './TerminalView.js'
@@ -1238,14 +1237,29 @@ export function VaultPane(): React.ReactElement {
             <SearchView onOpenHit={handleOpenHit} />
           ) : activeRibbon === 'terminal' ? (
             /* The first ribbon icon to graduate from a placeholder to a real
-               panel. The rest still describe themselves; see SidebarPlaceholder. */
+               panel, and by 1.0 the last one still described as such: every
+               other icon has its own panel too, which is why the placeholder
+               below is gone. */
             <TerminalView onClose={() => setActiveRibbon('files')} />
           ) : (
-            /* Every non-files ribbon icon used to fall through to nothing, so
-               the sidebar went blank while the icon reported itself pressed.
-               The `else` is the fix; the panel says which feature the icon is a
-               promise of, read from the roadmap. */
-            <SidebarPlaceholder view={activeRibbon} label={ribbonLabel(activeRibbon)} />
+            /* UNREACHABLE, and kept honest by a test rather than by a component.
+               Every id in LeftRibbon's VIEWS is now handled by name — here, or
+               in onViewChange above for the two that open a main view instead —
+               so nothing lands in this branch.
+
+               It used to render the SidebarPlaceholder component: a panel
+               describing the unbuilt feature an icon promised. That existed
+               because the original bug was an `&&` with no else, so seven icons
+               lit up and emptied the sidebar. The panel was the right fix while
+               there were unbuilt icons. There are none, so it had become a
+               component whose only job was to be reached by nothing.
+
+               What replaced it is not `null` plus optimism. `no ribbon icon
+               falls through to the not-built placeholder` in
+               review-s2-vault-pane.test.mjs reads both sources and asserts every
+               ribbon id is named in this file, so adding an icon without a panel
+               fails the suite instead of blanking a user's sidebar. */
+            null
           )}
 
           <VaultSwitcher

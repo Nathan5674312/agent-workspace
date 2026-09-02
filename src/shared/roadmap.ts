@@ -2,9 +2,11 @@
  * The product roadmap, as data.
  *
  * This is the feature list the app is being built against, in the author's own
- * grouping and wording. It lives in `shared/` because two surfaces read it: the
- * Roadmap tab in the main canvas, and the left-ribbon placeholders, which name
- * the feature a given icon is a promise of. One list, so the two cannot drift.
+ * grouping and wording. It lives in `shared/` because the Roadmap tab in the
+ * main canvas renders it. It USED to have a second reader — the left-ribbon
+ * placeholder panels, which named the feature a given icon was a promise of —
+ * and that reader is gone because by 1.0 every ribbon icon has a real panel and
+ * there is nothing left to promise.
  *
  * `status` is the honest state of the CODE, not a plan or an intention:
  *
@@ -19,7 +21,9 @@
  *
  * `surface` names where the feature lives in the UI, and is what lets a later
  * task be "fill in this panel" instead of "decide where this goes". `ribbon:*`
- * values are matched against LeftRibbon's view ids.
+ * values must name a real LeftRibbon view id — nothing reads them at runtime
+ * any more, so `no ribbon: surface points at an id the ribbon does not have` in
+ * test/ribbon-roadmap.test.mjs is what stops them rotting into fiction.
  */
 
 export type FeatureStatus = 'built' | 'partial' | 'planned'
@@ -240,11 +244,7 @@ export const ROADMAP: FeatureGroup[] = [
 /** Every feature, flattened. */
 export const ALL_FEATURES: Feature[] = ROADMAP.flatMap((g) => g.features)
 
-/** The feature a left-ribbon icon is a promise of, if any. */
-export function featureForRibbon(id: string): Feature | undefined {
-  return ALL_FEATURES.find((f) => f.surface === `ribbon:${id}`)
-}
-
+/** How many features sit at each status. What the Roadmap tab counts. */
 export function countByStatus(): Record<FeatureStatus, number> {
   const counts: Record<FeatureStatus, number> = { built: 0, partial: 0, planned: 0 }
   for (const f of ALL_FEATURES) counts[f.status]++

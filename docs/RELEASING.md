@@ -7,23 +7,39 @@ mechanism is a static JSON file and a button.
 
 There isn't an auto-updater, and that is a decision rather than a gap.
 
-- **In the app:** Settings → About → *Check for updates*. It fetches
-  `https://www.divineconstruc.com/updates/fate.json`, compares the version to
-  the running build, and either says you are current or offers a link. It sends
-  nothing, downloads nothing executable, and runs only when the button is
-  pressed — no check on launch, no timer. See the header of
-  `src/main/update.ts`.
-- **Not electron-updater.** It would need a publish target, and the obvious one
-  is out: `api.github.com/repos/Nathan5674312/agent-workspace/releases/latest`
-  returns **404 to an anonymous caller** because the repository is private.
-  Measured, not assumed. The only way past that is a token inside the app,
-  which is a credential handed to everyone who downloads it.
-- **`publish` is `null`** in `package.json` for the same reason: nothing is
-  auto-uploaded anywhere. Artifacts are put on the site by hand.
+- **In the app:** Settings → About → *Check for updates*. It reads
+  `https://api.github.com/repos/Nathan5674312/agent-workspace/releases/latest`,
+  compares the tag to the running build, and either says you are current or
+  offers a link to the release page. It sends nothing, downloads nothing
+  executable, and runs only when the button is pressed — no check on launch, no
+  timer. See the header of `src/main/update.ts`.
+- **Cutting a release IS publishing the version.** There is no second file to
+  remember to update, which is the failure mode a hand-written feed has.
+- **This only works because the repository is public.** It was private until
+  2026-09-01, and the same endpoint returned 404 to an anonymous caller; the
+  feed pointed at a static JSON file on the product site instead. If the
+  repository ever goes private again, `UPDATE_FEED` in `src/shared/update.ts`
+  is one line to repoint and `parseFeed()` already understands the
+  `{ "version": "1.0.1", "url": "…" }` file shape as well as GitHub's
+  `tag_name`/`html_url`.
+- **Not electron-updater**, which would need a real publish target and a
+  differential-download story. A version number and a link is the whole
+  requirement.
+- **`publish` is `null`** in `package.json`: nothing is auto-uploaded. Artifacts
+  go up with `gh release create`, deliberately, so no build ever publishes
+  itself as a side effect of running.
 
-Repointing the feed is one constant, `UPDATE_FEED` in `src/shared/update.ts`.
-If the repository ever goes public, that line becomes the GitHub releases API
-and nothing else changes.
+Two things the GitHub API demands that are easy to get wrong, both handled in
+`src/main/update.ts` and both silent failures if removed:
+
+- **A `User-Agent` header is mandatory.** Without one GitHub answers 403, so the
+  check never works rather than working badly.
+- **`X-GitHub-Api-Version` is pinned** to `2022-11-28`. Unpinned, the response
+  shape is whatever GitHub defaults to on the day a user clicks — a breaking
+  change arriving inside an already-shipped binary.
+
+Anonymous calls are rate-limited to 60 an hour per IP, which is irrelevant to a
+check that only fires on a button press.
 
 ## Cutting a release
 
@@ -46,26 +62,24 @@ and nothing else changes.
    Windows only in practice — see the note below. Output lands in `dist/`:
    an NSIS installer and a zip.
 5. **Publish the artifacts** to the download page.
-6. **Update the feed LAST**, once the files are actually downloadable. It is
-   two keys:
-   ```json
-   { "version": "1.0.1", "url": "https://www.divineconstruc.com/" }
+6. **Publish the release LAST**, once the artifacts are built and verified.
+   ```bash
+   gh release create v1.0.1 dist/*.exe dist/*.zip      --title "Fate 1.0.1" --notes-from-file CHANGELOG.md
    ```
-   `url` is optional and falls back to the site root. Anything that is not
-   `http:` or `https:` is ignored and the fallback used instead — that value
-   reaches `shell.openExternal`, so it is held to the same rule as every other
-   URL in the app.
+   Creating the release is what tells every existing install that a new version
+   exists, because `/releases/latest` starts answering with the new tag the
+   moment it is published. So the artifacts have to be attached in the same
+   command, not uploaded afterwards.
 
-Updating the feed before the download exists is the one ordering mistake that
-matters: it tells every user a version is available and then sends them to a
-404.
+   The tag must parse as a version — `v1.0.1` or `1.0.1`. Anything else is
+   refused by `isVersion()` and the app reports that it could not read the feed
+   rather than guessing.
 
-> **The feed does not 404 when it is missing.** The site is a single-page app
-> behind a catch-all, so `GET /updates/fate.json` with no such file returns
-> `200 text/html` and the home page. Verified 2026-09-01. The app copes — the
-> body fails to parse and it reports that it could not read the feed — but it
-> means "the request succeeded" is not evidence the file is there. Check the
-> content type, or just read the body.
+**The ordering mistake that matters:** publishing a release with no artifacts
+attached. Every user is told a version is available and then sent to a page with
+nothing on it. A DRAFT release is safe — `/releases/latest` skips drafts, and
+`parseFeed()` refuses one a second time — so build the draft, attach, verify the
+download, then publish.
 
 ## Platforms
 

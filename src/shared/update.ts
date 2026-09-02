@@ -11,13 +11,18 @@
  * background updating of a local-first notes app is a different product
  * decision with its own consent question, and it is not made here.
  *
- * WHY A STATIC FILE AND NOT THE GITHUB API. The obvious feed is
- * api.github.com/repos/<owner>/<repo>/releases/latest, and it returns 404 to an
- * anonymous caller because the repository is private — measured, not assumed.
- * The only fix would be shipping a token inside the app, which is a credential
- * handed to everyone who downloads it. A JSON file on the site the app already
- * belongs to costs nothing, needs no auth, and is repointable by editing one
- * constant.
+ * WHERE THE ANSWER COMES FROM, and why that changed. This first pointed at a
+ * static JSON file on the product site, because the GitHub releases API returns
+ * 404 to an anonymous caller for a PRIVATE repository and the only way past
+ * that is a token shipped inside the app — a credential handed to everyone who
+ * downloads it. The repository went public on 2026-09-01, so the releases API
+ * is now readable by anyone and is the better feed: it is written by the act of
+ * publishing a release, so it cannot be forgotten the way a hand-edited file
+ * can.
+ *
+ * Both shapes are still understood — see parseFeed. That is not
+ * future-proofing for its own sake; it is what makes UPDATE_FEED a single line
+ * to repoint if the repository ever goes private again.
  *
  * Everything here is pure. The one function that touches the network lives in
  * src/main/update.ts and calls into this to decide what the bytes meant.
@@ -25,19 +30,25 @@
 
 /**
  * Where the answer comes from. One constant, deliberately: repointing the feed
- * at a GitHub release, an S3 object or a different domain is an edit here and
+ * at a static file, an S3 object or a different repository is an edit here and
  * nowhere else.
  *
- * The file it names is small and hand-written:
+ * GitHub's own endpoint. It answers with the newest NON-draft, NON-prerelease
+ * release, so cutting a release is what publishes the version — there is no
+ * second file to remember to update, which is the failure mode a hand-written
+ * feed has.
  *
- *   { "version": "1.0.1", "url": "https://www.divineconstruc.com/download" }
- *
- * `url` is optional and falls back to DOWNLOAD_PAGE.
+ * Anonymous, which is the whole reason it is usable: no token, and therefore no
+ * credential inside a shipped app. It is rate-limited to 60 requests an hour per
+ * IP, which is irrelevant to a check that only fires when someone clicks a
+ * button.
  */
-export const UPDATE_FEED = 'https://www.divineconstruc.com/updates/fate.json'
+export const UPDATE_FEED =
+  'https://api.github.com/repos/Nathan5674312/agent-workspace/releases/latest'
 
 /** Where a person is sent when there IS something newer. */
-export const DOWNLOAD_PAGE = 'https://www.divineconstruc.com/'
+export const DOWNLOAD_PAGE =
+  'https://github.com/Nathan5674312/agent-workspace/releases/latest'
 
 /**
  * A version this module is willing to compare.
@@ -103,6 +114,12 @@ export function compareVersions(a: string, b: string): number {
 /**
  * What the feed said, or null if it did not say anything usable.
  *
+ * TWO SHAPES, one function. A GitHub release object names its version
+ * `tag_name` and its page `html_url`; a hand-written feed file names them
+ * `version` and `url`. Understanding both is what makes UPDATE_FEED a single
+ * line to repoint — if the repository goes private again, a static file on the
+ * product site takes over with no other change.
+ *
  * Takes the already-parsed value rather than the text, so the JSON.parse and
  * its failure belong to the caller. Everything is checked: this is data pulled
  * off the public internet and the renderer will render it.
@@ -110,16 +127,36 @@ export function compareVersions(a: string, b: string): number {
 export function parseFeed(raw: unknown): { version: string; url: string } | null {
   if (typeof raw !== 'object' || raw === null) return null
   const rec = raw as Record<string, unknown>
-  const version = typeof rec.version === 'string' ? normalise(rec.version) : ''
+
+  /**
+   * A draft or a prerelease is never an update. /releases/latest already
+   * excludes both, so this is belt and braces — but the cost of being wrong is
+   * offering every user an unfinished build, and the check is two lines.
+   */
+  if (rec.draft === true || rec.prerelease === true) return null
+
+  const rawVersion =
+    typeof rec.version === 'string'
+      ? rec.version
+      : typeof rec.tag_name === 'string'
+        ? rec.tag_name
+        : ''
+  const version = normalise(rawVersion)
   if (!isVersion(version)) return null
 
   // A feed-supplied URL reaches shell.openExternal, so it is held to the same
   // rule as everything else that does: http(s) only, parsed rather than matched.
   let url = DOWNLOAD_PAGE
-  if (typeof rec.url === 'string') {
+  const rawUrl =
+    typeof rec.url === 'string'
+      ? rec.url
+      : typeof rec.html_url === 'string'
+        ? rec.html_url
+        : ''
+  if (rawUrl !== '') {
     try {
-      const { protocol } = new URL(rec.url)
-      if (protocol === 'http:' || protocol === 'https:') url = rec.url
+      const { protocol } = new URL(rawUrl)
+      if (protocol === 'http:' || protocol === 'https:') url = rawUrl
     } catch {
       /* keep the default */
     }

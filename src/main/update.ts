@@ -39,13 +39,13 @@ const MAX_BYTES = 64 * 1024
  * followed — a feed that moves is an edit to UPDATE_FEED, not a chain this
  * code walks), or a body that will not stop arriving.
  *
- * THE STATUS CHECK IS NOT THE ONE THAT SAVES US, and it is worth knowing which
- * is. Measured 2026-09-01: the feed URL does not 404 when the file is absent.
- * The site is a single-page app behind a catch-all, so a missing path returns
- * `200 text/html` with index.html in the body. What actually catches it is the
- * JSON.parse in check() below, and after that parseFeed() refusing a shape it
- * does not recognise. Anyone tempted to trust the status code and drop either
- * guard would ship a version check that reads a web page as a version.
+ * DO NOT DROP THE JSON.parse GUARD ON THE GROUNDS THAT THE STATUS CODE COVERS
+ * IT. The feed pointed at the product site before it pointed at GitHub, and
+ * there a missing file did not 404: the site is a single-page app behind a
+ * catch-all, so an absent path returned `200 text/html` with the home page in
+ * the body (measured 2026-09-01). The GitHub API does 404 properly, but the
+ * whole point of UPDATE_FEED being one constant is that it can go back to a
+ * static file, and the parse guard is what makes that safe.
  */
 function fetchFeed(): Promise<string | null> {
   return new Promise((resolve) => {
@@ -57,23 +57,46 @@ function fetchFeed(): Promise<string | null> {
       }
     }
 
-    const req = get(UPDATE_FEED, { headers: { accept: 'application/json' } }, (res) => {
-      if (res.statusCode !== 200) {
-        res.resume()
-        return done(null)
-      }
-      let body = ''
-      res.setEncoding('utf8')
-      res.on('data', (chunk: string) => {
-        body += chunk
-        if (body.length > MAX_BYTES) {
-          req.destroy()
-          done(null)
+    const req = get(
+      UPDATE_FEED,
+      {
+        headers: {
+          /**
+           * THE API VERSION IS PINNED and the User-Agent is MANDATORY.
+           *
+           * GitHub rejects a request with no User-Agent outright — 403, not a
+           * warning — so omitting it is not a style question, it is a check
+           * that never works. The value names the app rather than imitating a
+           * browser, because the whole design of this file is that the request
+           * is honest about what it is.
+           *
+           * `X-GitHub-Api-Version` freezes the response shape. Without it the
+           * feed is whatever GitHub's default happens to be on the day a user
+           * clicks, which is a shape change arriving in a shipped binary.
+           */
+          'user-agent': 'Fate-Desktop',
+          accept: 'application/vnd.github+json',
+          'x-github-api-version': '2022-11-28',
+        },
+      },
+      (res) => {
+        if (res.statusCode !== 200) {
+          res.resume()
+          return done(null)
         }
-      })
-      res.on('end', () => done(body))
-      res.on('error', () => done(null))
-    })
+        let body = ''
+        res.setEncoding('utf8')
+        res.on('data', (chunk: string) => {
+          body += chunk
+          if (body.length > MAX_BYTES) {
+            req.destroy()
+            done(null)
+          }
+        })
+        res.on('end', () => done(body))
+        res.on('error', () => done(null))
+      },
+    )
 
     req.setTimeout(TIMEOUT_MS, () => {
       req.destroy()

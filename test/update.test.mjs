@@ -134,12 +134,63 @@ test('a build with no readable version is unknown, not out of date', () => {
 
 // --------------------------------------------------------------------- feeds
 
-test('both constants are https and neither is the private GitHub API', () => {
-  // The GitHub releases API 404s anonymously because the repo is private;
-  // pointing the feed there would ship a check that can only ever fail, or a
-  // token handed to everyone who downloads the app.
+test('both constants are https and carry no credential', () => {
+  // This assertion used to say the opposite — that the feed must NOT be
+  // api.github.com — because the repository was private and the releases API
+  // 404s anonymously. The repository went public on 2026-09-01 and the API
+  // became the better feed, so what is worth pinning is no longer WHICH host,
+  // it is that neither URL smuggles auth. A token in either constant is a
+  // credential shipped to everyone who downloads the app.
   for (const u of [UPDATE_FEED, DOWNLOAD_PAGE]) {
-    assert.equal(new URL(u).protocol, 'https:')
-    assert.ok(!u.includes('api.github.com'), `${u} is the auth-walled feed`)
+    const parsed = new URL(u)
+    assert.equal(parsed.protocol, 'https:')
+    assert.equal(parsed.username, '', `${u} carries a userinfo credential`)
+    assert.equal(parsed.password, '', `${u} carries a userinfo credential`)
+    assert.equal(parsed.search, '', `${u} carries a query string, which is where a token hides`)
+    assert.doesNotMatch(u, /gh[pousr]_|token|secret|key=/i, `${u} looks like it carries a secret`)
   }
+})
+
+// ------------------------------------------------------------- github shapes
+
+test('a GitHub release object is understood, not just a hand-written feed', () => {
+  // /releases/latest names these `tag_name` and `html_url`. Understanding both
+  // spellings is what makes UPDATE_FEED one line to repoint if the repository
+  // ever goes private again and a static file has to take over.
+  const release = {
+    tag_name: 'v1.0.1',
+    html_url: 'https://github.com/Nathan5674312/agent-workspace/releases/tag/v1.0.1',
+    draft: false,
+    prerelease: false,
+  }
+  assert.deepEqual(parseFeed(release), {
+    version: '1.0.1',
+    url: 'https://github.com/Nathan5674312/agent-workspace/releases/tag/v1.0.1',
+  })
+  assert.deepEqual(decide('1.0.0', release), {
+    state: 'available',
+    version: '1.0.0',
+    latest: '1.0.1',
+    url: release.html_url,
+  })
+})
+
+test('a draft or a prerelease is never offered as an update', () => {
+  // /releases/latest already excludes both, so this is belt and braces. The
+  // cost of being wrong is every user offered an unfinished build, which is
+  // worth two lines of defence against an endpoint changing its mind.
+  const base = { tag_name: 'v2.0.0', html_url: 'https://example.com/r' }
+  assert.equal(parseFeed({ ...base, draft: true }), null)
+  assert.equal(parseFeed({ ...base, prerelease: true }), null)
+  assert.equal(decide('1.0.0', { ...base, draft: true }).state, 'unknown')
+})
+
+test('the hand-written spelling still wins when both are present', () => {
+  // Not a preference so much as a guarantee: a static feed file that also
+  // happens to carry GitHub-shaped keys must behave as the file its author
+  // wrote, not as whatever was pasted in beside it.
+  assert.deepEqual(
+    parseFeed({ version: '3.0.0', url: 'https://example.com/a', tag_name: 'v9.9.9' }),
+    { version: '3.0.0', url: 'https://example.com/a' },
+  )
 })

@@ -51,12 +51,16 @@ someone has watched it work and written down what they saw.
 
 ## Install
 
-Download the release and run it. Windows builds are currently **unsigned**, so
-SmartScreen will warn on first run. Windows is the only platform ever built —
-see [Known limitations](#what-it-does-not-do-in-10) and `docs/RELEASING.md`.
+Download the latest release and run the installer:
+
+**[github.com/Nathan5674312/agent-workspace/releases/latest](https://github.com/Nathan5674312/agent-workspace/releases/latest)**
+
+Windows builds are currently **unsigned**, so SmartScreen will warn on first run
+— "More info" then "Run anyway". Windows is the only platform ever built; see
+[Known limitations](#what-it-does-not-do-in-10) and `docs/RELEASING.md`.
 
 To find out whether a newer version exists: Settings → About → *Check for
-updates*.
+updates*. It reads the releases API and nothing else.
 
 On first launch, open Settings and pick your vault folder. Nothing is read until
 you do.
@@ -69,9 +73,9 @@ you do.
   directory. Nothing else is stored.
 - **Nothing leaves the machine** except two requests, both of which you start:
   the agent panel, which sends what you type and what it reads to Anthropic's
-  API; and Settings → About → *Check for updates*, which fetches a small JSON
-  file naming the current version and sends nothing. There is no update check
-  on launch and no timer — see `src/main/update.ts`.
+  API; and Settings → About → *Check for updates*, which asks GitHub for this
+  repository's latest release tag and sends nothing. There is no update check on
+  launch and no timer — see `src/main/update.ts`.
 
 ## Development
 

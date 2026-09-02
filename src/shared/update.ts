@@ -147,11 +147,28 @@ export function parseFeed(raw: unknown): { version: string; url: string } | null
   // A feed-supplied URL reaches shell.openExternal, so it is held to the same
   // rule as everything else that does: http(s) only, parsed rather than matched.
   let url = DOWNLOAD_PAGE
+  /**
+   * `html_url` WINS, and getting this backwards shipped a link to raw JSON.
+   *
+   * A GitHub release object carries BOTH keys and they mean opposite things in
+   * GitHub's vocabulary: `html_url` is the page a human reads, and `url` is the
+   * API endpoint that returns the object you are already holding. Preferring
+   * `url` — which looks like the obvious choice, and was the first thing this
+   * did — sent "Open the download page" to
+   * api.github.com/repos/.../releases/380987583, a wall of JSON with no
+   * installer on it.
+   *
+   * Caught by running this against the live feed rather than the hand-built
+   * fixture, which only had `html_url` and so could never have shown it.
+   *
+   * A hand-written feed file has no `html_url`, so it keeps using `url` and
+   * nothing about that shape changes.
+   */
   const rawUrl =
-    typeof rec.url === 'string'
-      ? rec.url
-      : typeof rec.html_url === 'string'
-        ? rec.html_url
+    typeof rec.html_url === 'string'
+      ? rec.html_url
+      : typeof rec.url === 'string'
+        ? rec.url
         : ''
   if (rawUrl !== '') {
     try {

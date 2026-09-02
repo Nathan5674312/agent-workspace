@@ -185,6 +185,33 @@ test('a draft or a prerelease is never offered as an update', () => {
   assert.equal(decide('1.0.0', { ...base, draft: true }).state, 'unknown')
 })
 
+test('html_url beats url, because GitHub url is the API endpoint', () => {
+  // THE REAL SHAPE, trimmed from the live /releases/latest response for v1.0.0.
+  // The fixture above has only html_url and so could never catch this: a real
+  // release carries BOTH, and GitHub's `url` is the API object, not a page.
+  // Preferring it sent "Open the download page" to a wall of JSON.
+  const real = {
+    url: 'https://api.github.com/repos/Nathan5674312/agent-workspace/releases/380987583',
+    html_url: 'https://github.com/Nathan5674312/agent-workspace/releases/tag/v1.0.0',
+    tag_name: 'v1.0.0',
+    draft: false,
+    prerelease: false,
+  }
+  const out = parseFeed(real)
+  assert.equal(out.version, '1.0.0')
+  assert.equal(out.url, real.html_url)
+  assert.ok(!out.url.includes('api.github.com'), 'the API endpoint is not a download page')
+})
+
+test('a hand-written feed with no html_url still uses its url', () => {
+  // The other half of the rule above: preferring html_url must not break the
+  // static-file shape, which has no such key.
+  assert.deepEqual(parseFeed({ version: '1.0.1', url: 'https://example.com/dl' }), {
+    version: '1.0.1',
+    url: 'https://example.com/dl',
+  })
+})
+
 test('the hand-written spelling still wins when both are present', () => {
   // Not a preference so much as a guarantee: a static feed file that also
   // happens to carry GitHub-shaped keys must behave as the file its author

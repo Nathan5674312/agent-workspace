@@ -7,6 +7,7 @@ import * as network from './network.js'
 import * as settings from './settings.js'
 import * as terminal from './terminal.js'
 import * as activity from './activity.js'
+import * as update from './update.js'
 
 /**
  * True only for the window's top-level frame.
@@ -100,6 +101,9 @@ export function registerIpc(): void {
   network.register(handle)
   settings.register(handle)
   terminal.register(handle)
+  // The one outbound request the app makes on its own behalf, and only when a
+  // person clicks. See the header of src/main/update.ts.
+  update.register(handle)
 }
 
 export type Handle = typeof handle

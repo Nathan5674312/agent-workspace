@@ -205,7 +205,18 @@ test('no node, electron or network access anywhere in the pane', () => {
  * omissions carry is unchanged — `corner` and `network` belong to other panes,
  * and this pane reaching into either is the coupling being guarded against.
  */
-const ALLOWED_API = new Set(['vault', 'settings', 'terminal'])
+/**
+ * `update` joined on exactly the footing `settings` and `terminal` did: the
+ * About panel is part of the settings modal, which this pane renders, so this
+ * pane is where it reads from. Nothing else about the rule moves — `corner` and
+ * `network` remain other panes' business.
+ *
+ * Worth stating what this one surface can do, since it is the only outbound
+ * request in the app: `check()` takes no argument. The feed URL is a constant
+ * in shared/update.ts, so admitting it here does not give the pane the ability
+ * to point a request anywhere.
+ */
+const ALLOWED_API = new Set(['vault', 'settings', 'terminal', 'update'])
 
 test('the pane reaches only into its own window.api surfaces', () => {
   for (const [name, code] of all()) {

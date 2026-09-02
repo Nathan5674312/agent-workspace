@@ -38,6 +38,7 @@
     "directories": {
       "output": "dist"
     },
+    "publish": null,
     "files": [
       "out/**",
       "package.json",

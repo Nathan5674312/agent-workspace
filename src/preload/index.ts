@@ -75,6 +75,12 @@ const api: Api = {
     // human MORE often.
     setApprovals: (a) => ipcRenderer.invoke(CH.settingsSetApprovals, a),
   },
+  update: {
+    // No argument, and nothing to give one: the feed URL is a constant in
+    // shared/update.ts, so the renderer cannot point the app's one outbound
+    // request at a host of its choosing.
+    check: () => ipcRenderer.invoke(CH.updateCheck),
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

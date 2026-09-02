@@ -29,6 +29,7 @@
  * always resolves and the dialog's tab order still never contains it.
  */
 import { useEffect, useRef, useState, type KeyboardEvent } from 'react'
+import { DOWNLOAD_PAGE, type UpdateCheck } from '../../../shared/update.js'
 import {
   ARTWORK_OPACITY_MAX,
   DEFAULT_APPEARANCE,
@@ -103,6 +104,7 @@ const SECTIONS = [
   { id: 'vault', label: 'Vault' },
   { id: 'appearance', label: 'Appearance' },
   { id: 'agent', label: 'Agent' },
+  { id: 'about', label: 'About' },
 ] as const
 
 /**
@@ -158,6 +160,16 @@ export function SettingsDialog({ isOpen, onClose, isDirty }: SettingsDialogProps
    * left it is a feature nobody asked for and a migration nobody wants.
    */
   const [section, setSection] = useState<SectionId>('vault')
+  /**
+   * The last answer from the update check, and whether one is in flight.
+   *
+   * NOT fetched on open, and there is no effect that would. The whole point of
+   * the design in src/main/update.ts is that the app makes no outbound request
+   * a person did not ask for, and an update check that runs because a dialog
+   * was opened is exactly that request.
+   */
+  const [updateCheck, setUpdateCheck] = useState<UpdateCheck | null>(null)
+  const [checking, setChecking] = useState(false)
   const dialogRef = useRef<HTMLDialogElement>(null)
   /** The tablist, so an arrow key can focus the tab it just selected. */
   const navRef = useRef<HTMLDivElement>(null)
@@ -191,6 +203,25 @@ export function SettingsDialog({ isOpen, onClose, isDirty }: SettingsDialogProps
       cancelled = true
     }
   }, [isOpen])
+
+  /**
+   * Ask whether there is a newer version. Fires only from the button.
+   *
+   * Never rejects — main answers `unknown` with a sentence rather than
+   * throwing, because "we could not tell" and "you are up to date" are
+   * different answers and a catch here would render them the same. The catch is
+   * still present for a bridge that is not there at all.
+   */
+  async function handleCheckUpdate(): Promise<void> {
+    setChecking(true)
+    try {
+      setUpdateCheck(await window.api.update.check())
+    } catch (e: unknown) {
+      setUpdateCheck({ state: 'unknown', version: '', reason: String(e) })
+    } finally {
+      setChecking(false)
+    }
+  }
 
   /**
    * The whole of the modal behaviour: focus in, Tab trapped, Escape, focus back
@@ -694,6 +725,70 @@ export function SettingsDialog({ isOpen, onClose, isDirty }: SettingsDialogProps
                   </select>
                 </div>
               </div>
+            </div>
+          </div>
+
+          <div
+            className="settings-panel"
+            id="settings-panel-about"
+            role="tabpanel"
+            aria-labelledby="settings-tab-about"
+            hidden={section !== 'about'}
+          >
+            <div className="settings-field">
+              <div className="settings-field-head">
+                <span className="settings-label">Version</span>
+                <button
+                  className="settings-change"
+                  onClick={() => void handleCheckUpdate()}
+                  disabled={checking}
+                >
+                  {checking ? 'Checking…' : 'Check for updates'}
+                </button>
+              </div>
+              <div className="settings-path">Fate {__APP_VERSION__}</div>
+
+              {/* Says what the button will do BEFORE it is pressed, because it
+                  is the only thing in this app that leaves the machine without
+                  the user having typed to an agent. A person who would rather
+                  not make that request deserves to know that before clicking,
+                  not in a privacy policy afterwards. */}
+              <p className="settings-hint">
+                Nothing is sent and nothing is downloaded. This fetches a small file
+                listing the current version, only when you press the button — never
+                on launch and never on a timer.
+              </p>
+
+              {updateCheck && (
+                <div className="settings-pending" role="status">
+                  {updateCheck.state === 'available' ? (
+                    <>
+                      Version {updateCheck.latest} is available.{' '}
+                      {/* target="_blank" is load-bearing: an in-app navigation is
+                          blocked by will-navigate, and this routes through
+                          setWindowOpenHandler, which refuses anything but
+                          http(s) before it reaches the OS. */}
+                      <a href={updateCheck.url} target="_blank" rel="noreferrer noopener">
+                        Open the download page
+                      </a>
+                      .
+                    </>
+                  ) : updateCheck.state === 'current' ? (
+                    <>You are on the latest version.</>
+                  ) : (
+                    <>{updateCheck.reason}</>
+                  )}
+                </div>
+              )}
+            </div>
+
+            <div className="settings-field">
+              <span className="settings-label">Project</span>
+              <p className="settings-hint">
+                <a href={DOWNLOAD_PAGE} target="_blank" rel="noreferrer noopener">
+                  divineconstruc.com
+                </a>
+              </p>
             </div>
           </div>
         </div>

@@ -413,6 +413,7 @@ export type NetworkTrust = {
 import type { Activity } from './transcript.js'
 import type { NoteHits } from './search.js'
 import { DEFAULT_THEME, type ThemeId } from './themes.js'
+import type { UpdateCheck } from './update.js'
 export type { Activity }
 
 export const CH = {
@@ -447,6 +448,13 @@ export const CH = {
   settingsApplyVaultDir: 'settings:apply-vault-dir',
   settingsSetAppearance: 'settings:set-appearance',
   settingsSetApprovals: 'settings:set-approvals',
+
+  /**
+   * THE ONLY CHANNEL THAT LEAVES THIS MACHINE without the user having typed to
+   * an agent. A GET for a static JSON file, sending nothing, fired only by a
+   * click on "Check for updates". Reasoning in src/main/update.ts.
+   */
+  updateCheck: 'update:check',
 
   terminalProcesses: 'terminal:processes',
   terminalExits: 'terminal:exits',
@@ -609,5 +617,17 @@ export type Api = {
      * the gate; see src/main/consent.ts.
      */
     setApprovals(a: Approvals): Promise<AppSettings>
+  }
+  update: {
+    /**
+     * Ask whether a newer version exists. Fires one GET for a static JSON file
+     * and sends nothing. Never called except by a person clicking; there is no
+     * check on launch and no timer, on purpose.
+     *
+     * Never rejects. A failure is `{ state: 'unknown' }` carrying a sentence to
+     * show, because "we could not tell" and "you are up to date" are different
+     * answers and a thrown error would collapse them.
+     */
+    check(): Promise<UpdateCheck>
   }
 }

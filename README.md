@@ -51,8 +51,12 @@ someone has watched it work and written down what they saw.
 
 ## Install
 
-Download the release for your platform and run it. Windows builds are currently
-**unsigned**, so SmartScreen will warn on first run.
+Download the release and run it. Windows builds are currently **unsigned**, so
+SmartScreen will warn on first run. Windows is the only platform ever built —
+see [Known limitations](#what-it-does-not-do-in-10) and `docs/RELEASING.md`.
+
+To find out whether a newer version exists: Settings → About → *Check for
+updates*.
 
 On first launch, open Settings and pick your vault folder. Nothing is read until
 you do.
@@ -63,9 +67,11 @@ you do.
 - **Backups** of every overwritten note go to `.backups/` inside that folder.
 - **App settings** — vault path, theme, layout — go to Electron's `userData`
   directory. Nothing else is stored.
-- **Nothing leaves the machine** unless you use the agent panel, which sends
-  what you type, and what it reads, to Anthropic's API. That panel is the only
-  network call the app makes.
+- **Nothing leaves the machine** except two requests, both of which you start:
+  the agent panel, which sends what you type and what it reads to Anthropic's
+  API; and Settings → About → *Check for updates*, which fetches a small JSON
+  file naming the current version and sends nothing. There is no update check
+  on launch and no timer — see `src/main/update.ts`.
 
 ## Development
 

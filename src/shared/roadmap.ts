@@ -54,7 +54,7 @@ export const ROADMAP: FeatureGroup[] = [
       {
         label: 'Cross-platform (Windows, Mac, Linux, mobile)',
         status: 'partial',
-        note: 'Electron runs on all three desktops, but only Windows has been run. Mobile is not an Electron target at all.',
+        note: 'Electron runs on all three desktops, but only Windows has ever been BUILT, let alone run. The mac and linux electron-builder targets in package.json are configured and unverified, and neither can be produced on the build machine: mac artifacts require macOS, and a Linux AppImage from a non-Linux host requires Docker, which is not installed. They are scaffolding, not support, and docs/RELEASING.md says so rather than leaving a download page to imply otherwise. Mobile is not an Electron target at all.',
       },
       {
         label: 'Tree view left-side navigation',
@@ -182,7 +182,7 @@ export const ROADMAP: FeatureGroup[] = [
     subtitle: 'your edge',
     features: [
       { label: 'AI that actually knows your content', status: 'planned', surface: 'ribbon:terminal' },
-      { label: 'Agents that read, write, and act on the vault', status: 'planned', surface: 'ribbon:terminal', note: 'All five claude:* channels are implemented, and each turn runs in its own OS process so one crashing cannot take the app or the other sessions down. Still planned because the agent can only READ: the tool list is hard-coded to Read/Glob/Grep in claude.ts, so it cannot yet write or act on the vault.' },
+      { label: 'Agents that read, write, and act on the vault', status: 'planned', surface: 'ribbon:terminal', note: 'All five claude:* channels are implemented, and each turn runs in its own OS process so one crashing cannot take the app or the other sessions down. Still planned because the agent can only READ: the tool list is hard-coded to Read, Glob and Grep at agentHost.ts:128 — NOT claude.ts, which is where this note said it was until 2026-09-01 and is the file anyone would have opened first. It cannot yet write or act on the vault. What is missing is the tools, not the guard rails: consent.ts already gates agent-originated mutation on WHO acted, and vault.move/undoMove already exist as the reversible filing primitive an agent would use.' },
       {
         label: 'Watch what agents are doing, live',
         status: 'partial',

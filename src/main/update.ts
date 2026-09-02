@@ -38,6 +38,14 @@ const MAX_BYTES = 64 * 1024
  * because the feed has not been published yet, a redirect (deliberately NOT
  * followed — a feed that moves is an edit to UPDATE_FEED, not a chain this
  * code walks), or a body that will not stop arriving.
+ *
+ * THE STATUS CHECK IS NOT THE ONE THAT SAVES US, and it is worth knowing which
+ * is. Measured 2026-09-01: the feed URL does not 404 when the file is absent.
+ * The site is a single-page app behind a catch-all, so a missing path returns
+ * `200 text/html` with index.html in the body. What actually catches it is the
+ * JSON.parse in check() below, and after that parseFeed() refusing a shape it
+ * does not recognise. Anyone tempted to trust the status code and drop either
+ * guard would ship a version check that reads a web page as a version.
  */
 function fetchFeed(): Promise<string | null> {
   return new Promise((resolve) => {

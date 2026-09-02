@@ -60,6 +60,13 @@ Updating the feed before the download exists is the one ordering mistake that
 matters: it tells every user a version is available and then sends them to a
 404.
 
+> **The feed does not 404 when it is missing.** The site is a single-page app
+> behind a catch-all, so `GET /updates/fate.json` with no such file returns
+> `200 text/html` and the home page. Verified 2026-09-01. The app copes — the
+> body fails to parse and it reports that it could not read the feed — but it
+> means "the request succeeded" is not evidence the file is there. Check the
+> content type, or just read the body.
+
 ## Platforms
 
 Only Windows has ever been built. The `mac` and `linux` targets in

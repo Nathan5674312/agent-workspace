@@ -26,7 +26,8 @@
  *   - It exits when the turn ends. A process per session, not a pool: an idle
  *     agent should not hold a Node heap open.
  */
-import { query, type Query } from '@anthropic-ai/claude-agent-sdk'
+import { query, createSdkMcpServer, tool, type Query } from '@anthropic-ai/claude-agent-sdk'
+import { z } from 'zod'
 import type { ChatBlock, PermissionMode } from '../shared/ipc.js'
 
 /** Sent parent -> child exactly once, to start the turn. */
@@ -41,16 +42,42 @@ export type HostStart = {
 /** Parent -> child, answering a consent round trip. */
 export type HostConsentReply = { kind: 'consent-reply'; nonce: number; allow: boolean }
 
+/**
+ * Parent -> child, answering a vault round trip.
+ *
+ * `ok: false` is not only a crash. A human refusing the write arrives here the
+ * same way, and `message` is what the agent is told either way — which is the
+ * point: an agent that was denied should read that it was denied, in words, and
+ * stop asking, rather than see a transport error and retry.
+ */
+export type HostVaultReply = {
+  kind: 'vault-reply'
+  nonce: number
+  ok: boolean
+  message: string
+}
+
+/**
+ * What the child asks the parent to do to the vault. One variant per tool.
+ *
+ * `reason` rides along on every one because consent.ts refuses an agent actor
+ * without a non-empty one, and it is the whole of what the human judges by.
+ */
+export type VaultOp =
+  | { op: 'write'; path: string; text: string; reason: string }
+  | { op: 'move'; from: string; to: string; reason: string }
+
 /** Parent -> child, asking the SDK to stop the current turn. */
 export type HostInterrupt = { kind: 'interrupt' }
 
-export type HostInbound = HostStart | HostConsentReply | HostInterrupt
+export type HostInbound = HostStart | HostConsentReply | HostVaultReply | HostInterrupt
 
 /** Child -> parent. */
 export type HostOutbound =
   | { kind: 'sdk-session'; sdkSessionId: string }
   | { kind: 'blocks'; role: 'assistant' | 'user'; blocks: ChatBlock[] }
   | { kind: 'consent-request'; nonce: number; toolName: string; input: unknown }
+  | { kind: 'vault-request'; nonce: number; request: VaultOp }
   | { kind: 'status'; status: 'running' | 'awaiting-permission' | 'idle' | 'error' }
   | { kind: 'failed'; message: string }
   | { kind: 'done' }
@@ -66,6 +93,11 @@ let run: Query | null = null
 
 /** Outstanding consent round trips, by nonce. */
 const pending = new Map<number, (allow: boolean) => void>()
+
+/** Outstanding vault round trips, by nonce. Shares `nextNonce` so the two
+ *  kinds of round trip can never collide on one number. */
+const vaultPending = new Map<number, (reply: { ok: boolean; message: string }) => void>()
+
 let nextNonce = 1
 
 const send = (msg: HostOutbound): void => {
@@ -115,6 +147,74 @@ function requestConsent(toolName: string, input: unknown): Promise<boolean> {
   })
 }
 
+/** Ask the parent to perform one vault operation. Same round trip as consent,
+ *  for the same reason: the child is not allowed to touch the vault itself. */
+function requestVault(request: VaultOp): Promise<{ ok: boolean; message: string }> {
+  const nonce = nextNonce++
+  return new Promise((resolve) => {
+    vaultPending.set(nonce, resolve)
+    send({ kind: 'vault-request', nonce, request })
+  })
+}
+
+/** An MCP tool answers with content blocks, and flags a failure rather than
+ *  throwing — a thrown handler reaches the model as a transport fault, not as
+ *  "the human said no", and those must not look alike. */
+function toolResult(r: { ok: boolean; message: string }) {
+  return { content: [{ type: 'text' as const, text: r.message }], isError: !r.ok }
+}
+
+/**
+ * THE VAULT TOOLS — the only way an agent may change a file.
+ *
+ * Deliberately NOT the SDK's own Write and Edit. Those go straight to disk,
+ * which walks past all four things vault.ts owns: the consent gate, the
+ * pre-edit backup under `.backups/`, the lost-update guard, and the atomic
+ * temp-then-rename. A write tool that skips those is not a smaller version of
+ * this feature, it is a worse and different one, and the failure it produces —
+ * a note silently overwritten while the user had it open — is exactly the one
+ * the rest of this codebase is arranged to prevent.
+ *
+ * So these do NO filesystem work. Each round-trips to the parent, exactly as
+ * consent already does, and the parent calls vault.ts with an agent Actor. The
+ * rule at the top of this file is unchanged: this process never touches the
+ * vault.
+ *
+ * There is no delete tool, and that is a decision rather than an omission. A
+ * move to `.trash/` is what deletion means here and `move_note` already
+ * expresses it, reversibly, through the one path that records an undo.
+ */
+const vaultTools = createSdkMcpServer({
+  name: 'vault',
+  version: '1.0.0',
+  tools: [
+    tool(
+      'write_note',
+      'Write a note in the vault, creating it if it does not exist. Supply the COMPLETE new text; this REPLACES the file rather than appending to it, so read the note first unless you are creating it. The user is asked to approve before anything is written, and the previous contents are kept.',
+      {
+        path: z.string().describe('Vault-relative path, e.g. "Projects/AI.md".'),
+        text: z.string().describe('The complete new contents of the note.'),
+        reason: z
+          .string()
+          .describe('Why this write should happen, in one sentence a human can judge. Shown to the user verbatim.'),
+      },
+      async (args) => toolResult(await requestVault({ op: 'write', ...args })),
+    ),
+    tool(
+      'move_note',
+      'Move or rename a note in the vault. Reversible: the move is recorded and can be undone. The user is asked to approve first.',
+      {
+        from: z.string().describe('Current vault-relative path.'),
+        to: z.string().describe('New vault-relative path.'),
+        reason: z
+          .string()
+          .describe('Why this move should happen, in one sentence a human can judge. Shown to the user verbatim.'),
+      },
+      async (args) => toolResult(await requestVault({ op: 'move', ...args })),
+    ),
+  ],
+})
+
 async function start(msg: HostStart): Promise<void> {
   send({ kind: 'status', status: 'running' })
   try {
@@ -122,10 +222,24 @@ async function start(msg: HostStart): Promise<void> {
       prompt: msg.text,
       options: {
         cwd: msg.cwd,
-        // Unchanged from claude.ts: `tools` restricts what EXISTS.
-        // `allowedTools` is the auto-approve list and would let Read/Glob/Grep
-        // run without ever reaching canUseTool.
+        // `tools` restricts which BUILT-IN tools exist, and this list is
+        // still read-only on purpose: no Bash, and no built-in Write or Edit,
+        // because those write to disk behind vault.ts's back. See vaultTools.
         tools: ['Read', 'Glob', 'Grep'],
+        // Mutation lives here instead, in tools that cannot reach the disk
+        // themselves. `tools` above does not govern MCP tools, so restricting
+        // the built-ins and offering these are not in tension.
+        mcpServers: { vault: vaultTools },
+        // Auto-approved HERE deliberately, and it is not a hole in the gate.
+        // Every one of these ends in vault.ts, which raises the REAL prompt
+        // through consent.ts — the agent's stated reason, the exact paths, the
+        // batch grants, strict mode, the timeout that counts as a refusal.
+        // Leaving them to canUseTool as well would ask twice for one action:
+        // first as `Allow mcp__vault__write_note` over a blob of JSON, then
+        // properly. A human who has learned to click through the first prompt
+        // is in a worse position than one who only ever saw the second, which
+        // is the same argument consent.ts opens with.
+        allowedTools: ['mcp__vault__write_note', 'mcp__vault__move_note'],
         permissionMode: toSdkPermissionMode(msg.permissionMode),
         allowDangerouslySkipPermissions: msg.permissionMode === 'bypass',
         resume: msg.resume,
@@ -220,6 +334,15 @@ process.parentPort.on('message', (e) => {
     if (resolve) {
       pending.delete(msg.nonce)
       resolve(msg.allow === true)
+    }
+    return
+  }
+
+  if (msg.kind === 'vault-reply') {
+    const resolve = vaultPending.get(msg.nonce)
+    if (resolve) {
+      vaultPending.delete(msg.nonce)
+      resolve({ ok: msg.ok === true, message: String(msg.message ?? '') })
     }
     return
   }

@@ -62,9 +62,18 @@ check that only fires on a button press.
    Windows only in practice — see the note below. Output lands in `dist/`:
    an NSIS installer and a zip.
 5. **Publish the artifacts** to the download page.
-6. **Publish the release LAST**, once the artifacts are built and verified.
+6. **Preflight.** Between building and publishing, and nowhere else:
    ```bash
-   gh release create v1.0.1 dist/*.exe dist/*.zip      --title "Fate 1.0.1" --notes-from-file CHANGELOG.md
+   node scripts/release-preflight.mjs
+   ```
+   It refuses a dirty tree, a `dist/` that does not match the version, and — the
+   one that has actually bitten — a tag that already exists at some other commit.
+   It prints the `gh release create` line with the sha filled in.
+7. **Publish the release LAST**, once the artifacts are built and verified.
+   ```bash
+   gh release create v1.0.1 dist/*.exe dist/*.zip \
+     --target <sha printed by the preflight> \
+     --title "Fate 1.0.1" --notes-from-file CHANGELOG.md
    ```
    Creating the release is what tells every existing install that a new version
    exists, because `/releases/latest` starts answering with the new tag the
@@ -74,6 +83,34 @@ check that only fires on a button press.
    The tag must parse as a version — `v1.0.1` or `1.0.1`. Anything else is
    refused by `isVersion()` and the app reports that it could not read the feed
    rather than guessing.
+
+## The tag has to name the commit that was built
+
+`v1.0.0` does not. It points at `aef15d7` (2026-08-11); the binaries published
+under it were built from `de80b34` (2026-09-01 22:05), one minute before the
+timestamps inside `Fate-1.0.0-win.zip` and 155 commits later. The two were
+checked against each other by rebuilding `de80b34` from a clean clone: the
+resulting `app.asar` came out within 2 KB of the shipped one, which 155 commits
+and +26,872/-1,514 lines could not.
+
+Nothing did anything obviously wrong. The tag was made when the version was
+bumped, main kept moving, the artifacts were built weeks later, and
+`gh release create` silently reused the tag that already existed rather than
+making one at the code it was handed.
+
+It cost nothing while nothing read the tag: `/releases/latest` returns
+`tag_name`, the app compares it to its own version, and neither asks what commit
+it points at. **An update panel that renders "what changed" from
+`compare/<old tag>...<new tag>` changes that.** A tag naming the wrong commit
+becomes a changelog telling every user they are 155 commits and 26,000 lines
+behind code they are already running.
+
+Hence `--target <sha>` and the preflight. Two rules behind them:
+
+- **Tag at build time, never before.** A tag created at "version bump" o'clock
+  names whatever main was then, and main moves.
+- **Never reuse an existing tag for a new build.** Delete and recreate it at the
+  built commit, or bump the version. `gh release create` will not warn you.
 
 **The ordering mistake that matters:** publishing a release with no artifacts
 attached. Every user is told a version is available and then sent to a page with

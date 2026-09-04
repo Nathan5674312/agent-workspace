@@ -368,6 +368,8 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
 
     /** Where inside the node it was grabbed, in graph units. See `onMove`. */
     let grabOffset = { x: 0, y: 0 }
+    /** Where the dragged node STARTED, for pricing the release. */
+    let grabbedAt = { x: 0, y: 0 }
 
     // Momentum. The pan used to stop dead the instant the pointer lifted, so a
     // flick did nothing at all and the graph could only be moved by dragging it
@@ -1027,6 +1029,10 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       }
       if (hit) {
         dragging = hit
+        // Where it started, in graph units. The release scales the energy it
+        // leaves by how far the node actually travelled — a tap has nothing to
+        // relax, a drag across the board has a lot. See `releaseAlpha`.
+        grabbedAt = { x: hit.x!, y: hit.y! }
         const r = canvas.getBoundingClientRect()
         const p = toGraph(e.clientX - r.left, e.clientY - r.top)
         grabOffset = { x: p.x - hit.x!, y: p.y - hit.y! }
@@ -1150,13 +1156,26 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
         // is the opposite of what a force layout is for. It settles into the
         // neighbourhood you dropped it in rather than snapping home, because
         // its neighbours have already moved to meet it during the drag.
+        /**
+         * MEASURED BEFORE THE REFERENCE IS CLEARED, which is the only reason
+         * this sits above the unpin rather than below it with the rest of the
+         * teardown.
+         */
+        const moved = Math.hypot(
+          (dragging.x ?? 0) - grabbedAt.x,
+          (dragging.y ?? 0) - grabbedAt.y,
+        )
         dragging.fx = null
         dragging.fy = null
         dragging = null
-        // Rest lengths back at once; damping back over `RELEASE_RAMP_TICKS`,
-        // and the hold's heat capped so a fast regrab cannot ratchet it. See
-        // `setHolding` — releasing is deliberately not the mirror of pressing.
-        setHolding(false)
+        /**
+         * Rest lengths back at once; damping back over `RELEASE_RAMP_TICKS`;
+         * and the heat left behind scaled to how far this gesture moved the
+         * node, which is what lets a long drag settle while a tap leaves the
+         * graph cold. A FLAT cap here stranded dragged nodes — see
+         * `releaseAlpha`. Releasing is deliberately not the mirror of pressing.
+         */
+        setHolding(false, moved)
         sim.alphaTarget(0) // stop driving; let it coast to rest
       }
       const wasPanning = panning !== null

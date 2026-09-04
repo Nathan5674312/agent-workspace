@@ -63,6 +63,28 @@
   --fill-hover: rgba(240, 203, 165, 0.07);
   --fill-active: rgba(240, 203, 165, 0.12);
   --fill-selected: rgba(240, 203, 165, 0.1);
+  /**
+   * THE SELECTED STATE OF A NAVIGATION CONTROL, which `--fill-selected` is not
+   * strong enough to be.
+   *
+   * Measured: `--fill-selected` over the chrome ground gives 1.21:1 between a
+   * selected control and an unselected one. WCAG 1.4.11 asks 3:1 of the visual
+   * information that identifies a component's state, so at 1.21 the ribbon
+   * could not tell you which surface you were on — the thing it exists to do.
+   * The glyphs were no better: `--label` against `--label-secondary` is 1.35:1,
+   * so the icon did not distinguish itself either.
+   *
+   * A SEPARATE TOKEN rather than a stronger `--fill-selected`, because that one
+   * is also hover feedback, database chips and tone badges — twelve uses, most
+   * of which are not state indicators and would become loud.
+   *
+   * This fill alone still does not carry 3:1; it is not asked to. The accent
+   * bar in `.vault-ribbon-icon--active::after` is what satisfies 1.4.11, and it
+   * works in all seven themes for free because every theme publishes `--accent`
+   * against its own ground at 12:1 or better. The fill is the soft half of the
+   * same signal.
+   */
+  --fill-nav-selected: rgba(240, 203, 165, 0.18);
 
   /* ── labels ───────────────────────────────────────────────
      Solid palette colours. Ratios are against Ink, from the note's §2 dark

@@ -120,9 +120,42 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   -webkit-backdrop-filter: var(--blur-regular);
   border-right: 1px solid var(--separator);
 }
-/* Same selected treatment as .vault-tab--active; the base button rule already
-   supplies the radius and the transition. */
-.vault-ribbon-icon--active { color: var(--label); background: var(--fill-selected); }
+/**
+ * THE SELECTED SURFACE, and it has to be visible at a glance.
+ *
+ * This was `--fill-selected` and `--label`, which measured 1.21:1 between the
+ * selected icon's ground and an unselected one, and 1.35:1 between the two
+ * glyph colours. WCAG 1.4.11 asks 3:1 of whatever identifies a component's
+ * state. Below that you cannot tell which surface you are on by looking, which
+ * for the app's primary navigation is the whole job.
+ *
+ * THREE SIGNALS, because one of them is doing the compliance and the other two
+ * are doing the reading:
+ *   the bar     an accent rule at the left edge. This is what clears 3:1, and
+ *               it clears it in every theme without a per-theme value because
+ *               each theme's `--accent` is published against its own ground at
+ *               12:1 or better.
+ *   the fill    `--fill-nav-selected`, brighter than the shared selected fill.
+ *   the glyph   full `--label` against `--label-tertiary` for the rest, which
+ *               is 2.0:1 between them rather than 1.35:1.
+ *
+ * Asserted in test/nav-contrast.test.mjs across all seven themes.
+ */
+.vault-ribbon-icon { color: var(--label-tertiary); }
+.vault-ribbon-icon--active { color: var(--label); background: var(--fill-nav-selected); }
+.vault-ribbon-icon--active::after {
+  content: '';
+  position: absolute;
+  /* Into the ribbon's own left padding, so the bar sits outside the icon's
+     rounded box rather than inside it competing with the glyph. */
+  left: calc(var(--space-2) * -1);
+  top: 50%;
+  height: 60%;
+  width: 3px;
+  transform: translateY(-50%);
+  border-radius: 0 2px 2px 0;
+  background: var(--accent);
+}
 
 /* Nine surfaces in one column is a list you read rather than a shape you learn,
    so the groups are drawn: vault / tools / app. The rule is on the SLOT, not
@@ -196,7 +229,15 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   font-size: var(--text-xs);
   color: var(--label-tertiary);
 }
-.vault-finder-tab--active { color: var(--label); background: var(--fill-selected); }
+/* Same failure, same fix, minus the bar: these three sit in a row, so the
+   selected one is read against its neighbours and an underline is the shape
+   that says "tab". The accent carries the 3:1. */
+.vault-finder-tab { color: var(--label-tertiary); }
+.vault-finder-tab--active {
+  color: var(--label);
+  background: var(--fill-nav-selected);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
 
 .vault-sidebar-heading {
   flex: none;

@@ -322,7 +322,7 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
      * `dragging` and `adjacency` are read through getters so the physics never
      * learns what a pointer is, and this file stays the only place that knows.
      */
-    const { sim, setHolding, applyForces } = buildSimulation(
+    const { sim, setHolding, stepRelease, applyForces } = buildSimulation(
       nodes,
       links,
       () => dragging,
@@ -873,6 +873,10 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       dirty = true
     }
     const loop = () => {
+      // Hands damping back after a release, one frame at a time. A no-op
+      // unless a release is in flight, and it must run BEFORE the repaint
+      // decision below so the frame that is drawn is the frame it describes.
+      stepRelease()
       if (!fitted && sim.alpha() < 0.06) {
         fit()
         fitted = true
@@ -1149,7 +1153,10 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
         dragging.fx = null
         dragging.fy = null
         dragging = null
-        setHolding(false) // ordinary rest lengths and damping again
+        // Rest lengths back at once; damping back over `RELEASE_RAMP_TICKS`,
+        // and the hold's heat capped so a fast regrab cannot ratchet it. See
+        // `setHolding` — releasing is deliberately not the mirror of pressing.
+        setHolding(false)
         sim.alphaTarget(0) // stop driving; let it coast to rest
       }
       const wasPanning = panning !== null

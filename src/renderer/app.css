@@ -124,6 +124,43 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
    supplies the radius and the transition. */
 .vault-ribbon-icon--active { color: var(--label); background: var(--fill-selected); }
 
+/* Nine surfaces in one column is a list you read rather than a shape you learn,
+   so the groups are drawn: vault / tools / app. The rule is on the SLOT, not
+   between two buttons, because a bare <hr> in a flex column of controls is a
+   child that is not a control and screen readers announce it. */
+.vault-ribbon-slot { display: flex; }
+/* The inbox count, on the icon rather than beside it: the ribbon is a fixed
+   narrow column, so a badge that grew the row would shift every icon under it.
+   Tabular figures so 9 -> 10 does not resize the pill.
+
+   ACCENT, not `--fill-selected`. The first attempt used the selected fill,
+   which is a 10%-alpha cream built to sit UNDER an icon as a background — as a
+   14px pill drawn ON one it had almost no contrast against the ribbon and the
+   digits fought the glyph behind them. A count nobody can read is the thing
+   this badge exists to prevent, so it takes the solid accent and the ink
+   underneath it, and pulls clear of the glyph's corner. */
+.vault-ribbon-icon { position: relative; }
+.vault-ribbon-badge {
+  position: absolute; top: -3px; right: -3px;
+  min-width: 15px; padding: 0 3px;
+  border-radius: 999px;
+  background: var(--accent);
+  /* The ribbon's own ground, so the pill reads as sitting above the icon
+     rather than as part of it. */
+  box-shadow: 0 0 0 2px var(--material-heavy);
+  font-size: 10px; line-height: 15px; font-weight: 600;
+  font-variant-numeric: tabular-nums;
+  /* The token that exists for this exact pairing: "the accent is light, so its
+     ink is dark". Every theme sets both, so the badge stays legible in all
+     seven rather than only in the one it was eyeballed in. */
+  color: var(--label-on-accent);
+}
+.vault-ribbon-slot--group {
+  margin-top: var(--space-2);
+  padding-top: var(--space-2);
+  border-top: 1px solid var(--separator);
+}
+
 .vault-sidebar {
   /* Set by SidebarResizer, which writes the variable straight onto
      `.vault-layout` during a drag rather than through React state. The fallback
@@ -144,6 +181,23 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
    `flex: none` so the heading keeps its height while the trees either side of it
    take the space and scroll independently — without it a long file tree pushes
    the board list off the top of the sidebar. */
+/* The sidebar's three ways of finding a note.
+   Text tabs, not a second icon column: the ribbon is already icons, and two
+   unlabelled icon columns side by side with different meanings is how this pane
+   became confusing in the first place. Words say "different kind of control". */
+.vault-finder {
+  display: flex; gap: var(--space-1); flex: none;
+  padding: var(--space-2) var(--space-2) 0;
+}
+.vault-finder-tab {
+  flex: 1;
+  padding: var(--space-1) var(--space-2);
+  border-radius: var(--radius-md);
+  font-size: var(--text-xs);
+  color: var(--label-tertiary);
+}
+.vault-finder-tab--active { color: var(--label); background: var(--fill-selected); }
+
 .vault-sidebar-heading {
   flex: none;
   padding: var(--space-2) var(--space-3) var(--space-1);
@@ -508,10 +562,18 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   flex-direction: column;
 }
 
-.vault-view-controls { display: flex; align-items: center; gap: var(--space-1); padding: var(--space-3) var(--space-4); flex: none; }
+/* `.vault-view-controls`, `.vault-view-button` and `.vault-view-button.active`
+   were removed with the second navigation strip they styled. Every destination
+   they held is a ribbon icon now — see LeftRibbon.tsx. */
 .vault-note-header { flex: none; }
-.vault-view-button { border-radius: var(--radius-md); }
-.vault-view-button.active { color: var(--label); background: var(--fill-selected); }
+
+/* The unsaved-edits notice, which is what survived that strip because it is not
+   navigation. Rendered only when there is something to say, so this row does not
+   exist on a clean buffer — the strip was 40px of chrome on every screen. */
+.vault-view-notice {
+  display: flex; align-items: center; flex: none;
+  padding: var(--space-2) var(--space-4);
+}
 
 .vault-view-content { flex: 1; min-height: 0; overflow: auto; padding: var(--space-5); }
 
@@ -1465,10 +1527,35 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
 /* Centred, because "no note selected" is the state of the whole canvas, not a
    sentence pinned to its top-left corner. Matches .inbox-zero. */
 .vault-editor-empty {
-  display: flex; align-items: center; justify-content: center;
+  display: flex; flex-direction: column; align-items: center; justify-content: center;
+  gap: 0.4rem;
   height: 100%; min-height: 12rem;
+  padding: 0 2rem;
+  text-align: center;
   font-size: var(--text-sm);
   color: var(--label-quaternary);
+}
+/* The label is the answer, the hint is the next step, so they may not read as
+   the same weight. `quaternary` on BOTH was why the old single line vanished
+   into the background art. */
+.vault-editor-empty-title {
+  margin: 0;
+  font-size: var(--text-base);
+  color: var(--label-secondary);
+}
+.vault-editor-empty-hint {
+  margin: 0;
+  max-width: 28rem;
+  line-height: 1.5;
+  color: var(--label-tertiary);
+}
+.vault-editor-empty-hint kbd {
+  padding: 0.05rem 0.3rem;
+  border: 1px solid var(--separator);
+  border-radius: 4px;
+  background: var(--bg-elevated);
+  font: inherit;
+  color: var(--label-secondary);
 }
 
 /* 14. Three independent signals. Motion needs nothing here — the only press

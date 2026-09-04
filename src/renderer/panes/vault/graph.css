@@ -182,3 +182,19 @@
     background: var(--bg-elevated);
   }
 }
+
+/* The graph's two non-graph states.
+   `vault-graph-error` had NO rule anywhere before this — it rendered as bare
+   unstyled text in the top-left corner of the canvas area, which is how a
+   failure looked to a user. Both are centred like every other empty state in
+   the pane so the view does not change shape depending on how it went. */
+.vault-graph-loading,
+.vault-graph-error {
+  display: flex; align-items: center; justify-content: center;
+  height: 100%; min-height: 12rem;
+  padding: 0 2rem;
+  text-align: center;
+  font-size: var(--text-sm);
+}
+.vault-graph-loading { color: var(--label-tertiary); }
+.vault-graph-error { color: var(--red, var(--label-secondary)); }

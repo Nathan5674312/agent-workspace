@@ -86,6 +86,48 @@ export const COLLIDE_PADDING = 6
 export const CENTRING_STRENGTH = 0.012
 export const VELOCITY_DECAY_NORMAL = 0.4
 
+// ── the release ─────────────────────────────────────────────────
+
+/**
+ * The most energy a finished gesture may leave behind.
+ *
+ * A press drives the simulation to `HOLD.alpha` so neighbours answer your
+ * hand. Releasing used to only stop DRIVING — `alphaTarget(0)` — and alpha
+ * then bleeds off at d3's `alphaDecay`, about 2.3% a tick. That is slower than
+ * a person letting go and grabbing again, so the heat from one gesture was
+ * still in the graph when the next one added its own. Measured over six quick
+ * press-drag-release cycles, alpha at each press ran
+ *
+ *     0 -> 0.018 -> 0.032 -> 0.042 -> 0.050 -> 0.056
+ *
+ * and the node you let go of peaked at 0.807 px/tick and wandered 21px after
+ * the pointer was up. That is the fling: not one bad release, a ratchet.
+ *
+ * A CEILING rather than an undo. It is absolute, so no sequence of gestures
+ * can climb past it however fast they come; and anything already below it is
+ * left alone, so a graph that was genuinely disturbed still relaxes rather
+ * than freezing. 0.005 is five times `alphaMin`, which is roughly 70 ticks of
+ * settling — enough for `forceCollide` to separate a node dropped on top of
+ * another. `bench/release.mjs` asserts that overlaps stay at zero, which is
+ * the check that stops this from being a cure worse than the disease.
+ */
+export const RELEASE_ALPHA_CAP = 0.005
+
+/**
+ * How long damping takes to come back to its resting value, in ticks.
+ *
+ * The hold damps hard (`HOLD.velocityDecay` 0.62 against 0.4 at rest) to keep
+ * a disturbance from travelling. Restoring that in ONE frame hands the
+ * neighbourhood a 58% jump in how much velocity survives each tick, at exactly
+ * the moment it is carrying the most — so the release itself was a kick,
+ * separately from the alpha ratchet above. Ramping removes the step.
+ *
+ * 45 ticks, about three quarters of a second. Measured: 20 ticks leaves peak
+ * at 0.066 px/tick on a single gesture, 45 reaches 0.048, and 90 reaches 0.048
+ * as well. The knee is at 45 and going slower buys nothing.
+ */
+export const RELEASE_RAMP_TICKS = 45
+
 export const radius = (n: PhysicsNode) => 3.4 + Math.sqrt(n.degree) * 1.45
 
 // ── the tunables the forces panel exposes ───────────────────────
@@ -480,10 +522,56 @@ export function buildSimulation<
     linkForce.distance(distance).strength(strength)
   }
 
-  /** Called on press and release; owns the two levers that are not per-link. */
+  /**
+   * Ticks elapsed in the damping ramp, or -1 when no release is in flight.
+   *
+   * Advanced by `stepRelease` from the view's frame loop rather than from a
+   * tick handler, because it is a property of the GESTURE, not of the
+   * simulation: a press part-way through a ramp cancels it outright.
+   */
+  let releasing = -1
+
+  /**
+   * Called on press and release; owns the two levers that are not per-link.
+   *
+   * Release is not the mirror of press. Press is a step change the user
+   * caused and can see the reason for; release is a step change nothing on
+   * screen accounts for, so it reads as the app throwing the node. Letting go
+   * therefore does three things where taking hold does one: put the rest
+   * lengths back, cap the heat the hold added (`RELEASE_ALPHA_CAP`), and hand
+   * damping back over `RELEASE_RAMP_TICKS` instead of in a single frame.
+   */
   const setHolding = (holding: boolean) => {
-    sim.velocityDecay(holding ? tuning.velocityDecay : VELOCITY_DECAY_NORMAL)
+    if (holding) {
+      // A new press cancels any ramp still running from the last release —
+      // otherwise a fast regrab would keep ramping damping DOWN underneath a
+      // hold that is asking for it to be up.
+      releasing = -1
+      sim.velocityDecay(tuning.velocityDecay)
+    } else {
+      releasing = 0
+      sim.alpha(Math.min(sim.alpha(), RELEASE_ALPHA_CAP))
+    }
     refresh()
+  }
+
+  /**
+   * Advance the release ramp by one frame. Safe to call every frame forever;
+   * it is a no-op unless a release is in flight.
+   *
+   * `velocityDecay` is a plain number on the simulation, so this costs one
+   * assignment — unlike `refresh()`, which rebuilds the link force's cached
+   * distances and strengths and is why that one is called twice per gesture
+   * rather than per tick.
+   */
+  const stepRelease = () => {
+    if (releasing < 0) return
+    releasing++
+    const t = Math.min(1, releasing / RELEASE_RAMP_TICKS)
+    sim.velocityDecay(
+      tuning.velocityDecay + (VELOCITY_DECAY_NORMAL - tuning.velocityDecay) * t,
+    )
+    if (t >= 1) releasing = -1
   }
 
   /**
@@ -516,5 +604,5 @@ export function buildSimulation<
     sim.alpha(0.3).restart()
   }
 
-  return { sim, linkForce, refresh, setHolding, applyForces, tuning }
+  return { sim, linkForce, refresh, setHolding, stepRelease, applyForces, tuning }
 }

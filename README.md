@@ -31,13 +31,20 @@ README does.
 
 Stated here so it is not discovered.
 
-- **The agent reads only.** The Claude session in the terminal panel has its
-  tool list fixed to `['Read', 'Glob', 'Grep']` at `src/main/agentHost.ts:128`.
-  It can answer questions about the vault. It cannot write a note, edit one, or
-  run anything. This is a boundary, not an oversight — the consent gate that
-  would front an agent write already exists in `src/main/consent.ts`, and what
-  is missing is the write tools behind it and the lost-update handling for an
-  agent editing a note the user has open.
+- **The agent can write, but only through two tools, and only with your
+  permission.** Its BUILT-IN tools are still read-only — `['Read', 'Glob',
+  'Grep']`, no Bash, and deliberately not the SDK's own `Write` or `Edit`,
+  which would go straight to disk behind the vault's back. Mutation goes
+  through `write_note` and `move_note` instead, which cannot touch the disk
+  themselves: they round-trip to the main process, which calls the same
+  `src/main/vault.ts` functions your own clicks go through. So an agent write
+  gets the pre-edit backup, the atomic rename, the trash, the undo record, and
+  a consent prompt carrying the agent's own stated reason. If you have the note
+  open, your next save raises the conflict dialog rather than losing what you
+  typed. There is no delete tool — a move to the trash is what deletion means
+  here, and `move_note` already says it, reversibly.
+- **The agent still cannot run anything.** No Bash, no shell, no processes. It
+  reads, writes notes, and moves them; that is the whole of its reach.
 - **Windows only.** The `mac` and `linux` targets in `package.json` are
   configured and have never been built or run. Treat them as untested
   scaffolding, not as supported platforms. See [Building](#building).

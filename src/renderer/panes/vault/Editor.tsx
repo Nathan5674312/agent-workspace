@@ -174,7 +174,24 @@ export function Editor({
   }
 
   if (!note) {
-    return <div className="vault-editor-empty">No note selected</div>
+    /**
+     * The one place the empty state is stated, and it says what to do next.
+     *
+     * It used to be the words "No note selected" alone, with the note-title
+     * strip above saying them a second time. A first launch is almost entirely
+     * this view, so it is the screen the app is mostly made of — which makes
+     * "there is nothing here" an expensive thing for it to be the only thing
+     * saying.
+     */
+    return (
+      <div className="vault-editor-empty">
+        <p className="vault-editor-empty-title">No note open</p>
+        <p className="vault-editor-empty-hint">
+          Pick one from the sidebar, or press <kbd>+ Note</kbd> above the tree to
+          start a new one.
+        </p>
+      </div>
+    )
   }
 
   const wikilinks = parseWikilinkRefs(text)

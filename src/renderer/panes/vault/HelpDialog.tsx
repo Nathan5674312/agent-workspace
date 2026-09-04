@@ -23,9 +23,12 @@ import './help.css'
 export interface HelpDialogProps {
   isOpen: boolean
   onClose: () => void
+  /** Show the roadmap surface. Closes this dialog on the way, since the thing
+   *  it opens fills the window behind it. */
+  onOpenRoadmap: () => void
 }
 
-export function HelpDialog({ isOpen, onClose }: HelpDialogProps) {
+export function HelpDialog({ isOpen, onClose, onOpenRoadmap }: HelpDialogProps) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   /** Whether the press in flight began on the backdrop. A ref: the mouseup that
    *  reads it must not repaint anything in between. */
@@ -108,30 +111,66 @@ export function HelpDialog({ isOpen, onClose }: HelpDialogProps) {
         </section>
 
         <section className="help-section">
-          <h3 className="help-heading">The six views</h3>
+          {/* WAS "The six views", listing six of the eight that existed and in
+              an order matching neither the ribbon nor the main strip. It is one
+              list now because the app has one list — see LeftRibbon.tsx — and
+              it is written in ribbon order so reading it and looking at the
+              column agree. The file's own rule is that every sentence here is
+              checked against the code; a restructure is exactly when that rule
+              earns its keep. */}
+          <h3 className="help-heading">The surfaces</h3>
+          <p className="help-text">
+            The icons down the left edge. Each one changes what fills the
+            window; none of them change the sidebar.
+          </p>
           <ul className="help-list">
             <li>
-              <strong>Editor</strong> — the note's text, as plain markdown. No
+              <strong>Note</strong> — the note's text, as plain markdown. No
               live preview.
             </li>
             <li>
-              <strong>Versions</strong> — every pre-edit copy of the open note.
-              Restoring one is a save, so it is itself undoable.
+              <strong>Graph</strong> — notes as nodes, wikilinks as edges.
+              Alt-drag one node onto another to write the link into the
+              markdown.
             </li>
             <li>
-              <strong>Graph</strong> — notes as nodes, wikilinks as edges.
+              <strong>Canvas</strong> — <code className="help-code">.canvas</code>{' '}
+              boards, the same JSONCanvas format Obsidian uses. Notes drag in
+              from the tree as cards.
             </li>
             <li>
               <strong>Database</strong> — every note as a row, grouped and
               sorted by its frontmatter.
             </li>
             <li>
-              <strong>Inbox</strong> — what agents captured but did not file.
+              <strong>Planner</strong> — the month, with the daily notes beside
+              it.
             </li>
             <li>
-              <strong>Roadmap</strong> — what is built, partial, and planned.
+              <strong>Inbox</strong> — what agents captured but did not file.
+              The number on the icon is how many are waiting.
+            </li>
+            <li>
+              <strong>Terminal</strong> — slash commands run here freely;{' '}
+              <code className="help-code">!</code> reaches the operating system
+              and asks first, every time, showing the exact text it will run.
+            </li>
+            <li>
+              <strong>Versions</strong> — every pre-edit copy of the open note.
+              Restoring one is a save, so it is itself undoable.
             </li>
           </ul>
+        </section>
+
+        <section className="help-section">
+          <h3 className="help-heading">Finding a note</h3>
+          <p className="help-text">
+            The three tabs at the top of the sidebar — Files, Search and
+            Bookmarks — are ways of finding something to open, so they stay put
+            whichever surface you are on. Bookmarks is the same list Obsidian
+            shows, read from and written to the vault's own{' '}
+            <code className="help-code">bookmarks.json</code>.
+          </p>
         </section>
 
         <section className="help-section">
@@ -155,6 +194,24 @@ export function HelpDialog({ isOpen, onClose }: HelpDialogProps) {
             <code className="help-code">ARTWORK.md</code>. They are files on
             disk — there is no channel that opens one from in here.
           </p>
+        </section>
+
+        <section className="help-section">
+          {/* ROADMAP MOVED HERE OUT OF THE RIBBON.
+              Every other icon in that column is about YOUR NOTES; this one is
+              about the app grading itself, which is a question you ask from the
+              help dialog rather than a place you work. It is still the same
+              full view — the entry point moved, the feature did not. */}
+          <h3 className="help-heading">What is built, and what is not</h3>
+          <p className="help-text">
+            Fate keeps its own feature list with an honest status on every
+            entry, and grades itself against it. An entry only reads{' '}
+            <em>built</em> once someone has watched it work and written down
+            what they saw.
+          </p>
+          <button className="help-link-button" onClick={onOpenRoadmap}>
+            Open the roadmap
+          </button>
         </section>
 
         <div className="help-actions">

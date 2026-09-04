@@ -26,9 +26,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVault } from './useVault.js'
 import { LeftRibbon } from './LeftRibbon.js'
+import { SidebarFinder, type Finder } from './SidebarFinder.js'
 import { CanvasList } from './CanvasView.js'
 import { SidebarResizer } from './SidebarResizer.js'
-import { TerminalView } from './TerminalView.js'
 import { SearchView } from './SearchView.js'
 import { BookmarksView } from './BookmarksView.js'
 import { DailyNotesView } from './DailyNotesView.js'
@@ -56,6 +56,7 @@ const VIEW_LABEL: Record<MainView, string> = {
   roadmap: 'Roadmap',
   canvas: 'Canvas',
   planner: 'Planner',
+  terminal: 'Terminal',
 }
 import { ConflictDialog } from './ConflictDialog.js'
 import { SettingsDialog } from './SettingsDialog.js'
@@ -78,6 +79,7 @@ import {
 import type { VaultNoteBody } from '../../../shared/ipc.js'
 import { setFrontmatter } from '../../../shared/notemeta.js'
 import { listTemplates, type Template } from '../../../shared/templates.js'
+import { startupNote } from '../../../shared/startup.js'
 import {
   addWikilink,
   ambiguousStems,
@@ -97,21 +99,34 @@ export function VaultPane(): React.ReactElement {
    */
   const layoutRef = useRef<HTMLDivElement>(null)
   /**
-   * The sidebar's section, and separately the icon that is LIT.
+   * How the sidebar is finding notes. ONE state, and it is not the ribbon's.
    *
-   * Two states because two questions. `activeRibbon` is which panel the sidebar
-   * shows; `ribbonPressed` is which icon you last pressed, and Graph and
-   * Versions are pressable without owning a sidebar — they open a main view and
-   * leave the sidebar alone.
+   * There used to be two here — `activeRibbon` for which panel the sidebar
+   * showed and `ribbonPressed` for which icon was lit — with a comment
+   * explaining that deriving one from the other produced a screen that
+   * disagreed with itself about what was selected. That comment was right
+   * about the symptom and the cause was upstream of it: the ribbon was being
+   * asked to answer two different questions ("where am I" and "what is the
+   * sidebar listing") with one selection, so no single highlight could be
+   * correct.
    *
-   * Deriving the highlight from the view instead was wrong in a way only
-   * clicking finds: with the graph open, pressing Files swapped the sidebar but
-   * left Graph lit and left `aria-pressed=false` on the icon just pressed,
-   * because the main view was still the graph. The screen then disagreed with
-   * itself about what was selected.
+   * Splitting the questions retires the pair. The ribbon owns the surface,
+   * which already lives on the tab and is read below as `view`. This owns the
+   * sidebar, which is now the only thing it means. Neither can contradict the
+   * other because they no longer describe the same thing.
    */
-  const [activeRibbon, setActiveRibbon] = useState('files')
-  const [ribbonPressed, setRibbonPressed] = useState('files')
+  const [finder, setFinder] = useState<Finder>('files')
+  /**
+   * How many items are waiting in the inbox, for the ribbon's badge. `null`
+   * until the first read lands, so the badge is absent rather than reading 0.
+   *
+   * Read HERE and not in <MainCanvas> because the badge has to be right when
+   * you are not on the inbox — that is the entire point of a queue count. The
+   * inbox view keeps its own fetch: it needs the items, this needs a number,
+   * and the read is cheap enough that sharing one would mean threading loading
+   * and error state through the ribbon to save a call nobody notices.
+   */
+  const [inboxCount, setInboxCount] = useState<number | null>(null)
   const [selectedNote, setSelectedNote] = useState<VaultNoteBody | null>(null)
   /**
    * The open note's path, readable AFTER an await.
@@ -183,6 +198,62 @@ export function VaultPane(): React.ReactElement {
       ),
     )
   }, [vaultName])
+
+  /**
+   * OPEN THE FRONT DOOR ONCE, on the first tree of the session.
+   *
+   * Fate is a notes app, and a notes app that launches to "No note open" over a
+   * full vault has made its emptiest possible screen the first thing you see.
+   * `startupNote` picks the note — root Home/index/readme, else today's daily
+   * note if it is already written — and returns null rather than inventing one,
+   * so a vault with neither keeps the empty state.
+   *
+   * THE REF IS THE WHOLE GUARD, and it is a ref rather than state because it
+   * must not cause a render and must be true before the next effect runs. The
+   * tree reloads after every create, move and agent write; without this, each
+   * reload would yank you back to Home from whatever you had opened since. It
+   * fires at most once per mount, and only while nothing is open — a note
+   * restored some other way wins over the default, which is the point of
+   * calling it a default.
+   */
+  const openedStartupNote = useRef(false)
+  useEffect(() => {
+    if (openedStartupNote.current) return
+    if (!vault.tree) return
+    // Claimed BEFORE the await. `openNote` is async, and a second tree landing
+    // while the read is in flight would otherwise start a second open of the
+    // same note against the same empty buffer.
+    openedStartupNote.current = true
+    if (openPathRef.current) return
+    const path = startupNote(vault.tree)
+    // Not awaited and not reported: this is a convenience, so a note that will
+    // not open must leave the empty state up rather than raise an error for
+    // something the user never asked for.
+    if (path) void openNote(path)
+  }, [vault.tree])
+
+  /**
+   * Keyed on the tree, so the count re-reads when the vault reloads — which is
+   * what happens after a note is created, moved, or written by the agent, and
+   * therefore exactly when the queue can have changed. `live` cancels a late
+   * response the same way every async effect in this pane does.
+   */
+  useEffect(() => {
+    let live = true
+    vault
+      .getInbox()
+      .then((items) => {
+        if (live) setInboxCount(items.length)
+      })
+      .catch(() => {
+        // A count that cannot be read is not an error the user can act on, and
+        // the Inbox surface reports its own failure properly when opened. The
+        // badge simply stays absent rather than claiming a number.
+      })
+    return () => {
+      live = false
+    }
+  }, [vault.tree])
 
   /**
    * The primary canvas's view IS the active tab's view. Derived, not mirrored:
@@ -1113,50 +1184,103 @@ export function VaultPane(): React.ReactElement {
     <div className="vault-pane">
       <div className="vault-layout" ref={layoutRef}>
         {/**
-         * Versions is the one ribbon entry that opens a MAIN view instead of a
-         * sidebar section, because that is what it is — a panel over the open
-         * note, not a list to browse beside one.
+         * ONE JOB: pick the surface.
          *
-         * Without this branch it would land in the `else` below and render the
-         * placeholder panel, which is what every unimplemented ribbon icon
-         * does. Moving it off the top strip and into an icon that never shows
-         * versions would not be moving the feature, it would be deleting it.
+         * Every icon here now does the same kind of thing as every icon beside
+         * it, which is the whole of the change. It used to be three kinds:
+         * four icons swapped the sidebar, two swapped the main view and left
+         * the sidebar alone, one did both, and three more surfaces had no icon
+         * at all and lived in a second strip inside the main area. See
+         * `LeftRibbon.tsx` for the full account.
+         *
+         * `view` is the active tab's surface, so the lit icon and the thing on
+         * screen cannot disagree — they are the same value, not two copies of
+         * it kept in step by hand.
          */}
         <LeftRibbon
-          activeView={ribbonPressed}
-          onViewChange={(id) => {
-            /**
-             * TWO ICONS OPEN A MAIN VIEW AND KEEP THE SIDEBAR THEY HAD, and
-             * they are the two whose feature is not a list.
-             *
-             * Versions was already here. Graph joins it because the graph is
-             * the whole canvas — its filters, forces and display controls live
-             * in the view itself (Roadmap note 10), so a sidebar copy of them
-             * would be a second set of the same knobs. Sending the icon to the
-             * view is the feature; taking the file tree away to show a panel
-             * about the view is not.
-             */
-            setRibbonPressed(id)
-            if (id === 'versions') handleViewChange('versions')
-            else if (id === 'graph') handleViewChange('graph')
-            else {
-              setActiveRibbon(id)
-              /**
-               * The calendar icon is the one ribbon item that opens a MAIN view
-               * as well as its sidebar panel, and that is the merge rather than
-               * an inconsistency. Daily notes used to be a sidebar list, and a
-               * sidebar column can show which days you wrote and nothing about
-               * what is on them. The planner is the month with its contents, so
-               * the icon now means "show me the month" and the sidebar keeps
-               * the compact picker beside it.
-               */
-              if (id === 'calendar') handleViewChange('planner')
-            }
-          }}
+          surface={view}
+          onSurfaceChange={(next) => handleViewChange(next)}
+          inboxCount={inboxCount}
         />
 
         <div className="vault-sidebar">
-          {activeRibbon === 'files' ? (
+          {/**
+           * THE SIDEBAR FINDS THINGS. It does not navigate, and it no longer
+           * changes shape depending on which icon was last pressed.
+           *
+           * Two surfaces bring a finder of their own, and both were already
+           * argued for in the code this replaces — the reasoning was right, it
+           * was just attached to a ribbon icon instead of to the surface:
+           *
+           *   Canvas   a board is something you drag notes INTO, so the boards
+           *            list and the tree have to be on screen together. It is
+           *            stacked ABOVE the vault finder rather than replacing it,
+           *            which is what keeps the drag source present.
+           *   Planner  the month is the main surface; the day picker beside it
+           *            is how you get to a day.
+           *
+           * Everything else shares the vault's own three ways of finding a
+           * note, which are always available rather than being one press of an
+           * icon column away.
+           */}
+          {view === 'canvas' && (
+            /* Reads the boards out of the same tree the explorer draws, so
+               there is one answer to what is in the vault. Opening one goes
+               through `openNote`, which routes .canvas to the Canvas view. */
+            <CanvasList
+              tree={vault.tree}
+              current={canvasPath}
+              onOpen={(path) => void openNote(path)}
+              onCreated={vault.reload}
+            />
+          )}
+          {view === 'planner' && (
+            /* Daily notes. The tree is the source for which days exist, so this
+               reads the same data the explorer draws rather than asking again. */
+            <DailyNotesView
+              tree={vault.tree}
+              /**
+               * Opening a day must also SHOW it. `openNote` loads a note; it
+               * does not put the editor up, and the planner is the surface
+               * behind this picker — so without the switch, picking a day
+               * loaded the note behind the month and the click read as doing
+               * nothing at all. Same failure the database table and the graph
+               * both document, and the same fix.
+               *
+               * Conditional, because `openNote` resolves false when the open
+               * was refused — a declined discard, a conflict dialog — and
+               * switching anyway would drag the user off the month they were
+               * reading on the strength of a click that did not happen.
+               */
+              onOpenNote={async (path) => {
+                if (await openNote(path)) handleViewChange('editor')
+              }}
+              onCreated={vault.reload}
+            />
+          )}
+
+          <SidebarFinder value={finder} onChange={setFinder} />
+
+          {/**
+           * Three finders, all three always reachable, and no fourth branch.
+           *
+           * What stood here was a seven-way chain over ribbon ids ending in an
+           * `null` branch that a test had to prove was unreachable — a fallback
+           * guarding against an icon being added without a panel. That whole
+           * class of bug is gone rather than guarded: the ribbon no longer
+           * selects sidebar panels, so there is no id it can hold that this
+           * block would have to know about.
+           */}
+          {finder === 'search' ? (
+            /* Reads through vault.search, which applies the same exclusions as
+               the tree — see the header of src/shared/search.ts for why it is a
+               linear scan and not an index. */
+            <SearchView onOpenHit={handleOpenHit} />
+          ) : finder === 'bookmarks' ? (
+            /* Reads and writes Obsidian's own .obsidian/bookmarks.json, so this
+               is the same list Obsidian shows rather than a second one. */
+            <BookmarksView onOpenNote={(path) => void openNote(path)} />
+          ) : (
             <>
               <ExplorerHeader
                 onNewNote={() => void handleNewNote()}
@@ -1175,105 +1299,6 @@ export function VaultPane(): React.ReactElement {
                 onToggle={handleToggleFolder}
               />
             </>
-          ) : activeRibbon === 'bookmarks' ? (
-            /* Reads and writes Obsidian's own .obsidian/bookmarks.json, so this
-               is the same list Obsidian shows rather than a second one. */
-            <BookmarksView onOpenNote={(path) => void openNote(path)} />
-          ) : activeRibbon === 'calendar' ? (
-            /* Daily notes. The tree is the source for which days exist, so this
-               reads the same data the explorer draws rather than asking again. */
-            <DailyNotesView
-              tree={vault.tree}
-              /**
-               * THE VIEW SWITCH IS NOT OPTIONAL HERE, and it became load-bearing
-               * the moment this icon started opening the planner.
-               *
-               * `openNote` loads the note; it does not show it. That was
-               * survivable while the ribbon left the main area alone — you were
-               * usually already on the editor — but the calendar icon now puts
-               * the planner up, so picking a day loaded the note BEHIND the
-               * calendar and the click read as doing nothing at all. Same
-               * failure the database table and the graph both document, and the
-               * same fix.
-               *
-               * Conditional, because `openNote` resolves false when the open was
-               * refused — a declined discard, a conflict dialog — and switching
-               * anyway would drag the user off the month they were reading on
-               * the strength of a click that did not happen.
-               */
-              onOpenNote={async (path) => {
-                if (await openNote(path)) handleViewChange('editor')
-              }}
-              onCreated={vault.reload}
-            />
-          ) : activeRibbon === 'canvas' ? (
-            /**
-             * TWO SECTIONS, not one, and that is a fix rather than a layout
-             * preference.
-             *
-             * Every other ribbon icon replaces the file tree, which is right for
-             * them — bookmarks and daily notes are lists you read on their own.
-             * The canvas section is different because a board is something you
-             * drag files INTO: notes are draggable out of the tree and become
-             * cards where they land. Swapping the tree away the moment you open
-             * a board meant the source of that gesture was never on screen at
-             * the same time as its target, so the gesture was close to
-             * unreachable in normal use.
-             *
-             * The boards come first because that is what the icon was pressed
-             * for; the tree sits under it as the thing you pull from.
-             */
-            <>
-              {/* Reads the boards out of the same tree the explorer draws, so
-                  there is one answer to what is in the vault. Opening one goes
-                  through `openNote`, which routes .canvas to the Canvas view. */}
-              <CanvasList
-                tree={vault.tree}
-                current={canvasPath}
-                onOpen={(path) => void openNote(path)}
-                onCreated={vault.reload}
-              />
-              {/* Named, because two unlabelled trees stacked in one column read
-                  as one tree that has gone wrong. */}
-              <div className="vault-sidebar-heading">Files</div>
-              <FolderTree
-                root={sortedTree}
-                onSelectNote={openNote}
-                expanded={expanded}
-                onToggle={handleToggleFolder}
-              />
-            </>
-          ) : activeRibbon === 'search' ? (
-            /* The Search icon's first real panel. Reads through vault.search,
-               which applies the same exclusions as the tree — see the header of
-               src/shared/search.ts for why it is a linear scan and not an
-               index. */
-            <SearchView onOpenHit={handleOpenHit} />
-          ) : activeRibbon === 'terminal' ? (
-            /* The first ribbon icon to graduate from a placeholder to a real
-               panel, and by 1.0 the last one still described as such: every
-               other icon has its own panel too, which is why the placeholder
-               below is gone. */
-            <TerminalView onClose={() => setActiveRibbon('files')} />
-          ) : (
-            /* UNREACHABLE, and kept honest by a test rather than by a component.
-               Every id in LeftRibbon's VIEWS is now handled by name — here, or
-               in onViewChange above for the two that open a main view instead —
-               so nothing lands in this branch.
-
-               It used to render the SidebarPlaceholder component: a panel
-               describing the unbuilt feature an icon promised. That existed
-               because the original bug was an `&&` with no else, so seven icons
-               lit up and emptied the sidebar. The panel was the right fix while
-               there were unbuilt icons. There are none, so it had become a
-               component whose only job was to be reached by nothing.
-
-               What replaced it is not `null` plus optimism. `no ribbon icon
-               falls through to the not-built placeholder` in
-               review-s2-vault-pane.test.mjs reads both sources and asserts every
-               ribbon id is named in this file, so adding an icon without a panel
-               fails the suite instead of blanking a user's sidebar. */
-            null
           )}
 
           <VaultSwitcher
@@ -1365,7 +1390,17 @@ export function VaultPane(): React.ReactElement {
           guard. It cannot bypass a conflict either — <ConflictDialog> is a
           showModal() dialog in the top layer, and this one opening under it
           changes nothing about which must be answered first. */}
-      <HelpDialog isOpen={helpOpen} onClose={() => setHelpOpen(false)} />
+      <HelpDialog
+        isOpen={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        /* Closes on the way out, because the roadmap fills the window this
+           dialog is sitting on top of — leaving it up would put a modal over
+           the thing it just opened. */
+        onOpenRoadmap={() => {
+          setHelpOpen(false)
+          handleViewChange('roadmap')
+        }}
+      />
 
       {/* Replaces `window.prompt`, which throws in Electron. See createFolder. */}
       <NameDialog

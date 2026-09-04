@@ -73,18 +73,60 @@ test('every component named in the brief exists', () => {
 
 test('left ribbon carries every view, and no icon promises a cut feature', () => {
   const code = src('LeftRibbon.tsx')
+  /**
+   * THE LIST CHANGED KIND, not just contents.
+   *
+   * It used to be a mix: four sidebar panels (files, search, bookmarks,
+   * terminal), two main views (graph, versions), and one that did both
+   * (calendar) — with database, inbox and roadmap missing entirely because they
+   * lived in a second strip inside the main area. The ribbon now holds SURFACES
+   * and only surfaces, so what is asserted is that every MainView has an icon.
+   *
+   * files / search / bookmarks are deliberately absent and must stay absent:
+   * they are ways of finding a note, not places to be, and they moved to the
+   * sidebar's own control (SidebarFinder.tsx). An icon for them here would
+   * rebuild the exact ambiguity this restructure removed.
+   */
   for (const id of [
-    'files',
-    'search',
-    'bookmarks',
+    'editor',
     'graph',
     'canvas',
-    'versions',
-    'calendar',
+    'database',
+    'planner',
+    'inbox',
     'terminal',
+    'versions',
   ]) {
     assert.match(code, new RegExp(`id: '${id}'`), `ribbon missing ${id}`)
   }
+  for (const id of ['files', 'search', 'bookmarks']) {
+    assert.doesNotMatch(
+      code,
+      new RegExp(`id: '${id}'`),
+      `'${id}' is a sidebar finder, not a surface — see SidebarFinder.tsx`,
+    )
+  }
+  /**
+   * ROADMAP IS DELIBERATELY NOT AN ICON, and this is the assertion that keeps
+   * that a decision rather than an oversight. Fate is a notes app; every icon
+   * in that column is about the user's notes, and the roadmap is the app
+   * grading itself. It is reached from the help dialog instead.
+   *
+   * The next assertion is the one that matters: removing the icon must not have
+   * removed the only way in. A surface with no entry point is dead code that
+   * still renders.
+   */
+  assert.doesNotMatch(code, /id: 'roadmap'/, 'the roadmap is a surface again')
+  assert.match(
+    src('HelpDialog.tsx'),
+    /onOpenRoadmap/,
+    'the roadmap left the ribbon and nothing else opens it',
+  )
+  assert.match(
+    src('VaultPane.tsx'),
+    /handleViewChange\('roadmap'\)/,
+    'the help dialog is handed no way to actually switch to the roadmap',
+  )
   /**
    * WAS EIGHT INCLUDING `plugins`, and dropping it is the point rather than a
    * regression. The brief's own v1 cut bans a plugin API (see the test below),
@@ -112,15 +154,36 @@ test('no ribbon icon falls through to the not-built placeholder', () => {
   // So this test is the only thing standing between a new ribbon icon and the
   // empty sidebar the placeholder was built to prevent.
   const ribbon = src('LeftRibbon.tsx')
-  const pane = src('VaultPane.tsx')
+  const canvas = src('MainCanvas.tsx')
   const ids = [...ribbon.matchAll(/id: '([a-z]+)'/g)].map((m) => m[1])
   assert.ok(ids.length >= 8, `only ${ids.length} ribbon ids found`)
+  // Every surface, not just the ones with an icon — the roadmap has no icon and
+  // must still be dispatched, or opening it from Help would render the editor.
+  ids.push('roadmap')
+  /**
+   * THE EXHAUSTIVENESS MOVED WITH THE MEANING.
+   *
+   * This used to read VaultPane, because a ribbon id named a sidebar panel and
+   * an unhandled one blanked the sidebar. An id now names a SURFACE, so the
+   * file that must know every one of them is the surface dispatcher —
+   * MainCanvas — and an unhandled id would fall through its chain to the
+   * editor, silently showing the wrong thing rather than nothing.
+   *
+   * 'editor' is the chain's final else and so is handled without being named,
+   * which is the one exemption and is checked by its own assertion below.
+   */
   for (const id of ids) {
+    if (id === 'editor') continue
     assert.ok(
-      pane.includes(`activeRibbon === '${id}'`) || pane.includes(`id === '${id}'`),
-      `ribbon '${id}' is not handled in VaultPane, so it renders the placeholder`,
+      canvas.includes(`view === '${id}'`),
+      `ribbon '${id}' is not dispatched in MainCanvas, so it renders the editor`,
     )
   }
+  assert.match(
+    canvas,
+    /\| 'editor'/,
+    'editor is not in MainView, so the fall-through arm is not a real surface',
+  )
 })
 
 test('explorer header exposes new note, new folder, sort, collapse, expand', () => {

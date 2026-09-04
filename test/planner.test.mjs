@@ -169,10 +169,24 @@ test('planner is a main view, not a sidebar list', () => {
   assert.match(main, /view === 'planner' \? \(/, 'nothing renders the planner')
 })
 
-test('the calendar ribbon icon opens the planner', () => {
+test('the planner is a ribbon surface in its own right', () => {
+  /**
+   * It used to be reached by a `calendar` icon that special-cased itself into
+   * `handleViewChange('planner')` — one of the three exceptions that made the
+   * ribbon unreadable, since the icon's id and the thing it opened had
+   * different names. The icon IS the planner now, so there is no mapping left
+   * to assert and no branch left to get wrong.
+   */
+  const ribbon = readSource('LeftRibbon.tsx')
+  assert.match(ribbon, /id: 'planner'/, 'no planner icon')
+  assert.doesNotMatch(ribbon, /id: 'calendar'/, 'the old indirect id is back')
   const pane = readSource('VaultPane.tsx')
-  assert.match(pane, /if \(id === 'calendar'\) handleViewChange\('planner'\)/)
   assert.match(pane, /planner: 'Planner'/, 'the planner tab has no label')
+  assert.doesNotMatch(
+    pane,
+    /if \(id === 'calendar'\)/,
+    'the ribbon special-cases an icon again',
+  )
 })
 
 test('the planner is the calendar and nothing else', () => {
@@ -232,7 +246,17 @@ test('picking a day shows the note, it does not just load it', () => {
   // main area alone, but the icon now opens the planner — so picking a day
   // loaded the note BEHIND the calendar and the click read as doing nothing.
   const pane = readSource('VaultPane.tsx')
-  const mount = pane.slice(pane.indexOf('<DailyNotesView'), pane.indexOf('onCreated={vault.reload}'))
+  /**
+   * Anchored to THIS element at both ends. It used to slice from
+   * `<DailyNotesView` to the first `onCreated={vault.reload}` in the whole
+   * file — fine while the daily notes were the only thing mounting with that
+   * prop, and silently empty once the canvas board list moved above them and
+   * claimed the first match. An empty window matches nothing and asserts
+   * nothing, so the test passed by looking at no code at all.
+   */
+  const from = pane.indexOf('<DailyNotesView')
+  assert.ok(from > 0, 'the daily notes panel is not mounted at all')
+  const mount = pane.slice(from, pane.indexOf('/>', from))
   assert.match(
     mount,
     /if \(await openNote\(path\)\) handleViewChange\('editor'\)/,

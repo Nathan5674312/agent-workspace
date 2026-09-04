@@ -34,7 +34,7 @@
 import { utilityProcess, type UtilityProcess } from 'electron'
 import { join } from 'node:path'
 import type { ChatBlock, PermissionMode, Session } from '../shared/ipc.js'
-import type { HostOutbound } from './agentHost.js'
+import type { HostOutbound, VaultOp } from './agentHost.js'
 
 /** What the supervisor tells its caller about a live child. */
 export interface AgentProcessInfo {
@@ -67,6 +67,14 @@ export interface RunCallbacks {
   onStatus: (status: Session['status']) => void
   /** Resolve true to allow the tool call. */
   onConsent: (toolName: string, input: unknown) => Promise<boolean>
+  /**
+   * Perform one vault operation on the child's behalf, and say what happened.
+   *
+   * This never rejects: a refusal and a failure are both `ok: false` with a
+   * message, because the child has to hand SOMETHING back to the model and an
+   * unanswered round trip would hang the turn until the process is killed.
+   */
+  onVaultOp: (request: VaultOp) => Promise<{ ok: boolean; message: string }>
   /** Exactly once, whatever happens. */
   onExit: (record: ExitRecord) => void
 }
@@ -271,6 +279,24 @@ export function run(
               // is an ordinary race, not an error.
               if (!child.settled) {
                 proc.postMessage({ kind: 'consent-reply', nonce: msg.nonce, allow })
+              }
+            })
+          break
+        case 'vault-request':
+          // Same shape as consent, and for the same reason: the child owns no
+          // vault access, so the operation happens HERE or not at all.
+          void cb
+            .onVaultOp(msg.request)
+            .catch((e: unknown) => ({
+              ok: false,
+              message: e instanceof Error ? e.message : String(e),
+            }))
+            .then((reply) => {
+              // The child may already be gone — a kill mid-operation is an
+              // ordinary race. The vault work itself already happened or
+              // already did not; nothing is left half-done by skipping this.
+              if (!child.settled) {
+                proc.postMessage({ kind: 'vault-reply', nonce: msg.nonce, ...reply })
               }
             })
           break

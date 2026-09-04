@@ -21,6 +21,102 @@ import type { Handle } from './ipc.js'
 import { CH, EV, type Session, type ChatMessage, type PermissionMode } from '../shared/ipc.js'
 import { requestConsent } from './corner.js'
 import * as supervisor from './supervisor.js'
+import * as vault from './vault.js'
+import { ConsentDenied } from './consent.js'
+import type { Actor } from '../shared/ipc.js'
+import type { VaultOp } from './agentHost.js'
+
+/**
+ * THE AGENT'S WRITE PATH, and the only one it has.
+ *
+ * The child process asked; this is where it actually happens, through the same
+ * vault.ts functions the user's own clicks go through. Everything that protects
+ * a note protects it here too — the pre-edit backup, the atomic rename, the
+ * trash, the undo record — and `actor` is what makes the consent gate fire,
+ * since this is agent-originated rather than user-originated.
+ *
+ * The agent's own words are the reason. consent.ts refuses a blank one, and the
+ * human reads it verbatim in the prompt.
+ *
+ * Exported for the tests, which is the point of it being a named function and
+ * not the closure it started as: what a test has to be able to reach is the
+ * WRITE, not the chat session wrapped around it.
+ */
+/**
+ * The vault-relative folders on the way to `path` that do not exist yet,
+ * outermost first.
+ *
+ * save() will NOT create them, deliberately: "a save that conjures directories
+ * out of a typo'd path is how a vault grows junk"
+ * (test/section4-data-layer.test.mjs:301). Creating a folder is a separate
+ * control with its own dialog for the user, so it is a separate ask for the
+ * agent too — which is why this returns a LIST to be gated one at a time rather
+ * than handing `{ recursive: true }` to one call.
+ */
+function missingFolders(path: string): string[] {
+  const parts = path.split(/[\/]+/).slice(0, -1)
+  const out: string[] = []
+  let acc = ''
+  for (const part of parts) {
+    if (!part) continue
+    acc = acc ? `${acc}/${part}` : part
+    if (!existsSync(join(vault.getVaultDir(), acc))) out.push(acc)
+  }
+  return out
+}
+
+export async function applyVaultOp(
+  sessionId: string,
+  req: VaultOp,
+): Promise<{ ok: boolean; message: string }> {
+  const actor: Actor = { kind: 'agent', sessionId, reason: req.reason }
+  try {
+    if (req.op === 'write') {
+      /**
+       * The stamp is read HERE, a moment before the write, and that is not a
+       * hole in the lost-update guard — it is where the guard was never
+       * pointed. `mtime` protects a caller HOLDING AN OLD BUFFER from
+       * clobbering a newer file, and the agent holds no buffer: it is being
+       * told to write this text, now.
+       *
+       * The side that IS protected is the user's, and it comes for free.
+       * Their editor still holds the mtime from before this write, so their
+       * next save fails the guard and raises ConflictDialog instead of
+       * silently dropping what they typed. That is the case the README called
+       * missing, and it needed no new code — only for the agent to go through
+       * save() like every other caller.
+       *
+       * A read that fails is treated as "not there yet", which is what makes
+       * this the create call too. It cannot decay into a silent clobber: if
+       * the file does exist and merely could not be read, save() stats it,
+       * compares a real mtime against this 0, and raises SaveConflict.
+       */
+      // The folders first, each behind its own prompt. Two dialogs for
+      // "write a note into a new folder" is not fatigue, it is the two things
+      // that are actually happening — and consent.ts keys allowances per kind
+      // precisely so that approving folders never quietly approves writes.
+      for (const folder of missingFolders(req.path)) {
+        await vault.mkdir(folder, actor)
+      }
+      const cur = await vault.read(req.path).catch(() => null)
+      const saved = await vault.save(req.path, req.text, cur?.mtime ?? 0, actor)
+      return { ok: true, message: `Wrote ${saved.path}.` }
+    }
+    const rec = await vault.move(req.from, req.to, actor)
+    return { ok: true, message: `Moved ${rec.from} to ${rec.to}. Undo id ${rec.id}.` }
+  } catch (e) {
+    // A refusal is reported to the agent AS a refusal. Left as a generic error
+    // it reads like a fault, and a model that thinks it hit a fault retries —
+    // which is how one "no" turns into five prompts.
+    if (e instanceof ConsentDenied) {
+      return {
+        ok: false,
+        message: 'The user did not allow this. Do not retry it; ask them what they want instead.',
+      }
+    }
+    return { ok: false, message: e instanceof Error ? e.message : String(e) }
+  }
+}
 
 // ================================================================ Types
 
@@ -236,6 +332,7 @@ export function register(handle: Handle): void {
           detail: `The agent wants to ${toolName} with these arguments: ${JSON.stringify(input)}`,
           severity: 'info',
         }),
+      onVaultOp: (req) => applyVaultOp(id, req),
       onExit: () => {},
     })
 

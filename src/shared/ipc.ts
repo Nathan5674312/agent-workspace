@@ -414,6 +414,7 @@ import type { Activity } from './transcript.js'
 import type { NoteHits } from './search.js'
 import { DEFAULT_THEME, type ThemeId } from './themes.js'
 import type { UpdateCheck } from './update.js'
+import type { Changelog } from './changelog.js'
 export type { Activity }
 
 export const CH = {
@@ -455,6 +456,14 @@ export const CH = {
    * click on "Check for updates". Reasoning in src/main/update.ts.
    */
   updateCheck: 'update:check',
+
+  /**
+   * The second, and only other, channel that leaves this machine unasked-for:
+   * what changed between the running version and the one on offer. Same GET,
+   * same nothing-sent; it exists so a person can read what an update contains
+   * before agreeing to it.
+   */
+  updateChanges: 'update:changes',
 
   terminalProcesses: 'terminal:processes',
   terminalExits: 'terminal:exits',
@@ -629,5 +638,15 @@ export type Api = {
      * answers and a thrown error would collapse them.
      */
     check(): Promise<UpdateCheck>
+    /**
+     * List what changed between two released versions, newest commit first,
+     * with each file and its added and removed line counts.
+     *
+     * Never rejects, and `null` is not an error to show. It means the update
+     * stands but cannot be described — offline, rate-limited, the comparison
+     * too large to hold, or a tag that names no commit. A missing changelog
+     * must never take the update offer down with it.
+     */
+    changes(base: string, head: string): Promise<Changelog | null>
   }
 }

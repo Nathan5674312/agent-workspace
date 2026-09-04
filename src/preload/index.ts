@@ -80,6 +80,10 @@ const api: Api = {
     // shared/update.ts, so the renderer cannot point the app's one outbound
     // request at a host of its choosing.
     check: () => ipcRenderer.invoke(CH.updateCheck),
+    // These two DO come from the renderer, so main validates them with the same
+    // `isVersion` the feed's own tag goes through before either reaches a URL.
+    // The host is still a constant; only the two version numbers cross.
+    changes: (base: string, head: string) => ipcRenderer.invoke(CH.updateChanges, base, head),
   },
 }
 

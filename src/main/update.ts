@@ -19,7 +19,8 @@
  */
 import { app } from 'electron'
 import { get } from 'node:https'
-import { UPDATE_FEED, decide, type UpdateCheck } from '../shared/update.js'
+import { UPDATE_FEED, decide, isVersion, type UpdateCheck } from '../shared/update.js'
+import { compareUrl, parseCompare, type Changelog } from '../shared/changelog.js'
 import { CH } from '../shared/ipc.js'
 import type { Handle } from './ipc.js'
 
@@ -32,7 +33,19 @@ const TIMEOUT_MS = 6000
 const MAX_BYTES = 64 * 1024
 
 /**
- * Fetch the feed body, or null.
+ * A comparison is not a few hundred bytes, because GitHub returns the full
+ * patch text of every changed file and there is no way to ask it not to.
+ * Measured against this repository: a nine-commit delta is 311 KB, and 155
+ * commits across 233 files is 1.9 MB. Under the feed's 64 KB the check would
+ * not error — `fetchJson` fails closed — it would report "no changes" forever.
+ *
+ * 4 MB is a ceiling, not a target: past it the panel offers the update without
+ * a changelog rather than holding the whole thing in memory to describe it.
+ */
+const MAX_COMPARE_BYTES = 4 * 1024 * 1024
+
+/**
+ * Fetch a body, or null.
  *
  * Every failure returns null rather than throwing: offline, DNS, TLS, a 404
  * because the feed has not been published yet, a redirect (deliberately NOT
@@ -47,7 +60,7 @@ const MAX_BYTES = 64 * 1024
  * whole point of UPDATE_FEED being one constant is that it can go back to a
  * static file, and the parse guard is what makes that safe.
  */
-function fetchFeed(): Promise<string | null> {
+function fetchJson(url: string, maxBytes: number): Promise<string | null> {
   return new Promise((resolve) => {
     let settled = false
     const done = (v: string | null) => {
@@ -58,7 +71,7 @@ function fetchFeed(): Promise<string | null> {
     }
 
     const req = get(
-      UPDATE_FEED,
+      url,
       {
         headers: {
           /**
@@ -88,7 +101,7 @@ function fetchFeed(): Promise<string | null> {
         res.setEncoding('utf8')
         res.on('data', (chunk: string) => {
           body += chunk
-          if (body.length > MAX_BYTES) {
+          if (body.length > maxBytes) {
             req.destroy()
             done(null)
           }
@@ -115,7 +128,7 @@ function fetchFeed(): Promise<string | null> {
  * running `npm run dev` must not be told to download the app.
  */
 export async function check(): Promise<UpdateCheck> {
-  const body = await fetchFeed()
+  const body = await fetchJson(UPDATE_FEED, MAX_BYTES)
   const version = app.getVersion()
   if (body === null) {
     return {
@@ -133,6 +146,50 @@ export async function check(): Promise<UpdateCheck> {
   return decide(version, parsed)
 }
 
+/**
+ * What changed between two released versions, or null if it cannot be said.
+ *
+ * BOTH REFS ARE VALIDATED BEFORE THEY REACH A URL. They arrive over IPC, and
+ * `compareUrl` interpolates them into a path — an unchecked `../../` would walk
+ * off the compare endpoint onto another part of the API. `isVersion` is already
+ * the gate the feed's own tag goes through, so it is the gate these go through
+ * too, and anything else is `null` rather than a request.
+ *
+ * Null is not an error the user should see. It means the update is still on
+ * offer and the panel simply cannot describe it — offline, rate-limited,
+ * comparison too large, a tag that names no commit. Failing to list what
+ * changed must never withhold the update itself.
+ */
+export async function changes(base: string, head: string): Promise<Changelog | null> {
+  if (!isVersion(base) || !isVersion(head)) return null
+  /**
+   * VERSIONS ARRIVE NORMALISED; THE COMPARE ENDPOINT WANTS REFS. `check()`
+   * strips the leading `v` — `1.0.1`, not `v1.0.1` — because that is what a
+   * person should read, and `compare/1.0.1...1.0.2` then 404s against tags
+   * named `v1.0.1`. Failing closed, that is a changelog that is silently always
+   * empty, which is worse than one that errors.
+   *
+   * docs/RELEASING.md permits both spellings, so both are tried, `v` first
+   * because that is what has been cut. ponytail: a second request only on the
+   * miss; if tag spelling ever settles, thread the feed's own `tag_name`
+   * through `UpdateCheck` and delete this.
+   */
+  for (const prefix of ['v', '']) {
+    const body = await fetchJson(
+      compareUrl(`${prefix}${base}`, `${prefix}${head}`),
+      MAX_COMPARE_BYTES,
+    )
+    if (body === null) continue
+    try {
+      return parseCompare(JSON.parse(body))
+    } catch {
+      return null
+    }
+  }
+  return null
+}
+
 export function register(handle: Handle): void {
   handle(CH.updateCheck, () => check())
+  handle(CH.updateChanges, (base: string, head: string) => changes(base, head))
 }

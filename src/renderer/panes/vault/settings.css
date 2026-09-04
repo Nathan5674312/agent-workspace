@@ -325,3 +325,92 @@
   background: var(--material-light);
   padding: var(--space-3) var(--space-5);
 }
+
+/* ── the update dialog ────────────────────────────────────────
+   Shares the overlay, the panel and the button of Settings, because it IS the
+   same surface arriving on its own rather than a second design language for the
+   one screen the user did not ask for. Only what is genuinely new is below. */
+
+/* The sovereignty line. Reads before the heading and is not a hint: a hint is
+   something you may skip, and this is the frame the offer is read in. */
+.update-sovereignty {
+  margin: 0;
+  padding-bottom: var(--space-3);
+  border-bottom: 1px solid var(--separator);
+  color: var(--label);
+  font-size: var(--text-sm);
+  letter-spacing: var(--tracking-title);
+}
+
+.update-totals {
+  margin: 0 0 var(--space-3);
+  font-size: var(--text-sm);
+  color: var(--label);
+}
+
+/* Both lists cap their own height rather than the dialog growing: the actions
+   must stay reachable without scrolling past a long release. */
+.update-commits,
+.update-files {
+  margin: 0 0 var(--space-3);
+  padding: 0;
+  list-style: none;
+  max-height: 11rem;
+  overflow-y: auto;
+  font-size: var(--text-sm);
+}
+
+.update-commits li {
+  padding: var(--space-1) 0;
+  color: var(--label-secondary);
+}
+
+/* Grid, not flex: the counts line up in columns down the list, so the eye can
+   read magnitude without reading every number. */
+.update-files li {
+  display: grid;
+  grid-template-columns: 1fr auto auto;
+  gap: var(--space-3);
+  padding: var(--space-1) 0;
+  font-family: var(--font-mono, monospace);
+  color: var(--label-secondary);
+}
+
+/* The path is the "location", so it is the part that survives a narrow dialog;
+   it truncates from the LEFT, because a/b/c/Thing.tsx is identified by its end. */
+.update-path {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
+  text-align: left;
+}
+
+.update-added {
+  color: var(--green, #4a7c59);
+  font-variant-numeric: tabular-nums;
+}
+
+.update-removed {
+  color: var(--red, #8c4a4a);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Left, not right: three buttons of equal weight, and pushing them to the
+   trailing edge is how a UI implies which one is the "real" answer. */
+.update-actions {
+  flex-wrap: wrap;
+  justify-content: flex-start;
+}
+
+/* Two lists, one after the other, and without these they read as one run-on
+   block: the commits say WHAT changed and the files say WHERE, which is the
+   distinction the whole panel exists to draw. */
+.update-label {
+  margin: 0 0 var(--space-1);
+  font-size: var(--text-xs);
+  font-weight: var(--weight-semibold);
+  letter-spacing: var(--tracking-title);
+  text-transform: uppercase;
+  color: var(--label-tertiary, var(--label-secondary));
+}

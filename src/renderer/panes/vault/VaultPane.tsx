@@ -60,6 +60,8 @@ const VIEW_LABEL: Record<MainView, string> = {
 }
 import { ConflictDialog } from './ConflictDialog.js'
 import { SettingsDialog } from './SettingsDialog.js'
+import { UpdateDialog } from './UpdateDialog.js'
+import type { Changelog } from '../../../shared/changelog.js'
 import { HelpDialog } from './HelpDialog.js'
 import { NameDialog } from './NameDialog.js'
 import { ArtCredit } from './ArtCredit.js'
@@ -305,6 +307,54 @@ export function VaultPane(): React.ReactElement {
       live = false
     }
   }, [])
+  /**
+   * The launch update check, and the only request this app makes without being
+   * asked. It runs once per launch, never on a timer, and only while
+   * `notifyUpdates` is true — which the user can end from the dialog itself.
+   *
+   * ORDER MATTERS: settings first, and the check does not happen at all if the
+   * answer is no. Fetching and then declining to show it would still be the
+   * request the person asked not to make.
+   *
+   * Every failure is silence. A launch-time dialog reporting that it could not
+   * reach GitHub is a stranger interrupting to say nothing happened.
+   */
+  const [update, setUpdate] = useState<{
+    current: string
+    latest: string
+    url: string
+    changes: Changelog | null
+    loading: boolean
+  } | null>(null)
+  useEffect(() => {
+    let live = true
+    void (async () => {
+      try {
+        const s = await window.api.settings.get()
+        if (!live || !s.notifyUpdates) return
+        const check = await window.api.update.check()
+        if (!live || check.state !== 'available') return
+        setUpdate({
+          current: check.version,
+          latest: check.latest,
+          url: check.url,
+          changes: null,
+          loading: true,
+        })
+        // Second request, and the slow one — the dialog is already up and
+        // readable while it lands, because the version number is the part that
+        // matters and the changelog is the part that elaborates.
+        const changes = await window.api.update.changes(check.version, check.latest)
+        if (live) setUpdate((u) => (u ? { ...u, changes, loading: false } : u))
+      } catch {
+        /* silent, deliberately — see above */
+      }
+    })()
+    return () => {
+      live = false
+    }
+  }, [])
+
   const [conflictOpen, setConflictOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [helpOpen, setHelpOpen] = useState(false)
@@ -1366,6 +1416,27 @@ export function VaultPane(): React.ReactElement {
         onClose={() => setSettingsOpen(false)}
         isDirty={isDirty}
       />
+
+      {/* Unasked-for, so it is the one dialog that must be trivially dismissable
+          in three different ways, one of which ends it permanently. */}
+      {update && (
+        <UpdateDialog
+          current={update.current}
+          latest={update.latest}
+          url={update.url}
+          changes={update.changes}
+          loading={update.loading}
+          onGet={() => setUpdate(null)}
+          onLater={() => setUpdate(null)}
+          onNever={() => {
+            setUpdate(null)
+            // Persisted before the dialog is gone, and failure is swallowed for
+            // the same reason the check is: this is not a moment to interrupt
+            // someone who has just asked to stop being interrupted.
+            void window.api.settings.setNotifyUpdates(false).catch(() => {})
+          }}
+        />
+      )}
 
       {/* Same treatment as Settings, and for the same reason it is safe: Help
           is read-only text and cannot reach the buffer, so it needs no dirty

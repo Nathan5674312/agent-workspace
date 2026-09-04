@@ -278,6 +278,14 @@ export type AppSettings = {
    * `mode: "off"` reads back as 'manual', which is what it will behave as.
    */
   approvals: Approvals
+  /**
+   * Whether the app may look for updates when it opens.
+   *
+   * True on a fresh install, and the launch check is the only thing it gates.
+   * Turning it off does not hide the manual button in Settings -> About: a
+   * person who declines to be told is not declining to be able to ask.
+   */
+  notifyUpdates: boolean
 }
 
 // ------------------------------------------------------------- claude (pane 1)
@@ -449,6 +457,7 @@ export const CH = {
   settingsApplyVaultDir: 'settings:apply-vault-dir',
   settingsSetAppearance: 'settings:set-appearance',
   settingsSetApprovals: 'settings:set-approvals',
+  settingsSetNotifyUpdates: 'settings:set-notify-updates',
 
   /**
    * THE ONLY CHANNEL THAT LEAVES THIS MACHINE without the user having typed to
@@ -626,6 +635,11 @@ export type Api = {
      * the gate; see src/main/consent.ts.
      */
     setApprovals(a: Approvals): Promise<AppSettings>
+    /**
+     * Turn the launch update check on or off. Persisted, because a refusal that
+     * forgets itself on restart is a nag rather than a preference.
+     */
+    setNotifyUpdates(on: boolean): Promise<AppSettings>
   }
   update: {
     /**

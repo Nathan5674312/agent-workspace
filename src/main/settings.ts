@@ -34,6 +34,8 @@ interface Stored {
   vaultDir?: string
   appearance?: Appearance
   approvals?: Approvals
+  /** Absent means true. Only an explicit refusal is written. */
+  notifyUpdates?: boolean
 }
 
 /** The last thing loaded from or written to disk. */
@@ -227,6 +229,10 @@ function state(): AppSettings {
     // is shown is what is actually being enforced, including when the file said
     // something the gate refused to honour.
     approvals: getApprovalsPolicy(),
+    // Absent is true: a fresh install is told about updates. Only "do not
+    // notify me" writes the key, so the file records a decision and never a
+    // default the user did not make.
+    notifyUpdates: current.notifyUpdates !== false,
   }
 }
 
@@ -235,6 +241,20 @@ function state(): AppSettings {
  * they are CSS custom properties and attributes, so nothing has to be rebuilt to
  * honour them and there is no unsaved state to lose.
  */
+/**
+ * Remember whether the launch check may run at all.
+ *
+ * This is the off switch for the ONE thing this app does on its own behalf, so
+ * it is stored beside the vault path rather than held in the renderer: a
+ * preference that forgets itself on restart is not a refusal, it is a nag with
+ * extra steps.
+ */
+function setNotifyUpdates(on: boolean): AppSettings {
+  current = { ...current, notifyUpdates: on }
+  save(current)
+  return state()
+}
+
 function setAppearance(a: Appearance): AppSettings {
   current = { ...current, appearance: sanitize(a) }
   save(current)
@@ -354,4 +374,5 @@ export function register(handle: Handle): void {
   handle(CH.settingsApplyVaultDir, () => applyVaultDir())
   handle(CH.settingsSetAppearance, (a: Appearance) => setAppearance(a))
   handle(CH.settingsSetApprovals, (a: Approvals) => setApprovals(a))
+  handle(CH.settingsSetNotifyUpdates, (on: boolean) => setNotifyUpdates(on))
 }

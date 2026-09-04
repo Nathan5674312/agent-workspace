@@ -74,6 +74,7 @@ const api: Api = {
     // it off — so the worst a compromised renderer achieves here is asking the
     // human MORE often.
     setApprovals: (a) => ipcRenderer.invoke(CH.settingsSetApprovals, a),
+    setNotifyUpdates: (on: boolean) => ipcRenderer.invoke(CH.settingsSetNotifyUpdates, on),
   },
   update: {
     // No argument, and nothing to give one: the feed URL is a constant in

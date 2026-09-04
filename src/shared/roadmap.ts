@@ -223,6 +223,19 @@ export const ROADMAP: FeatureGroup[] = [
         surface: 'ribbon:planner',
         note: 'ONE PAGE, TWO FEATURES, and they are deliberately not merged. The calendar is the view that used to be the database’s fourth mode, moved here unchanged: every note placed on the day its `updated:` claims, `parseYmd` refusing anything that is not an ISO day rather than guessing, the notes it cannot place listed under the grid rather than dropped — most of this vault has no usable date — and a jump to a month that has something in it. The daily notes stay in the sidebar, where they were: Daily/YYYY-MM-DD.md read off the vault tree, days that have notes marked, a missing day created from Daily/_Template.md following the instruction that template itself carries, dates local so an evening note is not filed as yesterday. THEY WERE MERGED ONCE AND IT WAS WRONG: rendering each day’s daily note inside that day’s calendar cell made a view over the whole vault into a writing surface for one folder, and put a create-this-day button on every empty day in the vault’s history. They read dates out of different places and answer different questions; they share a screen — the icon opens the calendar in the main area and leaves the notes in the sidebar — because that is where you look for either. The database is down to three views and honest about it: table, board and gallery genuinely are the same rows three ways, which a calendar over `updated:` never was. Not built: a template picker, any filename format other than this vault’s, week or day zoom levels, and any link between the sidebar picker’s month and the calendar’s.',
       },
+      {
+        label: 'Activity heatmap — when you worked, and on what',
+        status: 'planned',
+        /**
+         * NOT `ribbon:` YET, and that is enforced rather than remembered.
+         * `ribbon-roadmap.test.mjs` asserts every `ribbon:<id>` names an icon
+         * that actually exists, so an unbuilt surface cannot claim one here
+         * without failing the suite. It becomes `ribbon:activity` on the commit
+         * that adds the icon, not before.
+         */
+        surface: 'Planned ribbon surface',
+        note: 'A GitHub-contributions grid over the vault: a year of days, each shaded by how much was written that day, and clicking one lists what. Nathan\'s framing, and it is the part that makes it different from the Planner — GitHub counts COMMITS, this counts NOTES CREATED, so it answers "when was I working and on what" rather than "what is dated today". The Planner is the wrong home for it: that page is the current month plus today\'s daily note, a place you write, and this is a year-scale read-only view of history you scroll back through. Reference Nathan gave: github.com/luke321/vault-graph. THE HARD PART IS THE DATE, and this app already has an opinion about it worth reusing — `shared/facets.ts` derives its date facet FROM THE FILENAME and never from mtime, because "a checkout or a sync rewrites" mtime, which would repaint the whole heatmap the first time the vault was cloned or a Dropbox sync touched it. So the honest sources in order are: an ISO day in the filename (which `Daily/` already uses and `isDailyNote` already parses), then `updated:` in frontmatter via `parseYmd`, then birthtime — and birthtime is unavailable or wrong on several filesystems, so a day with no usable date must be shown as unknown rather than silently dropped or bucketed as today. That is the same rule the calendar follows, which lists what it cannot place under the grid instead of hiding it. Needs no new IPC: `vault.tree()` already walks every file and carries `kind`, so the grid is derivable from data the app loads at startup — the counting belongs in shared/ beside `facets.ts` where it can be tested against real filenames, and only the grid itself is renderer code.',
+      },
     ],
   },
   {

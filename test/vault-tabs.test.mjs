@@ -65,8 +65,21 @@ test('MainCanvas no longer owns view as local state', () => {
 
 test('every view switch goes through the callback, not a local setter', () => {
   assert.doesNotMatch(CANVAS, /\bsetView\(/, 'a setView call survived the lift')
+  /**
+   * WAS >= 8, NOW >= 5. The number fell because five call sites were DELETED
+   * with the second navigation strip: its Canvas, Graph, Database, Inbox and
+   * Roadmap buttons each called this. Those destinations are ribbon icons now
+   * and switch from VaultPane, which is the point of the change.
+   *
+   * What the assertion is actually for survives intact — that MainCanvas never
+   * keeps a local view state and always reports upward — and it is the
+   * `setView(` check above that carries it. This is the floor for the switches
+   * that legitimately remain: a note opened from the graph, the table, the
+   * inbox, the planner or the terminal's close, all of which have to bring the
+   * editor forward.
+   */
   assert.ok(
-    (CANVAS.match(/onViewChange\(/g) ?? []).length >= 8,
+    (CANVAS.match(/onViewChange\(/g) ?? []).length >= 5,
     'not every view switch was rewired to the callback',
   )
 })

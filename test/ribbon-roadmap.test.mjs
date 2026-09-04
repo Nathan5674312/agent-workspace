@@ -43,13 +43,33 @@ const src = (name) => readFileSync(join(PANE, name), 'utf8')
 
 test('no ribbon: surface points at an id the ribbon does not have', () => {
   const ids = [...src('LeftRibbon.tsx').matchAll(/id: '([a-z]+)'/g)].map((m) => m[1])
-  // EIGHT. It was nine until `plugins` was removed on 2026-08-31, and it stays
-  // an EXACT count rather than a floor for the reason it always was: adding or
-  // dropping an icon should be a deliberate act that shows up right here.
-  assert.equal(ids.length, 8, 'expected the eight ribbon views')
+  /**
+   * EIGHT. It was eight of three different kinds; it is eight of ONE kind now —
+   * the surfaces that are about your notes, and nothing else. Still an EXACT
+   * count rather than a floor, for the reason it always was: adding or dropping
+   * an icon should be a deliberate act that shows up right here.
+   *
+   * The roadmap surface is not among them on purpose; `review-s2` asserts both
+   * that it is absent and that Help still opens it.
+   */
+  assert.equal(ids.length, 8, 'expected the eight surfaces')
+  assert.ok(!ids.includes('roadmap'), 'the roadmap is a ribbon icon again')
   for (const f of ALL_FEATURES.filter((f) => f.surface?.startsWith('ribbon:'))) {
     const id = f.surface.slice('ribbon:'.length)
     assert.ok(ids.includes(id), `roadmap points at ribbon:${id}, which no icon declares`)
+  }
+  /**
+   * The other half of the same guarantee, and it is new because the sidebar is
+   * new. Files, Search and Bookmarks stopped being ribbon icons, so the roadmap
+   * entries pointing at `ribbon:files` and friends were left describing a
+   * control that no longer existed. They say `sidebar:` now, and this keeps
+   * them honest the same way.
+   */
+  const finders = [...src('SidebarFinder.tsx').matchAll(/id: '([a-z]+)'/g)].map((m) => m[1])
+  assert.equal(finders.length, 3, 'expected files, search and bookmarks')
+  for (const f of ALL_FEATURES.filter((f) => f.surface?.startsWith('sidebar:'))) {
+    const id = f.surface.slice('sidebar:'.length)
+    assert.ok(finders.includes(id), `roadmap points at sidebar:${id}, which no finder declares`)
   }
 })
 
@@ -77,10 +97,19 @@ test('the sidebar still uses a ternary, so its else cannot be empty by accident'
   // fall-through a visible branch that review-s2-vault-pane's exhaustiveness
   // test can reason about.
   const code = src('VaultPane.tsx')
-  assert.match(code, /activeRibbon === 'files' \?/, 'the sidebar must use a ternary')
+  assert.match(code, /finder === 'search' \?/, 'the sidebar must use a ternary')
   assert.doesNotMatch(
     code,
-    /activeRibbon === 'files' &&/,
+    /finder === 'search' &&/,
     'the && form leaves the else empty — that is the bug this file exists for',
   )
+  /**
+   * The pair that caused the original confusion must not come back. Two
+   * variables for one selection is what made "which icon is lit" and "which
+   * panel is showing" able to disagree; see the comment in VaultPane where
+   * `finder` is declared.
+   */
+  const live = code.replace(/\/\*[\s\S]*?\*\//g, '').replace(/\/\/.*$/gm, '')
+  assert.doesNotMatch(live, /activeRibbon/, 'the ribbon owns a sidebar panel again')
+  assert.doesNotMatch(live, /ribbonPressed/, 'the split highlight state is back')
 })

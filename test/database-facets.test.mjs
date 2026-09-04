@@ -77,10 +77,28 @@ test('a failed graph load does not fail the database', () => {
   // Loaded separately and after the notes, with its own catch. If it shared the
   // notes try/catch, a graph error would render "Database failed:" over a table
   // that had loaded perfectly well.
-  assert.match(MAIN, /setNotes\(await getNotes\(\)\)/)
-  const after = MAIN.slice(MAIN.indexOf('handleSwitchToDatabase'))
-  assert.match(after, /setGraph\(await getGraph\(\)\)/, 'the database never fetches the graph')
-  assert.match(after, /if \(graph\) return/, 'it refetches a graph it already has')
+  /**
+   * BOTH LOADS ARE EFFECTS NOW, not the body of one onClick.
+   *
+   * They moved when the second navigation strip was deleted: the database
+   * became a ribbon surface, which is a second way in, and a load that lives on
+   * one control does not run from the other. The graph view had exactly this
+   * bug already — see the effect comments in MainCanvas — so the fix was
+   * applied to all three rather than waiting for it to be reported twice more.
+   *
+   * The separation this test exists for is unchanged and is what is checked:
+   * the graph is fetched by its OWN effect with its OWN catch, so a graph that
+   * will not build costs the facet column and not the table.
+   */
+  assert.match(MAIN, /if \(live\) setNotes\(n\)/, 'the database never fetches its notes')
+  const after = MAIN.slice(MAIN.indexOf("if (view !== 'database' || graph) return"))
+  assert.ok(after.length > 0, 'the graph fetch is not its own view-keyed effect')
+  assert.match(after, /if \(live\) setGraph\(g\)/, 'the database never fetches the graph')
+  assert.doesNotMatch(
+    MAIN.slice(MAIN.indexOf("if (view !== 'database') return"), MAIN.indexOf("|| graph) return")),
+    /getGraph\(\)/,
+    'the graph shares the notes effect, so its failure would fail the table',
+  )
 })
 
 test('the database is handed the graph it needs', () => {

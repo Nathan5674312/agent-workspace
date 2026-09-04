@@ -63,7 +63,7 @@ export const ROADMAP: FeatureGroup[] = [
       {
         label: 'Tree view left-side navigation',
         status: 'built',
-        surface: 'ribbon:files',
+        surface: 'sidebar:files',
         note: 'Folder tree follows Windows junctions and terminates on link cycles.',
       },
       {
@@ -84,7 +84,7 @@ export const ROADMAP: FeatureGroup[] = [
       {
         label: 'Fast search',
         status: 'partial',
-        surface: 'ribbon:search',
+        surface: 'sidebar:search',
         note: "The Search icon opens a real panel: a query box, results grouped by note, and clicking a line opens that note ON that line. Name matches rank first, then notes by how many lines matched, then path, so the order is stable between identical queries rather than depending on directory-walk timing. Matching is case-insensitive substring and the query is NEVER compiled as a pattern, because people type `.` and `(` and a regex build would either match everything or throw. One hit per LINE, not per occurrence. PARTIAL FOR ONE HONEST REASON: it is a linear scan, not an index. vault.search re-reads the vault per query because scan() deliberately throws each note text away after extracting wikilink names, and its own comment says why (peak memory), so there was nothing cached to grep. Three things keep that bounded: a two-character floor shared with the main process so both agree what is worth running, a budget that stops the walk once enough notes have matched, and running on Enter rather than per keystroke. That last one is not a UX preference: this pane bans setTimeout outright, and weakening a real guard so new code can pass it is how a guard stops being one. Roadmap/02 still settles on SQLite FTS5 plus sqlite-vec, and search() in src/main/vault.ts is the one function that changes when it lands. It applies the SAME walk and exclusions as tree(), so a note the explorer hides, the database omits and the graph does not draw cannot surface here either. Watched running 2026-08-31 against the real vault. 16 assertions in test/search.test.mjs, the last of which runs six queries over 251 real notes and asserts all 2314 hit offsets slice back to the query, because an offset one out does not throw, it highlights the wrong word on every row.",
       },
       {
@@ -199,7 +199,7 @@ export const ROADMAP: FeatureGroup[] = [
         surface: 'Top-right activity panel',
         note: 'THE SOURCE IS THE POINT. The first design had agents announce themselves into a log, which was wrong for one reason: anything an agent writes about itself it can omit, so the display would show what an agent chose to admit. Claude Code already appends a transcript per session, and THE HARNESS WRITES IT, not the model — the guarantee is not honesty but completeness, since a model cannot call a tool without the call appearing. shared/transcript.ts parses those lines; main/activity.ts tails every Claude config directory on the machine (this one has two accounts, deliberately) from a saved byte offset, because one session here is 44 MB and re-reading it on a timer is not viable. Two privacy boundaries are enforced in the PARSER rather than trusted to the view: tool metadata only, never message text or thinking or tool results, because a transcript holds whole conversations; and a shell command reduced to program and subcommand, never its arguments, because those carry tokens and a status panel will eventually be on screen during a recording. That second rule was first written as "everything up to the first flag" and a real transcript disproved it within a minute — cd "C:/Users/.../scratchpad" put a filesystem layout on screen, because a quoted path is not a flag. The panel is top-right and ambient, deliberately NOT the bottom-right consent corner, whose founding rule is that silence is the default; an activity feed is constant by nature and merging the two would spend the consent surface silence on status updates. It renders nothing at all when no agent is running, so an ordinary notes user never meets the agent layer. GAP: it reports what an agent DID, not what it intends. Pipeline steps can say what is next because run.ts knows; freeform reading cannot, and guessing would be presenting a prediction as a fact. WHERE, as well as what: each card carries a mini map — shared/agentTrail.ts — showing the vault graph framed on the notes the agent is using, with the walked links lit and flowing and the surrounding notes dim around them. It is the graph ZOOMED, not a diagram assembled from the visited notes; the first version laid them on an ellipse of their own and looked nothing like the graph view, so this one brings a hop of neighbourhood and runs the same kind of force layout. It will not draw an edge the vault does not have: a move between two unlinked notes is real, so it is shown as a dotted jump rather than as a connection that does not exist. The open and close behaviour Nathan asked for turned out to be ONE rule — the trail is built only from activity inside a 60s window, so an agent that never came here has nothing to draw and an agent that left and kept working ages out of it, with no "was it ever open" flag to fall out of sync. Watched working on 2026-08-24: two lit notes with the travelled edge dashed between them, four of six context notes inside the frame, and the rest cropped by the camera.',
       },
-      { label: 'Contextual retrieval, not just keyword search', status: 'planned', surface: 'ribbon:search' },
+      { label: 'Contextual retrieval, not just keyword search', status: 'planned', surface: 'sidebar:search' },
       { label: 'Autonomous organization and curation', status: 'planned', surface: 'Inbox tab', note: 'The Inbox already shows agent-proposed filing; nothing acts on it.' },
     ],
   },
@@ -209,7 +209,7 @@ export const ROADMAP: FeatureGroup[] = [
       {
         label: 'Bookmark notes, shared with Obsidian',
         status: 'built',
-        surface: 'ribbon:bookmarks',
+        surface: 'sidebar:bookmarks',
         note: 'Stored in the .obsidian/bookmarks.json that Obsidian itself uses rather than a second list, so a bookmark made in either program shows in both. Writes re-read the file and save under its mtime, so a concurrent Obsidian write raises a conflict instead of dropping what it added. Saved searches and graph bookmarks are preserved and shown, but only files open from here. The honest gap: a RUNNING Obsidian rewrites that file from memory, so a bookmark added while it is open can be overwritten by it.',
       },
     ],
@@ -220,7 +220,7 @@ export const ROADMAP: FeatureGroup[] = [
       {
         label: 'Planner — daily notes and the calendar, one page',
         status: 'built',
-        surface: 'ribbon:calendar',
+        surface: 'ribbon:planner',
         note: 'ONE PAGE, TWO FEATURES, and they are deliberately not merged. The calendar is the view that used to be the database’s fourth mode, moved here unchanged: every note placed on the day its `updated:` claims, `parseYmd` refusing anything that is not an ISO day rather than guessing, the notes it cannot place listed under the grid rather than dropped — most of this vault has no usable date — and a jump to a month that has something in it. The daily notes stay in the sidebar, where they were: Daily/YYYY-MM-DD.md read off the vault tree, days that have notes marked, a missing day created from Daily/_Template.md following the instruction that template itself carries, dates local so an evening note is not filed as yesterday. THEY WERE MERGED ONCE AND IT WAS WRONG: rendering each day’s daily note inside that day’s calendar cell made a view over the whole vault into a writing surface for one folder, and put a create-this-day button on every empty day in the vault’s history. They read dates out of different places and answer different questions; they share a screen — the icon opens the calendar in the main area and leaves the notes in the sidebar — because that is where you look for either. The database is down to three views and honest about it: table, board and gallery genuinely are the same rows three ways, which a calendar over `updated:` never was. Not built: a template picker, any filename format other than this vault’s, week or day zoom levels, and any link between the sidebar picker’s month and the calendar’s.',
       },
     ],

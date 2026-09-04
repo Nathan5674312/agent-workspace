@@ -9,6 +9,7 @@ import { PlannerView } from './PlannerView.js'
 import { InboxView } from './InboxView.js'
 import { RoadmapView } from './RoadmapView.js'
 import { VersionsView } from './VersionsView.js'
+import { TerminalView } from './TerminalView.js'
 import { PaneMenu, PaneMenuItem } from './PaneMenu.js'
 import { BookmarkToggleItem } from './BookmarksView.js'
 import type { VaultNoteMeta, InboxItem } from '../../../shared/notemeta.js'
@@ -35,6 +36,16 @@ export type MainView =
   | 'roadmap'
   | 'canvas'
   | 'planner'
+  /**
+   * The terminal is a SURFACE now, not a sidebar panel.
+   *
+   * It was rendered into the ~250px sidebar column, which is a strange place
+   * for the one feature in this app that can reach the operating system: it is
+   * a log you read and a prompt you type into, and both wanted the width. Under
+   * the ribbon's rule — the ribbon picks the surface, the sidebar finds notes —
+   * it could not have stayed there anyway, because it finds nothing.
+   */
+  | 'terminal'
 
 export interface MainCanvasProps {
   note: VaultNoteBody | null
@@ -184,53 +195,81 @@ export function MainCanvas({
     }
   }, [view])
 
-  /** The tab now only changes the view; the effect above does the loading. */
-  const handleSwitchToGraph = () => {
-    onViewChange('graph')
-  }
+  /**
+   * DATABASE AND INBOX LOAD FROM THE VIEW TOO, for the reason the graph effect
+   * above already documents at length.
+   *
+   * Both used to load inside an onClick — `handleSwitchToDatabase` and
+   * `handleSwitchToInbox`, the two buttons in the strip that is now gone. The
+   * graph had exactly that shape once, and its comment records what happened:
+   * "the moment a second entry point existed (the Graph ribbon icon...) the
+   * view rendered with `graph` still null and said 'No graph data' over a vault
+   * with 470 nodes in it. The tab worked, the icon did not, and nothing about
+   * the code said why."
+   *
+   * Promoting these three surfaces into the ribbon creates that second entry
+   * point for the other two. Keying the load on the view rather than on one
+   * control is what stops the same bug landing twice more, and it is why the
+   * strip could be deleted without taking the data with it.
+   */
+  useEffect(() => {
+    if (view !== 'database') return
+    let live = true
+    setLoadingNotes(true)
+    setNotesError(null)
+    /**
+     * Always re-fetch, never memo up here.
+     *
+     * A cached note list is worse than a cached graph, not better. Frontmatter
+     * is exactly what this view exists to show, so an edit to `status:` that
+     * the table keeps showing the old value for is the stale-status-board
+     * failure the database view was built to end.
+     *
+     * There is NO cache behind this. `vault.ts` memoises `graph()` only
+     * (GRAPH_TTL_MS, invalidated by save); `list()` does a fresh round trip on
+     * every switch. Affordable at 258 notes and the correct default for a view
+     * whose whole job is to be current — but do not read this as "something
+     * upstream is caching for me".
+     */
+    getNotes()
+      .then((n) => {
+        if (live) setNotes(n)
+      })
+      .catch((e: unknown) => {
+        if (live) setNotesError(String(e))
+      })
+      .finally(() => {
+        if (live) setLoadingNotes(false)
+      })
+    return () => {
+      live = false
+    }
+  }, [view])
 
   /**
-   * Same contract as the graph: always re-fetch, never memo up here.
+   * The graph too, for derived facets — but SEPARATELY, and its failure is not
+   * the table's failure.
    *
-   * A cached note list is worse than a cached graph, not better. Frontmatter is
-   * exactly what this view exists to show, so an edit to `status:` that the
-   * table keeps showing the old value for is the stale-status-board failure the
-   * database view was built to end.
-   *
-   * There is NO cache behind this. `vault.ts` memoises `graph()` only
-   * (GRAPH_TTL_MS, invalidated by save); `list()` does a fresh HTTP round trip
-   * to the note server on every tab switch. That is affordable at 258 notes and
-   * is the correct default for a view whose whole job is to be current -- but
-   * do not read this as "something upstream is caching for me".
+   * Facets are an extra column; the database is a working view without them, so
+   * a graph that will not build must degrade that column rather than take the
+   * whole table down with an error nobody can act on. Skipped entirely when the
+   * graph is already loaded, since the graph view and this share one copy and
+   * it is memoised in main for 30 seconds anyway.
    */
-  const handleSwitchToDatabase = async () => {
-    onViewChange('database')
-    try {
-      setLoadingNotes(true)
-      setNotesError(null)
-      setNotes(await getNotes())
-    } catch (e) {
-      setNotesError(String(e))
-    } finally {
-      setLoadingNotes(false)
+  useEffect(() => {
+    if (view !== 'database' || graph) return
+    let live = true
+    getGraph()
+      .then((g) => {
+        if (live) setGraph(g)
+      })
+      .catch(() => {
+        /* the facet column degrades to folder and date, which need no graph */
+      })
+    return () => {
+      live = false
     }
-    /**
-     * The graph too, for derived facets — but SEPARATELY and after.
-     *
-     * Not awaited alongside the notes, and its failure is not the table's
-     * failure. Facets are an extra column; the database is a working view
-     * without them, so a graph that will not build must degrade that column
-     * rather than take the whole table down with an error nobody can act on.
-     * Skipped entirely if the graph is already loaded, since the graph view and
-     * this share one copy and it is memoised in main for 30 seconds anyway.
-     */
-    if (graph) return
-    try {
-      setGraph(await getGraph())
-    } catch {
-      /* the facet column degrades to folder and date, which need no graph */
-    }
-  }
+  }, [view, graph])
 
   /**
    * THE "BRING THE EDITOR FORWARD" EFFECT USED TO LIVE HERE. It watched the
@@ -255,18 +294,25 @@ export function MainCanvas({
    * have: this queue's whole job is to tell you what arrived since you last
    * looked. A cached inbox is a lie about the present.
    */
-  const handleSwitchToInbox = async () => {
-    onViewChange('inbox')
-    try {
-      setLoadingInbox(true)
-      setInboxError(null)
-      setInbox(await getInbox())
-    } catch (e) {
-      setInboxError(String(e))
-    } finally {
-      setLoadingInbox(false)
+  useEffect(() => {
+    if (view !== 'inbox') return
+    let live = true
+    setLoadingInbox(true)
+    setInboxError(null)
+    getInbox()
+      .then((i) => {
+        if (live) setInbox(i)
+      })
+      .catch((e: unknown) => {
+        if (live) setInboxError(String(e))
+      })
+      .finally(() => {
+        if (live) setLoadingInbox(false)
+      })
+    return () => {
+      live = false
     }
-  }
+  }, [view])
 
   return (
     <div className="vault-main-canvas">
@@ -308,12 +354,22 @@ export function MainCanvas({
               ? 'Planner'
               : view === 'inbox'
                 ? 'Inbox'
-                : view === 'roadmap'
+                : view === 'terminal'
+                ? 'Terminal'
+              : view === 'roadmap'
                   ? 'Roadmap'
                   : view === 'versions'
                     ? // Still the note's own view, so it keeps the note's name.
                       `${note?.title ?? 'No note selected'} — versions`
-                    : (note?.title ?? 'No note selected')}
+                    : /* Empty, not "No note selected".
+                       *
+                       * This strip is a note's NAME. With no note there is no
+                       * name, and the editor below already says so — the two
+                       * sat 470px apart saying the same six words, which reads
+                       * as the app repeating itself rather than as one answer.
+                       * The body keeps the message because it is the half that
+                       * can also say what to do about it. */
+                      (note?.title ?? '')}
         </span>
         {/* This button had no onClick AND no `disabled`, so it took focus,
             painted the app's hover and press feedback, announced itself to a
@@ -348,75 +404,46 @@ export function MainCanvas({
         </PaneMenu>
       </div>
 
-      <div className="vault-view-controls">
-        {/**
-         * THE STRIP IS THE PLACES THIS USER ACTUALLY WORKS, not every view the
-         * app has. Canvas leads because that is where the work is right now.
-         *
-         * EDITOR HAS NO BUTTON AND IS STILL REACHABLE. Opening a note from
-         * anywhere — the tree, a wikilink, a bookmark, the nav trail — runs the
-         * `if (openPath) onViewChange('editor')` effect above and brings the
-         * editor forward. A button that only ever showed the note you already
-         * opened was a row of pixels doing nothing.
-         *
-         * VERSIONS MOVED TO THE LEFT RIBBON. It is about the open note rather
-         * than about the vault, and it is reached for rarely enough that it
-         * belongs with the icons.
-         *
-         * No loading state: CanvasView reads its own board from `canvasPath`,
-         * unlike Graph, Database and Inbox which fetch up here first.
-         */}
-        <button
-          className={`vault-view-button ${view === 'canvas' ? 'active' : ''}`}
-          onClick={() => onViewChange('canvas')}
-        >
-          Canvas
-        </button>
-        <button
-          className={`vault-view-button ${view === 'graph' ? 'active' : ''}`}
-          onClick={handleSwitchToGraph}
-          disabled={loadingGraph}
-        >
-          {loadingGraph ? 'Loading...' : 'Graph'}
-        </button>
-        <button
-          className={`vault-view-button ${view === 'database' ? 'active' : ''}`}
-          onClick={handleSwitchToDatabase}
-          disabled={loadingNotes}
-        >
-          {loadingNotes ? 'Loading...' : 'Database'}
-        </button>
-        <button
-          className={`vault-view-button ${view === 'inbox' ? 'active' : ''}`}
-          onClick={handleSwitchToInbox}
-          disabled={loadingInbox}
-        >
-          {loadingInbox ? 'Loading...' : 'Inbox'}
-          {/* The count is the point of a queue: it has to be legible without
-              opening the tab, or nobody opens the tab. Only shown once loaded
-              — a badge that says 0 before it has looked is a false all-clear. */}
-          {inbox && inbox.length > 0 && (
-            <span className="vault-view-badge">{inbox.length}</span>
-          )}
-        </button>
-        {/* Roadmap needs no loading state and no data plumbing: it renders a
-            static manifest from shared/roadmap.ts. Last in the strip because it
-            is about the app, not about the vault. */}
-        <button
-          className={`vault-view-button ${view === 'roadmap' ? 'active' : ''}`}
-          onClick={() => onViewChange('roadmap')}
-        >
-          Roadmap
-        </button>
-        {isDirty && (
+      {/**
+       * THE SECOND NAVIGATION STRIP USED TO BE HERE, and deleting it is the
+       * point of this change rather than a side effect of it.
+       *
+       * It was five text buttons — Canvas, Graph, Database, Inbox, Roadmap —
+       * sitting inside the main area while a column of icons down the left
+       * edge did the same job for a different, overlapping set. Canvas and
+       * Graph were in BOTH, four inches apart, one drawn as an icon and one as
+       * bare text, so the two controls for one destination did not read as
+       * related. Database, Inbox and Roadmap were ONLY here, which made them
+       * invisible until you had already arrived somewhere else.
+       *
+       * All five are ribbon icons now, beside the surfaces they were separated
+       * from for no stated reason. `LeftRibbon.tsx` holds the rule.
+       *
+       * The unsaved-edits notice stays, because it is not navigation: it
+       * answers the question the surface switch raises. It renders only when
+       * there is something to say, so the row does not exist otherwise —
+       * unlike the strip, which was 40px of chrome on every screen.
+       */}
+      {isDirty && (
+        <div className="vault-view-notice">
           <span className="vault-canvas-dirty-warning">
             Unsaved changes are kept while you switch views
           </span>
-        )}
-      </div>
+        </div>
+      )}
 
       <div className="vault-view-content">
-        {view === 'roadmap' ? (
+        {view === 'terminal' ? (
+          /**
+           * Full width now, where it used to be squeezed into the ~250px
+           * sidebar. It is a rendered log plus a prompt — see the header of
+           * TerminalView — and both wanted the room the sidebar could not give.
+           *
+           * Closing returns to the note rather than to a sidebar panel, which
+           * is the only thing "close" can mean once this is a surface.
+           */
+          <TerminalView onClose={() => onViewChange('editor')} />
+        ) : view === 'roadmap' ? (
           <RoadmapView />
         ) : view === 'canvas' ? (
           <CanvasView
@@ -519,6 +546,19 @@ export function MainCanvas({
           />
         ) : graphError ? (
           <div className="vault-graph-error">Graph failed: {graphError}</div>
+        ) : loadingGraph && !graph ? (
+          /**
+           * The strip button used to carry this, as its own label going
+           * "Loading...". Deleting the strip would have deleted the only
+           * feedback a 470-node vault gives while it builds, so it moves into
+           * the view rather than out of the app.
+           *
+           * `&& !graph` so a re-fetch does not blank a graph that is already on
+           * screen — the effect above re-runs on every entry to this view, and
+           * replacing a drawn layout with a spinner each time would be a
+           * regression the button never had.
+           */
+          <div className="vault-graph-loading">Building the graph...</div>
         ) : (
           <GraphView
             graph={graph}

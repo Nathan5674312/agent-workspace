@@ -475,3 +475,124 @@ export function toMeta(raw: unknown): VaultNoteMeta | null {
     reachRoot: typeof o.reachRoot === 'string' && o.reachRoot ? o.reachRoot : null,
   }
 }
+
+// ─────────────────────────────────────────────── the database's own logic
+/**
+ * MOVED OUT OF DatabaseView.tsx, and the reason is written in that file:
+ *
+ *   "statusTone lives in shared/notemeta.ts, not here: it is logic about
+ *    frontmatter values, the same as areaOf, and a .tsx module cannot be
+ *    imported by the node --test suite (type stripping does not handle JSX)."
+ *
+ * That rule was already stated and these three were on the wrong side of it —
+ * sorting, bucketing and grouping are logic about frontmatter values, and
+ * sitting in a .tsx made them untestable by construction. They depend on
+ * nothing React; `areaOf`, `typeFamily` and `monthOf` were already here.
+ */
+
+/** The value a row sorts by, for one column. */
+export type SortKey =
+  | 'title' | 'area' | 'type' | 'status' | 'updated' | 'links' | 'backlinks'
+
+/** The axis a table is grouped on. */
+export type GroupKey =
+  | 'area' | 'family' | 'type' | 'status' | 'tag' | 'facet' | 'folder'
+  | 'month' | 'linked' | 'none'
+
+/**
+ * The four type families' human labels.
+ *
+ * Split from the icon map that stays in DatabaseView.tsx: a label is a string
+ * and belongs with the other frontmatter logic, an icon is a React component
+ * and cannot come here. `groupValues` needs only the label.
+ */
+export const FAMILY_LABEL: Record<Exclude<TypeFamily, 'none'>, string> = {
+  structure: 'Structure',
+  work: 'Work',
+  reference: 'Reference',
+  routine: 'Routine',
+}
+
+/**
+ * How heavily a note is referenced, as a bucket.
+ *
+ * The labels lead with digits so `localeCompare(numeric: true)` in the group
+ * sort orders them 1–2, 3–5, 6–10, 11+ and drops "Unreferenced" last.
+ */
+export function linkBucket(backlinks: number): string {
+  if (backlinks === 0) return 'Unreferenced'
+  if (backlinks <= 2) return '1–2 backlinks'
+  if (backlinks <= 5) return '3–5 backlinks'
+  if (backlinks <= 10) return '6–10 backlinks'
+  return '11+ backlinks'
+}
+
+/** The value a row sorts by, for one column. */
+export function sortField(n: VaultNoteMeta, key: SortKey): string {
+  if (key === 'area') return areaOf(n)
+  if (key === 'title') return n.title
+  const v = n[key]
+  // The counts sort correctly as strings BECAUSE the comparator passes
+  // `numeric: true` — that collation reads "42" as forty-two, so 9 sorts before
+  // 42 rather than after it. Returning a number here instead would need a
+  // second comparator for two columns.
+  return typeof v === 'number' ? String(v) : v
+}
+
+/**
+ * The buckets one row belongs to, for the current grouping.
+ *
+ * Returns an ARRAY, not a string, because `tag` is multi-valued: a note tagged
+ * `[design, ui]` belongs under both, exactly as a Notion multi-select does.
+ * Every other axis returns one entry. This is also why the row count shown in
+ * the toolbar comes from the filtered rows and not from summing the groups —
+ * under Tag those two numbers legitimately differ.
+ */
+export function groupValues(
+  n: VaultNoteMeta,
+  key: GroupKey,
+  facetsOf: (path: string) => string[],
+): string[] {
+  switch (key) {
+    case 'area': return [areaOf(n)]
+    case 'family': {
+      const f = typeFamily(n.type)
+      return [f === 'none' ? '' : FAMILY_LABEL[f]]
+    }
+    case 'type': return [n.type]
+    case 'status': return [n.status]
+    case 'tag': return n.tags.length ? n.tags : ['']
+    // Multi-valued like tags, and for the same reason: a note sits in several
+    // folders' worth of ancestry and can be both dated and a hub.
+    case 'facet': {
+      const f = facetsOf(n.path)
+      return f.length ? f : ['']
+    }
+    case 'folder': return [n.folder]
+    case 'month': return [monthOf(n.updated)]
+    case 'linked': return [linkBucket(n.backlinks)]
+    default: return ['']
+  }
+}
+
+/**
+ * How many captures are waiting in `Inbox/`, straight off the folder tree.
+ *
+ * The badge on the ribbon needs a NUMBER, and `useVault().getInbox()` gets it
+ * by reading and parsing every file in that folder — 33 reads on this vault, on
+ * every launch and every tree reload, for one digit. Its own comment concedes
+ * the shape ("Ten reads is affordable"), and it was written when nothing called
+ * it until you opened the Inbox.
+ *
+ * The tree is already in memory and already knows what is in the folder, so the
+ * count is free. It agrees with `getInbox().length` because that function
+ * filters the same way — `kind === 'note'` under `Inbox/` — and then maps every
+ * one it could read. The only divergence is a file that fails to READ, which
+ * getInbox drops and this counts; a note in the tree that cannot be opened is
+ * rare enough, and wrong by one is a better trade than 33 reads a launch.
+ */
+export function inboxCount(tree: { children?: { kind: string; name: string; children?: { kind: string }[] }[] } | null): number {
+  const dir = tree?.children?.find((c) => c.kind === 'folder' && c.name === 'Inbox')
+  if (!dir) return 0
+  return (dir.children ?? []).filter((c) => c.kind === 'note').length
+}

@@ -27,7 +27,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import { useVault } from './useVault.js'
 import { LeftRibbon } from './LeftRibbon.js'
 import { SidebarFinder, type Finder } from './SidebarFinder.js'
-import { CanvasList } from './CanvasView.js'
+import { CanvasList } from './CanvasList.js'
 import { SidebarResizer } from './SidebarResizer.js'
 import { SearchView } from './SearchView.js'
 import { BookmarksView } from './BookmarksView.js'
@@ -77,7 +77,7 @@ import {
   type WikilinkRef,
 } from './helpers.js'
 import type { VaultNoteBody } from '../../../shared/ipc.js'
-import { setFrontmatter } from '../../../shared/notemeta.js'
+import { setFrontmatter, inboxCount as inboxCountOf } from '../../../shared/notemeta.js'
 import { listTemplates, type Template } from '../../../shared/templates.js'
 import { startupNote } from '../../../shared/startup.js'
 import {
@@ -116,17 +116,6 @@ export function VaultPane(): React.ReactElement {
    * other because they no longer describe the same thing.
    */
   const [finder, setFinder] = useState<Finder>('files')
-  /**
-   * How many items are waiting in the inbox, for the ribbon's badge. `null`
-   * until the first read lands, so the badge is absent rather than reading 0.
-   *
-   * Read HERE and not in <MainCanvas> because the badge has to be right when
-   * you are not on the inbox — that is the entire point of a queue count. The
-   * inbox view keeps its own fetch: it needs the items, this needs a number,
-   * and the read is cheap enough that sharing one would mean threading loading
-   * and error state through the ribbon to save a call nobody notices.
-   */
-  const [inboxCount, setInboxCount] = useState<number | null>(null)
   const [selectedNote, setSelectedNote] = useState<VaultNoteBody | null>(null)
   /**
    * The open note's path, readable AFTER an await.
@@ -233,33 +222,26 @@ export function VaultPane(): React.ReactElement {
   }, [vault.tree])
 
   /**
-   * Keyed on the tree, so the count re-reads when the vault reloads — which is
-   * what happens after a note is created, moved, or written by the agent, and
-   * therefore exactly when the queue can have changed. `live` cancels a late
-   * response the same way every async effect in this pane does.
-   */
-  useEffect(() => {
-    let live = true
-    vault
-      .getInbox()
-      .then((items) => {
-        if (live) setInboxCount(items.length)
-      })
-      .catch(() => {
-        // A count that cannot be read is not an error the user can act on, and
-        // the Inbox surface reports its own failure properly when opened. The
-        // badge simply stays absent rather than claiming a number.
-      })
-    return () => {
-      live = false
-    }
-  }, [vault.tree])
-
-  /**
    * The primary canvas's view IS the active tab's view. Derived, not mirrored:
    * a second copy in state would drift the moment a tab switch raced a view
    * click, and there is no state here that the tabs array does not already hold.
    */
+  /**
+   * The inbox badge's number. DERIVED from the tree, not fetched.
+   *
+   * This was a `useState` plus an effect calling `vault.getInbox()`, which
+   * reads and parses every file in `Inbox/` — 33 reads on this vault, at every
+   * launch and after every create, move and agent write, to produce one digit.
+   * The tree is already here and already lists that folder, so the count costs
+   * nothing and cannot go stale against the tree it is read from.
+   *
+   * `null` while there is no tree yet, which keeps the distinction the ribbon
+   * documents: null is "has not looked", 0 is "looked, nothing waiting". They
+   * draw the same — no badge — but only one of them is honest before the first
+   * read lands.
+   */
+  const inboxCount = vault.tree ? inboxCountOf(vault.tree) : null
+
   const view: MainView = tabs.find((t) => t.id === activeTabId)?.view ?? 'editor'
 
   /**

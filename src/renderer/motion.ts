@@ -59,11 +59,35 @@ export function rubberband(overshoot: number, dimension: number, constant = 0.55
  * dead before release still reports the speed it had mid-drag, and the surface
  * flies away from a finger the user had already parked — the single most
  * common way velocity handoff feels broken.
+ *
+ * THE WINDOW ENDS AT `now`, NOT AT THE LAST SAMPLE, and that distinction is the
+ * whole reason a stationary release used to fling.
+ *
+ * A pointer that is not moving emits no `pointermove`, so the sample history
+ * simply STOPS. Measuring across the samples' own span then divides the travel
+ * of a moving hand by the time that hand spent moving, and reports the mid-drag
+ * speed no matter how long ago the drag ended — hold a graph still for a second
+ * and let go, and it leaves at the speed it had a second earlier. Nothing in the
+ * history says the hand stopped; the ABSENCE of history is what says it, and
+ * only a clock reading at release can see that absence.
+ *
+ * So the divisor is `now - first.t` rather than `last.t - first.t`. The
+ * stationary tail is charged to the measurement, which makes the reported speed
+ * fall off smoothly as the hand rests and reach exactly zero once the whole
+ * window is older than `now`.
  */
 export class VelocityTracker {
   private samples: { x: number; y: number; t: number }[] = []
 
-  constructor(private windowMs = 100) {}
+  private windowMs: number
+
+  // Declared and assigned rather than a `private windowMs` parameter property.
+  // Node runs this suite with --experimental-strip-types, which only ERASES
+  // types; a parameter property needs an assignment emitted, so it throws
+  // ERR_UNSUPPORTED_TYPESCRIPT_SYNTAX at import and takes the whole run with it.
+  constructor(windowMs = 100) {
+    this.windowMs = windowMs
+  }
 
   clear(): void {
     this.samples = []
@@ -75,12 +99,24 @@ export class VelocityTracker {
     while (this.samples.length > 2 && this.samples[0].t < cutoff) this.samples.shift()
   }
 
-  /** px/s on each axis. Zero when there is not enough history to be sure. */
-  velocity(): { vx: number; vy: number } {
-    if (this.samples.length < 2) return { vx: 0, vy: 0 }
-    const first = this.samples[0]
+  /**
+   * px/s on each axis. Zero when there is not enough recent history to be sure.
+   *
+   * `now` defaults to the moment of the call, which for the only caller that
+   * matters is the moment of release. It is a parameter so a test can state the
+   * release time instead of racing the clock.
+   */
+  velocity(now = performance.now()): { vx: number; vy: number } {
+    const cutoff = now - this.windowMs
+    // `add` keeps a floor of two samples regardless of age, so the array is not
+    // the window — the window is whichever of them are still recent.
+    const at = this.samples.findIndex((s) => s.t >= cutoff)
+    // Nothing inside the window, or a single point, is a hand that has been
+    // still for at least a window. There is no flick to honour.
+    if (at < 0 || at === this.samples.length - 1) return { vx: 0, vy: 0 }
+    const first = this.samples[at]
     const last = this.samples[this.samples.length - 1]
-    const dt = last.t - first.t
+    const dt = now - first.t
     // Sub-millisecond spans divide into noise and produce four-figure
     // velocities from a stationary hand.
     if (dt < 8) return { vx: 0, vy: 0 }
@@ -105,7 +141,13 @@ export class Decay {
   private raf = 0
   private running = false
 
-  constructor(private decelerationRate = DECELERATION) {}
+  private decelerationRate: number
+
+  // Same reason as VelocityTracker's: no parameter properties in a file the
+  // test suite imports.
+  constructor(decelerationRate = DECELERATION) {
+    this.decelerationRate = decelerationRate
+  }
 
   get active(): boolean {
     return this.running

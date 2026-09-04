@@ -18,10 +18,14 @@ import {
 } from 'lucide-react'
 import {
   areaOf,
-  monthOf,
   statusTone,
   typeFamily,
+  groupValues,
+  sortField,
+  FAMILY_LABEL,
   NONE,
+  type GroupKey,
+  type SortKey,
   type TypeFamily,
   type VaultNoteMeta,
 } from '../../../shared/notemeta.js'
@@ -261,9 +265,10 @@ const VIEW_MODES: { key: ViewMode; label: string; Icon: LucideIcon; built: boole
   // an authoring surface, and it was wearing a view's clothes in here.
 ]
 
-type SortKey = 'title' | 'area' | 'type' | 'status' | 'updated' | 'links' | 'backlinks'
-type GroupKey =
-  | 'area' | 'family' | 'type' | 'status' | 'tag' | 'facet' | 'folder' | 'month' | 'linked' | 'none'
+/* SortKey, GroupKey, linkBucket, sortField and groupValues moved to
+   shared/notemeta.ts, for the reason this file already gave about statusTone:
+   they are logic about frontmatter values, and a .tsx module cannot be
+   imported by the node --test suite. */
 
 const GROUPS: { key: GroupKey; label: string }[] = [
   { key: 'area', label: 'Area' },
@@ -279,34 +284,6 @@ const GROUPS: { key: GroupKey; label: string }[] = [
   { key: 'linked', label: 'How linked' },
   { key: 'none', label: 'Nothing' },
 ]
-
-/**
- * Backlink count → a bucket.
- *
- * Grouping on the raw number would make 30-odd sections of one row each, which
- * is a sorted table with headings, not a grouping. Buckets are what turn it
- * into an axis.
- *
- * This is the Orphans toggle's missing middle, though NOT in the way it first
- * appears. Zero backlinks implies orphan by construction — nothing links to a
- * note, so nothing can reach it — and measuring the vault confirms the two sets
- * are identical: 64 unreferenced, 64 of them orphans, 0 reachable-but-
- * unreferenced. So this grouping does not find a hidden class of orphan.
- *
- * What it finds is the 150 notes of 280 sitting on exactly 1–2 backlinks. The
- * boolean toggle calls all of them "fine" alongside a hub with 25, which is the
- * distinction that actually matters when deciding what to link up next.
- *
- * The labels lead with digits so `localeCompare(numeric: true)` in the group
- * sort orders them 1–2, 3–5, 6–10, 11+ and drops "Unreferenced" last.
- */
-function linkBucket(backlinks: number): string {
-  if (backlinks === 0) return 'Unreferenced'
-  if (backlinks <= 2) return '1–2 backlinks'
-  if (backlinks <= 5) return '3–5 backlinks'
-  if (backlinks <= 10) return '6–10 backlinks'
-  return '11+ backlinks'
-}
 
 /**
  * `sort: false` is Tags only, and it is not an oversight. Sorting a
@@ -338,59 +315,14 @@ const COLUMNS: { key: SortKey | 'tags' | 'facets'; label: string; className: str
  * Icon rather than colour is the whole point — see `typeFamily` in notemeta.ts
  * for why this palette cannot spend a hue on a category.
  */
-const FAMILIES: Record<Exclude<TypeFamily, 'none'>, { label: string; Icon: LucideIcon }> = {
-  structure: { label: 'Structure', Icon: MapIcon },
-  work: { label: 'Work', Icon: Target },
-  reference: { label: 'Reference', Icon: BookOpen },
-  routine: { label: 'Routine', Icon: Repeat },
-}
-
-/** The value a row sorts by, for one column. */
-function field(n: VaultNoteMeta, key: SortKey): string {
-  if (key === 'area') return areaOf(n)
-  if (key === 'title') return n.title
-  const v = n[key]
-  // The counts sort correctly as strings BECAUSE the comparator below passes
-  // `numeric: true` — that collation reads "42" as forty-two, so 9 sorts before
-  // 42 rather than after it. Returning a number here instead would need a
-  // second comparator for two columns.
-  return typeof v === 'number' ? String(v) : v
-}
-
-/**
- * The buckets one row belongs to, for the current grouping.
- *
- * Returns an ARRAY, not a string, because `tag` is multi-valued: a note tagged
- * `[design, ui]` belongs under both, exactly as a Notion multi-select does.
- * Every other axis returns one entry. This is also why the row count shown in
- * the toolbar comes from the filtered rows and not from summing the groups —
- * under Tag those two numbers legitimately differ.
- */
-function groupValues(
-  n: VaultNoteMeta,
-  key: GroupKey,
-  facetsOf: (path: string) => string[],
-): string[] {
-  switch (key) {
-    case 'area': return [areaOf(n)]
-    case 'family': {
-      const f = typeFamily(n.type)
-      return [f === 'none' ? '' : FAMILIES[f].label]
-    }
-    case 'type': return [n.type]
-    case 'status': return [n.status]
-    case 'tag': return n.tags.length ? n.tags : ['']
-    // Multi-valued like tags, and for the same reason: a note sits in several
-    // folders' worth of ancestry and can be both dated and a hub.
-    case 'facet': {
-      const f = facetsOf(n.path)
-      return f.length ? f : ['']
-    }
-    case 'folder': return [n.folder]
-    case 'month': return [monthOf(n.updated)]
-    case 'linked': return [linkBucket(n.backlinks)]
-    default: return ['']
-  }
+/* ICONS ONLY. The labels live in `FAMILY_LABEL` in shared/notemeta.ts, because
+   `groupValues` needs them and a React component cannot go there. Split rather
+   than duplicated: two lists of the same four names drift. */
+const FAMILY_ICON: Record<Exclude<TypeFamily, 'none'>, LucideIcon> = {
+  structure: MapIcon,
+  work: Target,
+  reference: BookOpen,
+  routine: Repeat,
 }
 
 /* statusTone lives in shared/notemeta.ts, not here: it is logic about
@@ -407,13 +339,14 @@ function groupValues(
  */
 function TypeChip({ type }: { type: string }) {
   const family = typeFamily(type)
-  const meta = family === 'none' ? null : FAMILIES[family]
+  const Icon = family === 'none' ? null : FAMILY_ICON[family]
+  const label = family === 'none' ? null : FAMILY_LABEL[family]
   return (
     <span
       className={`db-tag db-fam-${family}`}
-      title={meta ? `${type} — ${meta.label}` : type}
+      title={label ? `${type} — ${label}` : type}
     >
-      {meta && <meta.Icon size={11} aria-hidden="true" />}
+      {Icon && <Icon size={11} aria-hidden="true" />}
       {type}
     </span>
   )
@@ -717,8 +650,8 @@ export function DatabaseView({
 
     const dir = desc ? -1 : 1
     const cmp = (a: VaultNoteMeta, b: VaultNoteMeta) => {
-      const av = field(a, sortBy)
-      const bv = field(b, sortBy)
+      const av = sortField(a, sortBy)
+      const bv = sortField(b, sortBy)
       // Empty always sorts last regardless of direction. 190 of 258 notes have
       // no type; letting blanks lead means the default view opens on a wall of
       // nothing, which reads as broken rather than as sorted.

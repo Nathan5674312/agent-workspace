@@ -3,6 +3,7 @@ import { AgentCorner } from './panes/corner/AgentCorner.js'
 import { AgentActivity } from './panes/corner/AgentActivity.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import { LoadingScreen } from './LoadingScreen.js'
+import { Onboarding } from './Onboarding.js'
 
 /**
  * The vault IS the app — it owns the whole window. The agent corner floats over
@@ -31,6 +32,13 @@ export function App(): React.ReactElement {
           <AgentCorner />
         </ErrorBoundary>
       </section>
+      {/* LAST, so it draws over both panes, and inside its own boundary for the
+          same reason the others have one: a first run is the worst possible
+          moment for a crash, and the vault must still mount behind a tour that
+          failed. It removes itself once seen — see Onboarding.tsx. */}
+      <ErrorBoundary name="onboarding">
+        <Onboarding />
+      </ErrorBoundary>
     </div>
   )
 }

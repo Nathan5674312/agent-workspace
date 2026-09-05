@@ -57,6 +57,12 @@ const api: Api = {
     trust: (trusted) => ipcRenderer.invoke(CH.networkTrust, trusted),
     onChanged: (cb) => on(EV.networkChanged, cb),
   },
+  window: {
+    // Two colour strings, validated in main against /^#[0-9a-f]{6}$/i. Same
+    // reasoning as setAppearance: nothing here can name a file.
+    setOverlay: (color, symbolColor) =>
+      ipcRenderer.invoke(CH.windowSetOverlay, color, symbolColor),
+  },
   settings: {
     get: () => ipcRenderer.invoke(CH.settingsGet),
     // No argument on purpose: the picker runs in main, so the renderer cannot

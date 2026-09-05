@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, Menu, shell } from 'electron'
 import { join } from 'node:path'
 import { registerIpc } from './ipc.js'
 import * as activity from './activity.js'
@@ -29,6 +29,42 @@ function createWindow(): BrowserWindow {
     minWidth: 1100,
     minHeight: 700,
     show: false,
+    /**
+     * NO OS TITLE BAR. The app's own chrome runs to the top edge, and Windows
+     * draws minimise / maximise / close over it.
+     *
+     * `hidden` rather than `frame: false`, deliberately: frameless would mean
+     * building those three buttons by hand, and hand-built window controls are
+     * where apps lose snap layouts (hover maximise), the correct hit targets at
+     * the screen corner, and every accessibility affordance the OS provides for
+     * free. This keeps the real controls and removes only the bar.
+     *
+     * The colours are placeholders for the first frame. They cannot be right
+     * here — the palette lives in CSS and there are seven of them, one of which
+     * (parchment, #f4ede1) is LIGHT, so a fixed dark strip would be visibly
+     * wrong in it. The renderer sends the computed values the moment it has
+     * applied a theme; see `windowSetOverlay`.
+     */
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#160c08',
+      symbolColor: '#f0cba5',
+      // Matches `.vault-tab-bar`'s height, so the buttons sit on the same row
+      // as the tabs rather than floating above them.
+      height: 40,
+    },
+    /**
+     * The menu bar is HIDDEN in every build, and REMOVED in packaged ones.
+     *
+     * Two mechanisms because they answer two different needs. `Menu.
+     * setApplicationMenu(null)` below deletes it outright, which is right for a
+     * user and wrong for a developer — it takes Ctrl+R and the devtools
+     * accelerator with it. This hides the strip while leaving the menu alive,
+     * so the dev build stops advertising `File / Edit / View / Window / Help`
+     * above a window designed to look like anything but Electron, and Alt still
+     * reveals it if it is ever wanted.
+     */
+    autoHideMenuBar: true,
     // Unpackaged only. A packaged Windows build takes its window icon from the
     // exe's own resource, which electron-builder writes from build/icon.ico, and
     // build/ is not in the `files` allowlist so this path does not exist inside
@@ -94,6 +130,23 @@ function createWindow(): BrowserWindow {
  * afterwards, the button has already been created under the old identity.
  */
 if (process.platform === 'win32') app.setAppUserModelId('com.divineconstruc.fate')
+
+/**
+ * NO DEFAULT MENU.
+ *
+ * `File / Edit / View / Window / Help` is Electron's stock menu, not this app's
+ * — nothing in `src/` creates it, and every entry on it is a framework default.
+ * It is the most recognisable tell that an app is Electron, and it sits above a
+ * window whose whole design is trying to say otherwise.
+ *
+ * Nothing is lost that the app offers elsewhere: there is no File command this
+ * app has, Edit's clipboard roles are handled natively by Chromium inside text
+ * fields on Windows, and Help is a dialog reached from the sidebar. The one
+ * real cost is the accelerators the menu carried — reload and devtools — which
+ * is why this is packaged-only. A developer keeps Ctrl+R; a user gets a window
+ * that does not announce its framework.
+ */
+if (app.isPackaged) Menu.setApplicationMenu(null)
 
 void app.whenReady().then(() => {
   // FIRST, before any handler or window can read the vault: a persisted

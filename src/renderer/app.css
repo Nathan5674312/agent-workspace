@@ -564,14 +564,70 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   .art-credit-handle { opacity: 1; }
 }
 
+/**
+ * THE TAB BAR IS THE TITLE BAR NOW.
+ *
+ * The window is `titleBarStyle: 'hidden'`, so there is no OS bar above this and
+ * Windows draws minimise/maximise/close over the top-right of the content. Two
+ * things follow, and both are load-bearing.
+ *
+ * IT HAS TO BE DRAGGABLE, or the window cannot be moved at all — the strip that
+ * used to do that is gone. `drag` is on the bar; every control inside it takes
+ * `no-drag` below, because a draggable parent swallows clicks on its children.
+ *
+ * IT HAS TO GET OUT OF THE WAY OF THE BUTTONS. `env(titlebar-area-width)` is the
+ * draggable width the browser reports, which is the window minus the controls —
+ * so the difference is exactly how much room they need, with no hardcoded 138px
+ * to go stale when Windows changes it. The fallback is `100vw`, which makes the
+ * padding zero: on any build without the overlay this rule does nothing, which
+ * is the correct behaviour rather than a guess.
+ *
+ * `min-height` matches `titleBarOverlay.height` in src/main/index.ts. If either
+ * moves the buttons stop sitting on the same row as the tabs.
+ */
 .vault-tab-bar {
   display: flex; align-items: center; gap: var(--space-1);
   padding: var(--space-2) var(--space-3);
+  padding-right: calc(100vw - env(titlebar-area-width, 100vw) + var(--space-3));
+  min-height: 40px;
   background: var(--material-regular);
   backdrop-filter: var(--blur-regular);
   -webkit-backdrop-filter: var(--blur-regular);
   border-bottom: 1px solid var(--separator);
+  -webkit-app-region: drag;
 }
+/**
+ * THE TOP RESIZE EDGE, given back.
+ *
+ * `-webkit-app-region: drag` on an element touching the window edge swallows
+ * the OS resize handle — the window could be moved by the bar and then not
+ * resized from its top border at all. A no-drag strip along the very top hands
+ * those few pixels back to the frame.
+ *
+ * 4px matches what Windows uses for a border grab. It sits above the bar's
+ * content rather than beside it, so nothing in the row moves.
+ */
+.vault-tab-bar { position: relative; }
+.vault-tab-bar::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  -webkit-app-region: no-drag;
+}
+
+/* Everything you can actually press. A draggable ancestor eats pointer events
+   on its children, so a control that is not listed here becomes decoration. */
+.vault-tab-bar button,
+.vault-tab-bar .vault-tab-slot,
+.vault-tab-bar [popover],
+.vault-tab-bar input {
+  -webkit-app-region: no-drag;
+}
+/* The ribbon runs to the top edge too, and its first icon would otherwise sit
+   under where the title bar used to be. It is all controls, so none of it
+   drags — the tab bar is the handle. */
+.vault-ribbon { -webkit-app-region: no-drag; }
 /* The BOX around a tab is `.vault-tab-slot` in tabbar.css, not this button.
    The close x is a SIBLING of the label (a <button> inside a <button> is
    invalid HTML), so a box painted by this button necessarily excludes it -
@@ -1749,7 +1805,21 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
    * so it says so.
    */
   position: fixed;
-  top: 0;
+  /**
+   * BELOW THE WINDOW CONTROLS, which now live in the app's own top strip.
+   *
+   * The window is `titleBarStyle: 'hidden'`, so content starts at y=0 and
+   * Windows draws minimise/maximise/close over the top-right — exactly where
+   * this panel is pinned. Without the offset the OS buttons are painted across
+   * the first card, and the card's own controls are unreachable underneath them.
+   *
+   * `env(titlebar-area-height)` is the overlay's real height as the browser
+   * reports it, so this tracks whatever `titleBarOverlay.height` is set to in
+   * src/main/index.ts instead of duplicating the number. The `0px` fallback is
+   * correct rather than defensive: on a build with no overlay there are no
+   * buttons here to avoid.
+   */
+  top: env(titlebar-area-height, 0px);
   right: 0;
   z-index: 5;
   margin: var(--space-5);

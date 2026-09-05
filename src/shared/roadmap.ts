@@ -61,6 +61,12 @@ export const ROADMAP: FeatureGroup[] = [
         note: 'Electron runs on all three desktops, but only Windows has ever been BUILT, let alone run. The mac and linux electron-builder targets in package.json are configured and unverified, and neither can be produced on the build machine: mac artifacts require macOS, and a Linux AppImage from a non-Linux host requires Docker, which is not installed. They are scaffolding, not support, and docs/RELEASING.md says so rather than leaving a download page to imply otherwise. Mobile is not an Electron target at all.',
       },
       {
+        label: 'CI matrix — prove it builds on Mac and Linux',
+        status: 'planned',
+        surface: 'GitHub Actions',
+        note: 'THE THING ACTUALLY BLOCKING CROSS-PLATFORM, and it is not Electron. There is no CI at all: `.github/workflows` does not exist, every release so far was cut by hand, and 1.0.1 was tagged from a laptop. The vault note `Fate/Roadmap/01 - Cross-Platform and Mobile` (2026-08-17) is right that Mac and Linux are "a week of chores with no unknowns" rather than an architecture problem — and the first chore is a matrix on windows-latest, macos-latest and ubuntu-latest building UNSIGNED, purely to prove it compiles. You cannot build or sign a macOS app from Windows, so CI is the only route that does not require owning a Mac. What that note predicts it will find: the hardcoded Windows vault path defaulted in vault.ts; resolveInVault, whose lexical containment is a SECURITY check written and tested only on case-insensitive filesystems and which may behave differently on ext4; junction-versus-symlink cycle handling; and the .backups/ timestamp, whose colons are legal on Linux and illegal on Windows, so it fails in the opposite direction from usual. Signing comes after and costs money (99/yr Apple, 100-400/yr Windows); proving the build does not cost anything. Sequenced that way deliberately — there is no point signing something nobody has watched compile.',
+      },
+      {
         label: 'Tree view left-side navigation',
         status: 'built',
         surface: 'sidebar:files',

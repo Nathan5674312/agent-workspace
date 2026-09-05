@@ -9,10 +9,35 @@
 
 /* The toggle sits opposite `.vault-graph-info`, which already holds the bottom
    left of the canvas. */
+/* THE DROP. Both of these live in the top-right corner, which is also where
+   the agent activity panel sits, so while agents are working they were behind
+   it. The cards never swallowed the click — `.activity` is `pointer-events:
+   none` — but a control you cannot see is not a control.
+
+   `--agents-drop` is that panel's measured bottom edge in WINDOW coordinates,
+   published on <html> by AgentActivity. Measured rather than a constant
+   because the stack is one to five cards of varying height, so any fixed
+   offset is wrong for some number of agents.
+
+   Two coordinate spaces, hence two different sums:
+
+     - the panel below is `position: fixed`, so it is already in window
+       coordinates and adds the gap directly;
+     - this button is `position: absolute` inside .vault-graph-view, so the
+       wrap's own top has to come off. resize() publishes it as `--graph-top`
+       from a rect it was already computing.
+
+   `max()` is what makes the resting position survive: with no agents the
+   variable is absent, the calc goes negative, and the usual gap wins. So
+   nothing moves until something is actually in the way. */
 .graph-forces-toggle {
   position: absolute;
-  top: var(--space-4);
+  top: max(
+    var(--space-4),
+    calc(var(--agents-drop, 0px) - var(--graph-top, 0px) + var(--space-4))
+  );
   right: var(--space-4);
+  transition: top 320ms cubic-bezier(0.16, 1, 0.3, 1);
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -51,8 +76,9 @@
   /* `position-anchor` is not in Electron 33's Chromium, so the panel is placed
      against the viewport rather than the button. Same corner, no anchor API. */
   position: fixed;
-  top: calc(var(--space-6) * 2);
+  top: max(calc(var(--space-6) * 2), calc(var(--agents-drop, 0px) + var(--space-4)));
   right: var(--space-5);
+  transition: top 320ms cubic-bezier(0.16, 1, 0.3, 1);
 }
 
 /* `display`, not only the flex properties: the UA sheet closes a popover with

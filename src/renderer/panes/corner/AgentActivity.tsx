@@ -26,7 +26,7 @@
  * no file contents, no command arguments reach this component — that boundary is
  * enforced where the parsing happens rather than trusted to the view.
  */
-import { useEffect, useMemo, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import type { Activity } from '../../../shared/ipc.js'
 import { sessions, describe, where } from '../../../shared/transcript.js'
 import { trail, type Trail } from '../../../shared/agentTrail.js'
@@ -216,6 +216,44 @@ export function AgentActivity(): React.JSX.Element | null {
    */
   const [vault, setVault] = useState<{ graph: VaultGraph; root: string } | null>(null)
 
+  /**
+   * How much room this panel is taking, published to the whole document.
+   *
+   * The graph's Forces button lives in the same top-right corner and was being
+   * covered whenever agents were working. `pointer-events: none` above means
+   * the cards never swallowed the click — the button was still hittable — but a
+   * control you cannot SEE is not a control, so it has to move.
+   *
+   * MEASURED, not a constant. The stack is between one and MAX_SHOWN cards and
+   * each card's height depends on what its agent is doing, so any fixed offset
+   * is wrong for some number of agents. A ResizeObserver costs one line more
+   * than guessing and is right for every count.
+   *
+   * Published as a custom property on <html> rather than threaded down as a
+   * prop: this panel is anchored to the WINDOW (see .activity above), so what
+   * it occludes is a fact about the window, not about any component's subtree.
+   * Anything that needs to keep clear of it reads one variable. Cleared when
+   * the panel is gone, so `var(--agents-drop, 0px)` falls back on its own.
+   */
+  const boxRef = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const el = boxRef.current
+    const root = document.documentElement
+    const clear = () => root.style.removeProperty('--agents-drop')
+    if (!el) {
+      clear()
+      return
+    }
+    const ro = new ResizeObserver(() => {
+      root.style.setProperty('--agents-drop', `${Math.round(el.getBoundingClientRect().bottom)}px`)
+    })
+    ro.observe(el)
+    return () => {
+      ro.disconnect()
+      clear()
+    }
+  })
+
   useEffect(() => {
     let live = true
     void window.api.agents.activity().then((initial) => {
@@ -266,7 +304,7 @@ export function AgentActivity(): React.JSX.Element | null {
   const hidden = live.length - shown.length
 
   return (
-    <div className="activity" role="status" aria-live="polite" aria-label="Agent activity">
+    <div className="activity" ref={boxRef} role="status" aria-live="polite" aria-label="Agent activity">
       {shown.map((s) => (
         <div className="activity-agent" key={s.session}>
           <div className="activity-head">

@@ -927,6 +927,11 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
 
     const resize = () => {
       const r = wrap.getBoundingClientRect()
+      // Where this wrap starts, in window coordinates. The Forces button is
+      // absolute inside it but has to clear the agent panel, which is fixed —
+      // so graph.css subtracts this to move between the two spaces. Published
+      // from the rect the resize already had rather than measured again.
+      wrap.style.setProperty('--graph-top', `${Math.round(r.top)}px`)
       w = r.width
       h = r.height
       canvas.width = Math.round(w * dpr)

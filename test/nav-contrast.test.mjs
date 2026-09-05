@@ -82,7 +82,10 @@ test('the contrast function agrees with the ratios themes.css already publishes'
 
 /** Every theme's block, plus the base `:root` that the others override. */
 function themeBlocks() {
-  const base = TOKENS.match(/:root\s*\{([\s\S]*?)\n\}/)
+  // `[^{]*` rather than `\s*`: the base block answers to a second selector
+  // now — `[data-theme='founders']` — so the palette can be scoped to an
+  // element for the Settings theme preview. Same block, same values.
+  const base = TOKENS.match(/:root[^{]*\{([\s\S]*?)\n\}/)
   const out = new Map([['(default)', base[1]]])
   for (const m of THEMES.matchAll(/:root\[data-theme='([a-z]+)'\]\s*\{([\s\S]*?)\n\}/g)) {
     // A theme may appear twice (parchment has a second block); merge, later wins.

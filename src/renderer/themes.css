@@ -1,3 +1,18 @@
+/*
+ * SCOPED, NOT ONLY ROOT. Every palette below is declared for BOTH
+ * `:root[data-theme='x']` and a bare `[data-theme='x']`, so any element can
+ * carry a theme and everything inside it resolves to that palette.
+ *
+ * That is what makes the Settings theme picker possible: each preview is a
+ * small mockup of the app inside a `[data-theme]` element, painted by these
+ * same tokens. The alternative was a table of hex values in the picker, which
+ * is the second source of truth this file and tokens.css both exist to
+ * prevent — a retuned palette would silently stop matching its own swatch.
+ *
+ * The root-scoped selector is kept, and written SECOND on purpose:
+ * themes.test.mjs finds each block by matching that selector followed
+ * immediately by the brace, so it has to be the last one in the list.
+ */
 /**
  * THEMES. Imported by main.tsx after tokens.css.
  *
@@ -44,6 +59,7 @@
    with no hue of its own: saturation 0.03 keeps it a hair warm so it does not
    read as blue-grey next to Slate, which is the theme it is most confusable
    with. Pick this when the browns are the thing you did not want. */
+[data-theme='dark'],
 :root[data-theme='dark'] {
   --scrim-rgb: 18, 18, 18;
   --bg-app: #121212;
@@ -87,6 +103,7 @@
    Text runs near-white rather than tinted, because at this depth any tint reads
    as a colour cast over the whole app. That also buys the highest contrast in
    the set: body text at 17.3:1. */
+[data-theme='midnight'],
 :root[data-theme='midnight'] {
   --scrim-rgb: 6, 6, 7;
   --bg-app: #060607;
@@ -132,6 +149,7 @@
 
    Tertiary is interpolated: Nord jumps from nord3 (1.6:1) straight to nord4,
    with nothing at the AA step this app needs. */
+[data-theme='nord'],
 :root[data-theme='nord'] {
   --scrim-rgb: 46, 52, 64;
   --bg-app: #2e3440;
@@ -162,6 +180,7 @@
    same solid-label discipline. Green sits at the eye's luminance peak, so this
    palette needed the least lightness to reach its ratios — the labels look
    softer than the numbers suggest, which is the measurement working. */
+[data-theme='forest'],
 :root[data-theme='forest'] {
   --scrim-rgb: 11, 20, 16;
   --bg-app: #0b1410;
@@ -206,6 +225,7 @@
    a teal, which fails the "is this actually green" check the semantic test
    makes. Rather than borrow another palette's green, one is solved in this
    palette's own terms at hue 95. */
+[data-theme='rosepine'],
 :root[data-theme='rosepine'] {
   --scrim-rgb: 25, 23, 36;
   --bg-app: #191724;
@@ -239,6 +259,7 @@
    THREE THINGS DO NOT SURVIVE THE INVERSION and are fixed below the block:
    the shadows, the glass edge highlight, and the canvas artwork. Everything
    else is the same token set doing the same job. */
+[data-theme='parchment'],
 :root[data-theme='parchment'] {
   --scrim-rgb: 244, 237, 225;
   --bg-app: #f4ede1;
@@ -284,6 +305,7 @@
       read as glass, and "bright" means lighter than the material. On every dark
       theme that is the accent; here the accent is nearly black, so the generated
       value would draw a dark line where the light one belongs. White. */
+[data-theme='parchment'],
 :root[data-theme='parchment'] {
   --shadow-sm: 0 1px 2px rgba(60, 44, 30, 0.10);
   --shadow-md: 0 4px 16px rgba(60, 44, 30, 0.14);

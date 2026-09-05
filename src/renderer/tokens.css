@@ -24,7 +24,14 @@
  *   4. Spacing is in rem so a larger system text size scales the layout with it.
  */
 
-:root {
+/* `[data-theme='founders']` is NOT a second definition of the default palette —
+   it is this one, answering to a name. The default sets no attribute on <html>
+   (see shared/themes.ts), which is right for the document and useless for a
+   preview: a swatch for Founder's inside a Midnight window would inherit
+   Midnight. Naming it here lets the picker scope it like any other, with the
+   values still living in exactly one place. */
+:root,
+[data-theme='founders'] {
   /* ── materials ────────────────────────────────────────────
      Chrome is rgba + backdrop-filter, never an opaque bar. Content scrolls
      UNDER it. Weight encodes hierarchy: heavier = structural (sidebars),

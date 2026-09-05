@@ -39,7 +39,7 @@ import {
   type AppSettings,
 } from '../../../shared/ipc.js'
 import { applyAppearance } from '../../appearance.js'
-import { THEMES } from '../../../shared/themes.js'
+import { ThemePicker } from './ThemePicker.js'
 import './settings.css'
 
 /**
@@ -511,45 +511,35 @@ export function SettingsDialog({ isOpen, onClose, isDirty }: SettingsDialogProps
               {/* No Contrast row. `@media (prefers-contrast: more)` in app.css
                   still answers the OS preference; the in-app High override was
                   removed because it was a second copy of those values. */}
-              {/* Its own row rather than a <Choice>: that component is System +
-                  ONE named override, which is the shape of an accessibility
-                  escape hatch. A theme is neither an accessibility setting nor
-                  binary, so it gets a plain labelled <select> with one option
-                  per palette — same element, same keyboard and screen-reader
-                  behaviour, no new control invented for it.
+              {/* WAS A <select>, AND THE ELEMENT WAS THE PROBLEM. The
+                  reasoning that put it there still holds for every OTHER row
+                  here — a theme is neither an accessibility setting nor binary,
+                  so it is not a <Choice> — but it drew the wrong conclusion:
+                  that the answer was therefore a plain list of names.
 
-                  The hint under it changes with the selection, because "Deep
-                  navy, for a dark room" is the thing that makes a name like
-                  Midnight mean something before you click it. */}
-              <div className="settings-appearance-row">
+                  A palette is the one setting in this dialog whose value you
+                  cannot read from its name. Choosing from names meant applying
+                  and undoing, once per theme, with the dialog in the way each
+                  time. ThemePicker.tsx renders each palette as a small mockup
+                  of this window, painted by that theme's own tokens, so all
+                  seven are visible at once and the choice is made by looking.
+
+                  The hint survives underneath, because "Deep navy, for a dark
+                  room" is what makes a name like Midnight mean something, and
+                  six dark rectangles cannot say it. */}
+              <div className="settings-appearance-row settings-appearance-row--stacked">
                 <div className="settings-appearance-text">
-                  <label className="settings-appearance-label" htmlFor="settings-theme">
-                    Theme
-                  </label>
-                  <span className="settings-appearance-hint">
-                    {THEMES.find((t) => t.id === appearance.theme)?.hint ?? ''}
-                  </span>
+                  <span className="settings-appearance-label">Theme</span>
                 </div>
-                <select
-                  id="settings-theme"
-                  className="settings-appearance-select"
+                <ThemePicker
                   value={appearance.theme}
                   disabled={!settings}
-                  onChange={(e) => {
-                    // Narrowed against the list rather than cast: the value of a
-                    // <select> is a string as far as the DOM is concerned, and
-                    // main sanitises anyway, but a bad id must not travel as a
-                    // ThemeId through the optimistic apply in update().
-                    const next = THEMES.find((t) => t.id === e.target.value)
-                    if (next) void update({ theme: next.id })
-                  }}
-                >
-                  {THEMES.map((t) => (
-                    <option key={t.id} value={t.id}>
-                      {t.label}
-                    </option>
-                  ))}
-                </select>
+                  // Narrowed by the picker against THEMES, so a bad id cannot
+                  // travel as a ThemeId through the optimistic apply in
+                  // update() — the same guard the <select> needed because a DOM
+                  // value is a string.
+                  onPick={(id) => void update({ theme: id })}
+                />
               </div>
 
               <Choice

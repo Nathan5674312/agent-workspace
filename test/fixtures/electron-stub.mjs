@@ -21,6 +21,11 @@ export const app = {
   whenReady: () => new Promise(() => {}),
   on() {},
   quit() {},
+  // src/main/index.ts calls this at module scope on win32 so the taskbar button
+  // gets the same identity as the Start Menu shortcut. Inert here, but it must
+  // EXIST: without it the module throws on import and takes every suite that
+  // imports index.ts with it.
+  setAppUserModelId() {},
 }
 
 export const shell = { openExternal: async () => {} }

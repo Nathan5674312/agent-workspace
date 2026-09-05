@@ -78,6 +78,23 @@ function createWindow(): BrowserWindow {
   return win
 }
 
+/**
+ * THE TASKBAR PICKS AN ICON BY AppUserModelID, NOT BY THE WINDOW'S ICON.
+ *
+ * Without this call Windows derives a per-process identity from the executable
+ * path, which is a different identity from the one the installer wrote onto the
+ * Start Menu shortcut. The consequences are all the ones that look like "the
+ * icon did not update": the taskbar button shows a stale cached icon, it does
+ * not merge with the pinned shortcut, and `setIcon` on the window has no effect
+ * on the button at all.
+ *
+ * It must match the `appId` in package.json's build config, because that is the
+ * string electron-builder stamps onto the shortcut, and the whole point is that
+ * the two agree. It must also run BEFORE the first window is created — set
+ * afterwards, the button has already been created under the old identity.
+ */
+if (process.platform === 'win32') app.setAppUserModelId('com.divineconstruc.fate')
+
 void app.whenReady().then(() => {
   // FIRST, before any handler or window can read the vault: a persisted
   // vaultDir has to be in place before the first tree() call, or the app boots

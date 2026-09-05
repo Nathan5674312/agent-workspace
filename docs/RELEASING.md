@@ -11,8 +11,10 @@ There isn't an auto-updater, and that is a decision rather than a gap.
   `https://api.github.com/repos/Nathan5674312/agent-workspace/releases/latest`,
   compares the tag to the running build, and either says you are current or
   offers a link to the release page. It sends nothing, downloads nothing
-  executable, and runs only when the button is pressed — no check on launch, no
-  timer. See the header of `src/main/update.ts`.
+  executable, and runs on launch and when the button is pressed — no timer.
+  The launch check is gated by `notifyUpdates` in settings.json, which the
+  update panel can switch off permanently; settings are read before the request,
+  so a refusal means it is never made. See the header of `src/main/update.ts`.
 - **Cutting a release IS publishing the version.** There is no second file to
   remember to update, which is the failure mode a hand-written feed has.
 - **This only works because the repository is public.** It was private until
@@ -38,8 +40,13 @@ Two things the GitHub API demands that are easy to get wrong, both handled in
   shape is whatever GitHub defaults to on the day a user clicks — a breaking
   change arriving inside an already-shipped binary.
 
-Anonymous calls are rate-limited to 60 an hour per IP, which is irrelevant to a
-check that only fires on a button press.
+Anonymous calls are rate-limited to 60 an hour per IP. That was irrelevant when
+the check only fired on a button press; with a launch check it is worth stating
+the arithmetic. One launch costs two requests — the feed, then the comparison —
+so a person would have to open the app thirty times in an hour to reach the
+limit, and behind shared NAT enough colleagues could. The failure is soft:
+`fetchJson` returns null on the 403, so the panel does not appear rather than
+appearing broken.
 
 ## Cutting a release
 

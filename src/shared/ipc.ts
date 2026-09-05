@@ -644,8 +644,9 @@ export type Api = {
   update: {
     /**
      * Ask whether a newer version exists. Fires one GET for a static JSON file
-     * and sends nothing. Never called except by a person clicking; there is no
-     * check on launch and no timer, on purpose.
+     * and sends nothing. Called once when the app opens — gated on
+     * `notifyUpdates`, which the update panel can switch off for good — and
+     * whenever a person presses the button. No timer.
      *
      * Never rejects. A failure is `{ state: 'unknown' }` carrying a sentence to
      * show, because "we could not tell" and "you are up to date" are different

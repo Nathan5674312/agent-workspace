@@ -5,9 +5,19 @@
  * asking it to. Everything else in this app is local. This file is the one
  * exception and it is kept deliberately small and deliberately manual:
  *
- *   - It runs ONLY when a person clicks "Check for updates". No timer, no
- *     check on launch, no telemetry. A local-first notes app that phones home
- *     on boot is a different promise than the one the README makes.
+ *   - It runs when the app opens, and when a person clicks "Check for
+ *     updates". No timer, no telemetry, and no second request after the first.
+ *
+ *     THE LAUNCH CHECK IS NEW, AND IT REPLACED A FLAT PROMISE THAT THERE WOULD
+ *     NEVER BE ONE. That promise was worth something and it is worth saying what
+ *     bought it out: a user who is never told about a fix cannot choose to take
+ *     it, and "we never contacted the server" is poor comfort to someone running
+ *     a version with a bug we fixed months ago. So the check happens, and the
+ *     control moved rather than disappearing. `notifyUpdates` in settings.json
+ *     gates it, the panel it raises can switch it off for good, and settings are
+ *     read BEFORE the request — declining means the request is never made, not
+ *     that its answer is discarded. Absent means true, so only a refusal is ever
+ *     written and an untouched install keeps no key at all.
  *   - It sends nothing. A GET for a static JSON file, no query string, no
  *     identifier, no version header. The server learns an IP fetched a public
  *     file, which is what any download would tell it anyway.

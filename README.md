@@ -78,11 +78,19 @@ you do.
 - **Backups** of every overwritten note go to `.backups/` inside that folder.
 - **App settings** — vault path, theme, layout — go to Electron's `userData`
   directory. Nothing else is stored.
-- **Nothing leaves the machine** except two requests, both of which you start:
-  the agent panel, which sends what you type and what it reads to Anthropic's
-  API; and Settings → About → *Check for updates*, which asks GitHub for this
-  repository's latest release tag and sends nothing. There is no update check on
-  launch and no timer — see `src/main/update.ts`.
+- **Nothing leaves the machine** except two requests. The agent panel sends
+  what you type and what it reads to Anthropic's API, and you start that one by
+  typing. The other is the update check: it asks GitHub for this repository's
+  latest release tag, and sends nothing — no identifier, no version, no
+  telemetry.
+
+  **The update check runs when the app opens**, and again if you press
+  Settings → About → *Check for updates*. There is no timer. If a newer version
+  exists you get one panel listing what changed, with three answers on it — take
+  it, not now, or stop asking — and the last of those is remembered. Turning it
+  off stops the launch check entirely; the button in Settings still works,
+  because declining to be told is not the same as declining to be able to ask.
+  See `src/main/update.ts`.
 
 ## Development
 

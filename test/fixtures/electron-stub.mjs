@@ -21,9 +21,34 @@ export const app = {
   whenReady: () => new Promise(() => {}),
   on() {},
   quit() {},
+  /**
+   * Windows taskbar identity. `src/main/index.ts` sets it at module scope,
+   * before `whenReady`, because the id is read when the first window is made —
+   * so importing that module for its pure exports calls straight through here.
+   */
+  setAppUserModelId() {},
+  /**
+   * False under `node --test`, which is also the honest answer: this is not a
+   * packaged app. It matters because index.ts strips the default menu only when
+   * packaged, so the stub returning false is what keeps that branch unexercised
+   * rather than accidentally asserting a menu call that never happens in dev.
+   */
+  isPackaged: false,
 }
 
 export const shell = { openExternal: async () => {} }
+
+/**
+ * The default application menu is removed in packaged builds. Nothing under
+ * `node --test` is packaged, so this exists to satisfy the import rather than
+ * to be called — but it records the call so a future test can assert it.
+ */
+export const Menu = {
+  calls: [],
+  setApplicationMenu(m) {
+    Menu.calls.push(m)
+  },
+}
 
 /** No renderer exists under `node --test`, so there is no window to push to. */
 export const BrowserWindow = {
@@ -76,6 +101,7 @@ export const utilityProcess = {
 export default {
   app,
   shell,
+  Menu,
   dialog,
   BrowserWindow,
   ipcMain,

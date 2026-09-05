@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell } from 'electron'
+import { app, BrowserWindow, Menu, shell } from 'electron'
 import { join } from 'node:path'
 import { registerIpc } from './ipc.js'
 import * as activity from './activity.js'
@@ -28,6 +28,18 @@ function createWindow(): BrowserWindow {
     minWidth: 1100,
     minHeight: 700,
     show: false,
+    /**
+     * The menu bar is HIDDEN in every build, and REMOVED in packaged ones.
+     *
+     * Two mechanisms because they answer two different needs. `Menu.
+     * setApplicationMenu(null)` below deletes it outright, which is right for a
+     * user and wrong for a developer — it takes Ctrl+R and the devtools
+     * accelerator with it. This hides the strip while leaving the menu alive,
+     * so the dev build stops advertising `File / Edit / View / Window / Help`
+     * above a window designed to look like anything but Electron, and Alt still
+     * reveals it if it is ever wanted.
+     */
+    autoHideMenuBar: true,
     // Unpackaged only. A packaged Windows build takes its window icon from the
     // exe's own resource, which electron-builder writes from build/icon.ico, and
     // build/ is not in the `files` allowlist so this path does not exist inside
@@ -71,6 +83,40 @@ function createWindow(): BrowserWindow {
   }
   return win
 }
+
+/**
+ * THE APP'S IDENTITY TO WINDOWS, and without it the taskbar shows Electron's.
+ *
+ * Windows groups taskbar buttons and picks their icon by AppUserModelID, not by
+ * the window's own icon. Electron defaults that ID to `electron.app.<name>` when
+ * unpackaged, so the window title bar showed the Fate mark — `createWindow`
+ * already sets `icon` for exactly that — while the TASKBAR sat there showing the
+ * Electron atom all day. Two different mechanisms, one of them unset.
+ *
+ * The literal matches `build.appId` in package.json, because a packaged NSIS
+ * install registers its shortcut under that id and a mismatch would split one
+ * app into two taskbar buttons.
+ *
+ * Set before `whenReady`, since the id is read when the first window is created.
+ */
+app.setAppUserModelId('com.divineconstruc.fate')
+
+/**
+ * NO DEFAULT MENU.
+ *
+ * `File / Edit / View / Window / Help` is Electron's stock menu, not this app's
+ * — nothing in `src/` creates it, and every entry on it is a framework default.
+ * It is the most recognisable tell that an app is Electron, and it sits above a
+ * window whose whole design is trying to say otherwise.
+ *
+ * Nothing is lost that the app offers elsewhere: there is no File command this
+ * app has, Edit's clipboard roles are handled natively by Chromium inside text
+ * fields on Windows, and Help is a dialog reached from the sidebar. The one
+ * real cost is the accelerators the menu carried — reload and devtools — which
+ * is why this is packaged-only. A developer keeps Ctrl+R; a user gets a window
+ * that does not announce its framework.
+ */
+if (app.isPackaged) Menu.setApplicationMenu(null)
 
 void app.whenReady().then(() => {
   // FIRST, before any handler or window can read the vault: a persisted

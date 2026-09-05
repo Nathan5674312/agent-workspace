@@ -108,9 +108,19 @@ test('the block stays a sane number of rows', () => {
   // Every phrase is padded to the tallest, so one long entry sets the height
   // for EVERY boot, and the tile count is width x rows cells all animating.
   // Three rows is a phrase; ten is a paragraph on a splash screen.
+  //
+  // FIVE, RAISED FROM FOUR on 2026-09-05, and it is a deliberate purchase
+  // rather than a cap that drifted. One line — "THE ARROWS THAT TRAVEL THE
+  // FURTHEST DISTANCE ARE PULLED BACK THE FURTHEST" — wraps to five, and every
+  // other phrase in the list still fits in four. The alternative was to edit
+  // Nathan's sentence to fit a number in a test, which is the wrong way round:
+  // the board exists to say his words, and 18 more blank tiles on the boots
+  // that show a shorter phrase cost nothing, because a blank cell is a resting
+  // state rather than a glyph. Raise it again only for a line worth 18 more
+  // tiles on every boot.
   const { width, rows } = boardSize(phrases(), MAX_LINE)
   assert.ok(
-    rows <= 4,
+    rows <= 5,
     `the tallest phrase needs ${rows} rows, and that is the height every boot gets`,
   )
   assert.ok(width <= MAX_LINE)

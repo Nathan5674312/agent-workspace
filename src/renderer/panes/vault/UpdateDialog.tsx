@@ -81,10 +81,32 @@ export function UpdateDialog({
 }: Props) {
   const dialogRef = useRef<HTMLDialogElement>(null)
   const downOnBackdrop = useRef(false)
+  /**
+   * When this opened. A backdrop click before SETTLE_MS is ignored.
+   *
+   * THIS IS THE BUG THAT MADE THE WHOLE UPDATE CHANNEL LOOK BROKEN, so it is
+   * worth stating plainly. Every other dialog in this app is opened BY a click,
+   * so by the time it exists the click that summoned it is already over. This
+   * one is the exception: it appears at launch, unasked, centred on the screen,
+   * at the exact moment someone is reaching for their notes. Their first click
+   * lands on the backdrop, dismisses it, and they never learn an update exists.
+   * From the outside that is indistinguishable from a check that never runs —
+   * which is what it was reported as, and what it was believed to be.
+   *
+   * Escape is deliberately NOT guarded. Escape is unambiguous: nobody presses
+   * it by accident on the way to something else, and a modal you cannot
+   * dismiss on demand is worse than one dismissed early.
+   *
+   * 400ms is a human reaction floor, not a taste: a click that begins under
+   * 400ms after a surface appears was aimed at whatever the surface replaced.
+   */
+  const openedAt = useRef(0)
+  const SETTLE_MS = 400
 
   useEffect(() => {
     const el = dialogRef.current
     el?.showModal()
+    openedAt.current = performance.now()
     return () => el?.close()
   }, [])
 
@@ -104,6 +126,7 @@ export function UpdateDialog({
         downOnBackdrop.current = e.target === e.currentTarget
       }}
       onMouseUp={(e) => {
+        if (performance.now() - openedAt.current < SETTLE_MS) return
         if (downOnBackdrop.current && e.target === e.currentTarget) onLater()
       }}
       onCancel={(e) => {

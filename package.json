@@ -1,6 +1,6 @@
 {
   "name": "agent-workspace",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Full-screen vault workspace with a floating agent corner.",
   "author": "Divine Construct",
   "homepage": "https://github.com/Nathan5674312/agent-workspace",
@@ -46,6 +46,15 @@
       "out/**",
       "package.json",
       "node_modules/@anthropic-ai/claude-agent-sdk/**"
+    ],
+    "extraResources": [
+      {
+        "from": "build/themed",
+        "to": "icons",
+        "filter": [
+          "*.png"
+        ]
+      }
     ],
     "asarUnpack": [
       "node_modules/@anthropic-ai/claude-agent-sdk/**"

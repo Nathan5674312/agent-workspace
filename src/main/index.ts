@@ -29,6 +29,30 @@ function createWindow(): BrowserWindow {
     minHeight: 700,
     show: false,
     /**
+     * NO OS TITLE BAR. The app's own chrome runs to the top edge, and Windows
+     * draws minimise / maximise / close over it.
+     *
+     * `hidden` rather than `frame: false`, deliberately: frameless would mean
+     * building those three buttons by hand, and hand-built window controls are
+     * where apps lose snap layouts (hover maximise), the correct hit targets at
+     * the screen corner, and every accessibility affordance the OS provides for
+     * free. This keeps the real controls and removes only the bar.
+     *
+     * The colours are placeholders for the first frame. They cannot be right
+     * here — the palette lives in CSS and there are seven of them, one of which
+     * (parchment, #f4ede1) is LIGHT, so a fixed dark strip would be visibly
+     * wrong in it. The renderer sends the computed values the moment it has
+     * applied a theme; see `windowSetOverlay`.
+     */
+    titleBarStyle: 'hidden',
+    titleBarOverlay: {
+      color: '#160c08',
+      symbolColor: '#f0cba5',
+      // Matches `.vault-tab-bar`'s height, so the buttons sit on the same row
+      // as the tabs rather than floating above them.
+      height: 40,
+    },
+    /**
      * The menu bar is HIDDEN in every build, and REMOVED in packaged ones.
      *
      * Two mechanisms because they answer two different needs. `Menu.

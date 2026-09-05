@@ -452,6 +452,8 @@ export const CH = {
   networkTrust: 'network:trust',
   networkTrustCurrent: 'network:trust-current',
 
+  windowSetOverlay: 'window:set-overlay',
+
   settingsGet: 'settings:get',
   settingsPickVaultDir: 'settings:pick-vault-dir',
   settingsApplyVaultDir: 'settings:apply-vault-dir',
@@ -598,6 +600,13 @@ export type Api = {
      * comes back as `denied`, not as an error.
      */
     run(command: string): Promise<ShellResult>
+  }
+  window: {
+    /**
+     * Repaint the native window controls for the active theme. Both must be
+     * literal `#rrggbb`; main refuses anything else. See the handler.
+     */
+    setOverlay(color: string, symbolColor: string): Promise<void>
   }
   settings: {
     get(): Promise<AppSettings>

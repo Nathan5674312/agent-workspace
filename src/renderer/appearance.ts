@@ -44,4 +44,59 @@ export function applyAppearance(a: Appearance): void {
     '--canvas-art-opacity',
     String(Math.min(Math.max(a.artworkOpacity, 0), ARTWORK_OPACITY_MAX)),
   )
+
+  paintWindowControls()
+}
+
+/**
+ * Hand the active palette to the OS, which paints the window controls.
+ *
+ * The window has no title bar: minimise, maximise and close are drawn by
+ * Windows over the app's own top strip. The OS cannot read a CSS variable, and
+ * there are seven themes here, one of them light (parchment) — so without this
+ * the strip behind those buttons keeps whatever the first frame guessed and is
+ * wrong in six of them.
+ *
+ * READ AFTER the attributes above are set, so `getComputedStyle` resolves the
+ * theme that was just applied rather than the one being replaced.
+ *
+ * Colours rather than a theme name, so the palette has exactly one definition
+ * — themes.css — instead of a second copy in the main process that drifts the
+ * first time one is retuned.
+ */
+function paintWindowControls(): void {
+  const css = getComputedStyle(document.documentElement)
+  const color = hex(css.getPropertyValue('--bg-app'))
+  const symbolColor = hex(css.getPropertyValue('--label'))
+  if (!color || !symbolColor) return
+  // Fire and forget. A window built without the overlay, or a platform that
+  // has none, rejects — and a theme change must not fail over the colour of a
+  // close button.
+  void window.api?.window?.setOverlay(color, symbolColor).catch(() => {})
+}
+
+/**
+ * `#rrggbb` or nothing.
+ *
+ * `getComputedStyle` returns whatever the stylesheet wrote for a custom
+ * property — these are authored as hex, but a shorthand or an `rgb()` would
+ * come back as typed. Main refuses anything that is not six-digit hex, so the
+ * conversion happens here where the value is known rather than by loosening
+ * the check at the boundary.
+ */
+function hex(raw: string): string | null {
+  const v = raw.trim()
+  if (/^#[0-9a-f]{6}$/i.test(v)) return v
+  if (/^#[0-9a-f]{3}$/i.test(v)) {
+    return '#' + [...v.slice(1)].map((c) => c + c).join('')
+  }
+  const m = v.match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)/i)
+  if (!m) return null
+  return (
+    '#' +
+    m
+      .slice(1, 4)
+      .map((n) => Math.min(255, Number(n)).toString(16).padStart(2, '0'))
+      .join('')
+  )
 }

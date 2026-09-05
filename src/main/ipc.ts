@@ -1,4 +1,4 @@
-import { ipcMain, type IpcMainInvokeEvent } from 'electron'
+import { BrowserWindow, ipcMain, type IpcMainInvokeEvent } from 'electron'
 import { CH, type Actor } from '../shared/ipc.js'
 import * as vault from './vault.js'
 import * as versions from './versions.js'
@@ -69,6 +69,42 @@ function handle(
 const USER: Actor = { kind: 'user' }
 
 export function registerIpc(): void {
+  /**
+   * Repaint the native window controls to match the active theme.
+   *
+   * The window has no OS title bar; Windows draws minimise/maximise/close over
+   * the app's own chrome. Those buttons are painted by the OS, so they cannot
+   * read a CSS variable, and the palette is CSS — seven themes, one of them
+   * light. Without this the strip behind the controls stays whatever the first
+   * frame guessed, which is visibly wrong in six of the seven.
+   *
+   * IT TAKES COLOURS, NOT A THEME NAME, and that is the cheaper of two wrongs.
+   * A theme name would mean main keeping its own copy of seven palettes and
+   * drifting from themes.css the first time one is retuned. Colours come from
+   * `getComputedStyle` in the renderer, so there is exactly one definition.
+   *
+   * A COLOUR CANNOT NAME A FILE, which is the rule this channel is measured
+   * against — the same one that lets `setAppearance` take an argument while
+   * `pickVaultDir` may not. Both values are refused unless they are literal
+   * `#rrggbb`, so the widest thing a compromised renderer achieves here is an
+   * ugly title bar.
+   */
+  handle(CH.windowSetOverlay, (color: string, symbolColor: string) => {
+    const hex = /^#[0-9a-f]{6}$/i
+    if (!hex.test(String(color)) || !hex.test(String(symbolColor))) {
+      throw new Error('window: overlay colours must be #rrggbb')
+    }
+    for (const w of BrowserWindow.getAllWindows()) {
+      // Throws on a window built without titleBarOverlay, and on platforms that
+      // do not have it at all. Neither is worth failing a theme change over.
+      try {
+        w.setTitleBarOverlay({ color, symbolColor })
+      } catch {
+        /* no overlay on this window or this platform */
+      }
+    }
+  })
+
   handle(CH.vaultTree, () => vault.tree())
   handle(CH.vaultList, () => vault.list())
   // Read-only, so no gate: it reads exactly what tree() already exposes.

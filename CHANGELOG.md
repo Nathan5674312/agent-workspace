@@ -9,6 +9,28 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [1.0.4] — 2026-09-04
+
+The taskbar shows the app's own icon.
+
+### Fixed
+
+- **The taskbar button kept a stale icon and would not merge with the pinned
+  shortcut.** Windows identifies a taskbar button by AppUserModelID, not by the
+  window's icon, and nothing ever set one — so Windows derived an identity from
+  the executable path, which is a different identity from the one the installer
+  stamps onto the Start Menu shortcut. Every symptom looked like "the icon did
+  not update", including `setIcon` having no effect on the button. The app now
+  declares the same id the installer writes, before the first window exists.
+
+### Known limitations
+
+Unchanged from 1.0.3. In particular: the taskbar, Start Menu, desktop and
+installer icons show the Founder's palette and cannot follow your theme. Those
+are read by Windows from the executable's own resource before any of this app's
+code runs. The title bar and the task switcher do follow your theme, and they
+are the only two that can.
+
 ## [1.0.3] — 2026-09-04
 
 A new app icon, and it wears whatever theme you are in.

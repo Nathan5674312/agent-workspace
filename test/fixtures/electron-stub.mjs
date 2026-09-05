@@ -21,17 +21,16 @@ export const app = {
   whenReady: () => new Promise(() => {}),
   on() {},
   quit() {},
-  /**
-   * Windows taskbar identity. `src/main/index.ts` sets it at module scope,
-   * before `whenReady`, because the id is read when the first window is made —
-   * so importing that module for its pure exports calls straight through here.
-   */
+  // src/main/index.ts calls this at module scope on win32 so the taskbar button
+  // gets the same identity as the Start Menu shortcut. Inert here, but it must
+  // EXIST: without it the module throws on import and takes every suite that
+  // imports index.ts with it.
   setAppUserModelId() {},
   /**
-   * False under `node --test`, which is also the honest answer: this is not a
+   * False under `node --test`, which is the honest answer: this is not a
    * packaged app. It matters because index.ts strips the default menu only when
-   * packaged, so the stub returning false is what keeps that branch unexercised
-   * rather than accidentally asserting a menu call that never happens in dev.
+   * packaged, so returning false is what keeps that branch unexercised rather
+   * than asserting a Menu call that never happens in development.
    */
   isPackaged: false,
 }

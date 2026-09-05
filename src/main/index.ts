@@ -115,21 +115,21 @@ function createWindow(): BrowserWindow {
 }
 
 /**
- * THE APP'S IDENTITY TO WINDOWS, and without it the taskbar shows Electron's.
+ * THE TASKBAR PICKS AN ICON BY AppUserModelID, NOT BY THE WINDOW'S ICON.
  *
- * Windows groups taskbar buttons and picks their icon by AppUserModelID, not by
- * the window's own icon. Electron defaults that ID to `electron.app.<name>` when
- * unpackaged, so the window title bar showed the Fate mark — `createWindow`
- * already sets `icon` for exactly that — while the TASKBAR sat there showing the
- * Electron atom all day. Two different mechanisms, one of them unset.
+ * Without this call Windows derives a per-process identity from the executable
+ * path, which is a different identity from the one the installer wrote onto the
+ * Start Menu shortcut. The consequences are all the ones that look like "the
+ * icon did not update": the taskbar button shows a stale cached icon, it does
+ * not merge with the pinned shortcut, and `setIcon` on the window has no effect
+ * on the button at all.
  *
- * The literal matches `build.appId` in package.json, because a packaged NSIS
- * install registers its shortcut under that id and a mismatch would split one
- * app into two taskbar buttons.
- *
- * Set before `whenReady`, since the id is read when the first window is created.
+ * It must match the `appId` in package.json's build config, because that is the
+ * string electron-builder stamps onto the shortcut, and the whole point is that
+ * the two agree. It must also run BEFORE the first window is created — set
+ * afterwards, the button has already been created under the old identity.
  */
-app.setAppUserModelId('com.divineconstruc.fate')
+if (process.platform === 'win32') app.setAppUserModelId('com.divineconstruc.fate')
 
 /**
  * NO DEFAULT MENU.

@@ -21,6 +21,31 @@ Two consequences you must hold on to:
   every app that opens is told. You cannot un-tell them. So the release is the
   last step, never the exploratory one.
 
+## 0b. Test locally. Then push. Never test by publishing.
+
+**A release is not a test run.** Everything except the release itself can be
+proved on this machine: `npm run dist` builds the real installer, and installing
+it locally and launching it exercises the whole app exactly as a user would.
+Verify there, and publish only once it works.
+
+Publishing to find out whether something works has three costs, and the first
+one is the one that matters:
+
+- **It is not reversible.** `/releases/latest` answers with the new tag within
+  seconds and every app that opens is told. There is no quiet retry.
+- **It burns version numbers on nothing.** A user's update history should read
+  as a record of the product, not of an agent's debugging.
+- **It publishes unfinished work to whoever downloads in that window.**
+
+The only thing that genuinely cannot be rehearsed locally is the feed answering
+with a new tag. If you must prove that path end to end, do it once, on a change
+that was going to ship anyway — never on a change invented to test with.
+
+**What this means in practice:** a change that is still being tested stays on a
+branch and stays local. A change that leaves testing goes through GitHub, and
+goes through this document. Those are two different moments and they are not
+allowed to be the same one.
+
 ## 1. What the user actually sees, and why it constrains your commits
 
 When someone opens the app and a newer release exists, they get one panel:
@@ -212,6 +237,7 @@ in it, that is a finding to report, not an obstacle to route around.
 ## 7. What you must never do
 
 - Publish a release you have not built and verified on this machine.
+- Publish in order to test something. See §0b — verify locally, then publish.
 - Publish with `--target main`. `main` moves; a sha does not.
 - Ship a version bump without a `CHANGELOG.md` section.
 - Delete or force-push a tag that a published release points at, unless you are

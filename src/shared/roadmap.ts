@@ -179,6 +179,18 @@ export const ROADMAP: FeatureGroup[] = [
       { label: 'Real-time multiplayer editing', status: 'planned', note: 'Needs a server and a CRDT; the save path is currently last-write-wins behind an mtime guard.' },
       { label: 'Sharing / permissions', status: 'planned' },
       { label: 'Comments', status: 'planned', surface: 'Editor tab' },
+      {
+        label: 'Message the founder — bugs and requests, from inside the app',
+        status: 'planned',
+        /**
+         * Not `ribbon:` — see the activity-heatmap entry for why an unbuilt
+         * surface may not claim a ribbon id. This one probably never will:
+         * reporting a bug is not a place you work, so Help or Settings → About
+         * is the likelier home, beside "Check for updates".
+         */
+        surface: 'Planned — Help or Settings → About',
+        note: 'Nathan\'s ask: a way to send a bug or a request straight from the app to him, through divineconstruc.com into a Cloudflare D1 table, so the feedback loop is constant rather than dependent on someone finding an email address. THE ARCHITECTURE IS ALREADY DECIDED BY THIS APP\'S OWN CONSTRAINTS, and getting them wrong is the whole risk. (1) IT CANNOT BE SENT FROM THE RENDERER. index.html ships `connect-src \'none\'` under `default-src \'none\'`, enforced by the browser rather than promised by the code, so a fetch from the form itself is refused before it leaves. It has to go through main, which is exactly how `update.ts` already works: one constant URL in shared/, one channel, no argument that could point the request somewhere else — the preload comment on `pickVaultDir` is the rule ("the renderer cannot nominate a directory for the app to read from") and it applies to a hostname just as hard. A `feedback:send(text)` channel is the shape; a `feedback:post(url, body)` channel is the security hole. (2) IT BREAKS A PUBLISHED PROMISE UNLESS THE DOCS MOVE WITH IT. README.md line 81 says "Nothing leaves the machine except two requests, both of which you start", and lists them. This is a third. The entry does not ship until that sentence, docs/PRIVACY.md and the About panel all say so — a privacy claim that is quietly false is worse than one that admits a third request the user pressed a button to make. (3) WHAT IT SENDS HAS TO BE ENUMERABLE AND SHOWN. The honest payload is the typed message, the app version, and the OS — no vault path, no note text, no note titles, no machine id, because this app scrubs absolute paths out of fs errors before they even cross to the renderer and a feedback form that quietly undoes that is the leak. Show the exact text that will be sent before sending it, the way the terminal shows the exact command before it runs. NOT ANONYMOUS TELEMETRY: nothing is collected in the background, there is no timer, and no request happens without a press. That is the same bar `update.ts` already meets — no check on launch and no timer — and it is the only version of this feature that fits an app whose pitch is local-first.',
+      },
     ],
   },
   {

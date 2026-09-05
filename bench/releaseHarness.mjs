@@ -126,6 +126,7 @@ export function measureRelease(
 
     // Drag, exactly as `onMove` does it: fx follows the pointer, nothing else.
     const startX = hub.x
+    const startY = hub.y
     for (let t = 0; t < dragTicks; t++) {
       hub.fx = hub.x = startX + (dragPx * (t + 1)) / dragTicks
       sim.tick()
@@ -137,7 +138,11 @@ export function measureRelease(
     held = null
     if (onRelease) onRelease({ sim, setHolding, refresh, hub, oneHop, tuning })
     else {
-      setHolding(false)
+      // The distance the node actually travelled, exactly as `finish` measures
+      // it. The release prices its leftover energy on this — a harness that
+      // passed nothing would measure a graph that always goes cold, which is
+      // the bug this argument exists to fix.
+      setHolding(false, Math.hypot(hub.x - startX, hub.y - startY))
       sim.alphaTarget(0)
     }
     // Reset on every release, not just the last: a ramp that has not finished

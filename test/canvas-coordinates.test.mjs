@@ -79,7 +79,14 @@ test('the drag rounds both coordinates before writing them to the node', () => {
 test('a duplicate is placed on integers too', () => {
   // The offset is added to the source's coordinate, so a duplicate of a card
   // that predates this fix would otherwise carry the old fraction forward.
-  const dup = VIEW.slice(VIEW.indexOf('const copy: CanvasNode'), VIEW.indexOf('doc.nodes.push(copy)'))
+  // Terminated on `place(doc, copy)`, which is what the bare `doc.nodes.push`
+  // became when creation started fitting the group a page lands in. The
+  // terminator matters more than it looks: `indexOf` returns -1 for a string
+  // that is gone, `slice(start, -1)` then runs to the end of the FILE, and the
+  // assertions below would pass on some other function's rounding.
+  const end = VIEW.indexOf('place(doc, copy)')
+  assert.ok(end > 0, 'duplicateNode no longer has the shape this test reads')
+  const dup = VIEW.slice(VIEW.indexOf('const copy: CanvasNode'), end)
   assert.match(dup, /x: Math\.round\(node\.x \+ DUPLICATE_OFFSET\)/, 'a duplicate can land on a float')
   assert.match(dup, /y: Math\.round\(node\.y \+ DUPLICATE_OFFSET\)/, 'a duplicate can land on a float')
 })

@@ -36,6 +36,28 @@ import { fileURLToPath } from 'node:url'
 const root = resolve(dirname(fileURLToPath(import.meta.url)), '..')
 const git = (...args) => execFileSync('git', args, { cwd: root, encoding: 'utf8' }).trim()
 
+/**
+ * A `git` call whose failure is an ANSWER, not an error.
+ *
+ * `rev-parse` on a tag that does not exist is the ordinary good case — it means
+ * the tag is about to be created — but git still writes "fatal: ambiguous
+ * argument" to stderr, and execFileSync lets that through to the terminal. The
+ * operator then reads a fatal error inside a check that is passing. Swallowing
+ * stderr here is not hiding a problem; it is refusing to report a non-problem
+ * in the language of one.
+ */
+const gitQuiet = (...args) => {
+  try {
+    return execFileSync('git', args, {
+      cwd: root,
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'ignore'],
+    }).trim()
+  } catch {
+    return null
+  }
+}
+
 const problems = []
 const note = (s) => console.log(`  ${s}`)
 
@@ -67,11 +89,36 @@ if (dirty) {
  *    failure: an existing tag is silently reused by `gh release create`, and it
  *    keeps whatever commit it was made at.
  */
+/**
+ * THE REMOTE IS ASKED, NOT ONLY THE LOCAL REPOSITORY, and that distinction is
+ * the whole value of this check.
+ *
+ * `gh release create` makes the tag on GitHub. A clone that has not fetched
+ * since then has no such ref, so a local-only lookup answers "does not exist,
+ * it will be created at HEAD" about a tag that already exists at another
+ * commit — the precise failure this script was written to stop, reported as an
+ * all-clear. Observed here on 2026-09-04, minutes after v1.0.1 was published.
+ *
+ * `ls-remote` is authoritative and costs one network round trip. If it cannot
+ * be reached the local ref is used and the operator is told the check was
+ * partial, because a preflight that silently degrades to a weaker check is
+ * worse than one that says so.
+ */
 let tagged = null
-try {
-  tagged = git('rev-parse', `${tag}^{commit}`)
-} catch {
-  // No such tag. That is the good case — it will be created at HEAD below.
+let tagSource = 'origin'
+const remote = gitQuiet('ls-remote', '--tags', 'origin', tag)
+if (remote === null) {
+  tagSource = 'local only — could not reach origin'
+  tagged = gitQuiet('rev-parse', `${tag}^{commit}`)
+} else if (remote === '') {
+  tagged = gitQuiet('rev-parse', `${tag}^{commit}`)
+  if (tagged) tagSource = 'local, not yet on origin'
+} else {
+  // An annotated tag prints twice: the tag object, then `<tag>^{}` for the
+  // commit. The dereferenced line is the one that names the commit.
+  const lines = remote.split('\n').map((l) => l.split('\t'))
+  const deref = lines.find(([, ref]) => ref?.endsWith('^{}')) ?? lines[0]
+  tagged = deref[0]
 }
 if (tagged && tagged !== head) {
   const behind = git('rev-list', '--count', `${tagged}..${head}`)
@@ -82,9 +129,9 @@ if (tagged && tagged !== head) {
       `      v1.0.0 shipped. Delete and recreate the tag at HEAD, or bump the version.`,
   )
 } else if (tagged) {
-  note(`tag       ${tag} already exists and points at HEAD — good`)
+  note(`tag       ${tag} already exists at HEAD (${tagSource}) — good`)
 } else {
-  note(`tag       ${tag} does not exist yet; it will be created at HEAD`)
+  note(`tag       ${tag} does not exist on origin; it will be created at HEAD`)
 }
 
 /**

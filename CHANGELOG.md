@@ -9,6 +9,35 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [1.0.2] — 2026-09-04
+
+**No change to the app itself.** This release fixes the release tooling and
+proves the update path end to end — a 1.0.1 install being told about 1.0.2,
+reading what changed, and choosing. Stated plainly because a release note that
+dressed this up as a feature would be the first lie in a panel whose entire
+purpose is that you can trust what it lists.
+
+### Fixed
+
+- **The preflight only checked local tags.** `gh release create` makes the tag
+  on GitHub, so a clone that has not fetched since has no such ref — and the
+  check answered "does not exist, it will be created at HEAD" about a tag that
+  already existed at another commit. That is precisely the fault the script was
+  written to catch, reported as an all-clear. Observed on 2026-09-04, minutes
+  after v1.0.1 was published, while cutting this release. It now asks `origin`
+  first and says which source answered; if origin cannot be reached it falls
+  back to the local ref and says the check was partial, because a preflight that
+  quietly degrades is worse than one that admits it.
+- **The preflight printed a fatal error while passing.** `git rev-parse` on a
+  tag that does not exist writes "fatal: ambiguous argument" to stderr, which
+  went straight to the terminal inside a check that was succeeding.
+
+### Known limitations
+
+Unchanged from 1.0.1: the update is not downloaded for you, builds are
+unsigned, and anyone still on 1.0.0 has no launch check and must find an update
+by hand.
+
 ## [1.0.1] — 2026-09-04
 
 The app can now tell you an update exists, and show you what is in it before

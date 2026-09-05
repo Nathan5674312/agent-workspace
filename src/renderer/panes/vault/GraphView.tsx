@@ -157,13 +157,32 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
     const token = (name: string, fallback: string) =>
       css.getPropertyValue(name).trim() || fallback
     const COL = {
-      link: token('--label-tertiary', 'GrayText'),
-      node: token('--label-secondary', 'CanvasText'),
-      hot: token('--accent', 'Highlight'),
-      label: token('--label-secondary', 'CanvasText'),
+      link: '',
+      node: '',
+      hot: '',
+      label: '',
       /** The window ground, for refilling the erased disc under each node. */
-      ground: token('--bg-app', 'Canvas'),
+      ground: '',
     }
+    /**
+     * Re-readable, not read once. `getComputedStyle` returns a LIVE
+     * declaration, so calling `token()` again after `data-theme` changes on
+     * <html> yields the new palette without a new `getComputedStyle` call.
+     *
+     * This exists because the graph used to resolve its colours once, inside an
+     * effect keyed on `[graph]`, and so kept the founder's palette until the
+     * note set changed. Re-keying that effect on the theme is the obvious fix
+     * and the wrong one: it tears down the simulation, so every node jumps to a
+     * fresh layout and the camera resets, for a colour change.
+     */
+    const readPalette = () => {
+      COL.link = token('--label-tertiary', 'GrayText')
+      COL.node = token('--label-secondary', 'CanvasText')
+      COL.hot = token('--accent', 'Highlight')
+      COL.label = token('--label-secondary', 'CanvasText')
+      COL.ground = token('--bg-app', 'Canvas')
+    }
+    readPalette()
 
     const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
 
@@ -209,18 +228,24 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
     const halo = document.createElement('canvas')
     halo.width = SPRITE_PX
     halo.height = SPRITE_PX
-    {
+    /**
+     * Baked from `--bg-app`, so it is a palette artefact and has to be rebuilt
+     * with the palette. A sprite kept from the old theme is worse than no
+     * halo: going from Midnight to Parchment left a DARK pool under every node
+     * on cream paper, which is the halo doing the exact opposite of its job.
+     */
+    const paintHalo = () => {
       const hx = halo.getContext('2d')
-      if (hx) {
-        const c = SPRITE_PX / 2
-        const g = hx.createRadialGradient(c, c, 0, c, c, c)
-        const ink = token('--bg-app', 'Canvas')
-        g.addColorStop(0, ink)
-        g.addColorStop(1, 'transparent')
-        hx.fillStyle = g
-        hx.fillRect(0, 0, SPRITE_PX, SPRITE_PX)
-      }
+      if (!hx) return
+      const c = SPRITE_PX / 2
+      hx.clearRect(0, 0, SPRITE_PX, SPRITE_PX)
+      const g = hx.createRadialGradient(c, c, 0, c, c, c)
+      g.addColorStop(0, COL.ground)
+      g.addColorStop(1, 'transparent')
+      hx.fillStyle = g
+      hx.fillRect(0, 0, SPRITE_PX, SPRITE_PX)
     }
+    paintHalo()
 
     // Degree drives node size — the same signal Obsidian uses. A hub should
     // look like a hub without being clicked.
@@ -918,6 +943,22 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
     ro.observe(wrap)
     resize()
 
+    /**
+     * The theme is an attribute on <html> (see src/renderer/appearance.ts), so
+     * that attribute is the signal — not React state, which this view is not
+     * given, and not a prop, which would make every caller responsible for
+     * remembering to pass it.
+     */
+    const themeWatch = new MutationObserver(() => {
+      readPalette()
+      paintHalo()
+      invalidate()
+    })
+    themeWatch.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['data-theme'],
+    })
+
     if (reduced) {
       // Motion here is incidental, not informational: run the layout to rest
       // synchronously and paint the settled result.
@@ -1377,6 +1418,7 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       // loop that writes to a canvas that is no longer in the document.
       stopMotion()
       sim.stop()
+      themeWatch.disconnect()
       canvas.removeEventListener('pointermove', onMove)
       canvas.removeEventListener('pointermove', onPan)
       canvas.removeEventListener('pointerdown', onDown)

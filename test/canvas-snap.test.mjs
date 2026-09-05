@@ -193,9 +193,20 @@ test('the interior is the group inset by the padding a group is built from', () 
   )
 })
 
-test('aligning is the default and Shift is the escape hatch', () => {
-  // Inverted deliberately. Held behind Shift, the snap was a feature nobody
-  // invoked, so every drag was a free drag and the board read as loose pages.
-  const move = VIEW.slice(VIEW.indexOf('const held = drag.current'), VIEW.indexOf('const snapX ='))
-  assert.match(move, /if \(doc && !e\.shiftKey\) \{/, 'the drag snap is gated behind Shift again')
+test('dragging always aligns - no modifier gates it', () => {
+  /*
+   * Corrected twice. Held behind Shift it was a feature nobody invoked, so
+   * every drag was a free drag. Inverting it made Shift the escape hatch, which
+   * collided with Shift being the ADDITIVE-SELECTION modifier: shift-clicking
+   * several pages and dragging them turned alignment off, so the one gesture
+   * most likely to be arranging things was the one that would not help.
+   *
+   * No modifier now. The snap only pulls inside SNAP_RANGE, so further away is
+   * already free placement and nothing needs an off switch.
+   */
+  const from = VIEW.indexOf('const held = drag.current')
+  const move = VIEW.slice(from, VIEW.indexOf('const snapX =', from))
+  assert.ok(move.length > 0, 'the drag block no longer has the shape this test reads')
+  assert.match(move, /if \(doc\) \{/, 'the drag snap is gated again')
+  assert.doesNotMatch(move, /shiftKey/, 'a modifier gates alignment again')
 })

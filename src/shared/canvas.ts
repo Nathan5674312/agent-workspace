@@ -217,6 +217,35 @@ export function groupMembers(group: CanvasBox, nodes: CanvasNode[]): CanvasNode[
 }
 
 /**
+ * Everything a drag on `target` must carry, target itself excluded.
+ *
+ * The selection when `target` is part of a multi-selection, plus whatever any
+ * group in that set is holding — because a group that moved alone was a
+ * rectangle you could slide off its own contents.
+ *
+ * PURE AND HERE rather than inline in the view, and that placement is the whole
+ * lesson of the revision that added it: the first cut lived in CanvasView and
+ * was "tested" by a regex asserting the lines existed. They did exist. It still
+ * did not work, and a source-shaped test cannot tell you that. This one can be
+ * run against a real board.
+ */
+export function dragSet(
+  target: CanvasNode,
+  selection: ReadonlySet<string>,
+  nodes: CanvasNode[],
+): CanvasNode[] {
+  const inSelection = selection.has(target.id) && selection.size > 1
+  const movers = new Set<CanvasNode>(
+    inSelection ? nodes.filter((n) => selection.has(n.id)) : [target],
+  )
+  for (const n of [...movers]) {
+    if (n.type === 'group') for (const m of groupMembers(n, nodes)) movers.add(m)
+  }
+  movers.delete(target)
+  return [...movers]
+}
+
+/**
  * The box a group has to be to hold `members` with `pad` around them.
  *
  * `null` when it holds nothing, and that is the useful half of the contract:
@@ -229,12 +258,29 @@ export function groupMembers(group: CanvasBox, nodes: CanvasNode[]): CanvasNode[
  * shape of a page that has since been dragged out of it, which is the same
  * untidiness the fit exists to remove, just slower to notice.
  *
+ * `floor` IS THE EXEMPTION FOR A BOX SOMEBODY SIZED ON PURPOSE, and it is what
+ * makes a hand-resized group survive contact with the fit. Passed a box, the
+ * result contains it: the group still GROWS to hold a page that has moved
+ * outside its walls, and is never pulled back in around its contents.
+ *
+ * That asymmetry is the point rather than a compromise. Growing is the fit
+ * answering for something the user just did to the PAGES — a page they dragged
+ * to a place their own box does not reach. Shrinking is the fit overruling a
+ * size they set with their own hands, on no new information at all. Only the
+ * second one is the view arguing with the user, so only the second one is
+ * withheld. `null` means the group has never been sized by hand and the fit owns
+ * it completely, which is the ordinary case.
+ *
  * `pad` is passed in rather than owned here for the reason `guides.ts` gives
  * about grid and range: CanvasView owns GROUP_PAD, it is the same measurement a
  * new group is built from and the same one the snap insets a group's interior
  * by, and a second copy of it here is how those three quietly stop agreeing.
  */
-export function groupFit(members: CanvasBox[], pad: number): CanvasBox | null {
+export function groupFit(
+  members: CanvasBox[],
+  pad: number,
+  floor: CanvasBox | null = null,
+): CanvasBox | null {
   if (members.length === 0) return null
   let minX = Infinity
   let minY = Infinity
@@ -249,11 +295,22 @@ export function groupFit(members: CanvasBox[], pad: number): CanvasBox | null {
   // Rounded because the spec declares x/y/width/height integer, and a group is
   // the one node the user never types a size into — every value it ever gets
   // comes from arithmetic like this.
-  return {
+  const box = {
     x: Math.round(minX - pad),
     y: Math.round(minY - pad),
     width: Math.round(maxX - minX + pad * 2),
     height: Math.round(maxY - minY + pad * 2),
+  }
+  if (!floor) return box
+  // The smallest box holding both, so the hand-set walls are kept and only the
+  // sides the contents have outgrown move.
+  const x = Math.min(box.x, floor.x)
+  const y = Math.min(box.y, floor.y)
+  return {
+    x,
+    y,
+    width: Math.max(box.x + box.width, floor.x + floor.width) - x,
+    height: Math.max(box.y + box.height, floor.y + floor.height) - y,
   }
 }
 

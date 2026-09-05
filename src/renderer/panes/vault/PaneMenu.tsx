@@ -70,6 +70,29 @@ export function PaneMenu({
    * button and the state lives on the panel.
    */
   const [open, setOpen] = useState(false)
+  /**
+   * Whether this menu has EVER been opened, which is what gates its contents.
+   *
+   * A closed menu used to mount its children anyway, and children do work:
+   * `BookmarkToggleItem` reads `.obsidian/bookmarks.json` on mount to decide
+   * whether its row says "Bookmark" or "Remove bookmark". Most vaults have
+   * never had that file — the panel's own comment calls its absence "the NORMAL
+   * state of a vault nobody has bookmarked in" — so every launch logged
+   *
+   *     Error occurred in handler for 'vault:read': ENOENT ... bookmarks.json
+   *
+   * from the main process. The renderer caught it correctly; Electron logs a
+   * rejected `ipcMain.handle` regardless, and an error printed on every launch
+   * for a normal condition is how real errors stop being read.
+   *
+   * `everOpened` rather than `open`, deliberately. Gating on `open` alone would
+   * unmount the contents on close and re-run their effects on every open, which
+   * is a different behaviour than the one this app has today — fresher, but not
+   * what anything here was written against. This keeps the semantics identical
+   * and removes only the work nobody asked for: the first open pays for the
+   * read, and a menu never opened pays nothing.
+   */
+  const [everOpened, setEverOpened] = useState(false)
 
   return (
     <>
@@ -90,9 +113,23 @@ export function PaneMenu({
         className={panelClass ? `pane-menu ${panelClass}` : 'pane-menu'}
         role="menu"
         aria-label={label}
+        /**
+         * `beforetoggle`, not `toggle`, for the mount.
+         *
+         * `toggle` fires AFTER the popover is shown, so the first open would
+         * paint one frame of an empty panel and then grow to fit — a visible
+         * pop, and a popover that positions itself against the wrong size.
+         * `beforetoggle` fires before it is shown, which gives React the render
+         * it needs while the panel is still hidden.
+         */
+        onBeforeToggle={(e) => {
+          if (e.newState === 'open') setEverOpened(true)
+        }}
+        // `open` still comes from `toggle`, because aria-expanded should
+        // describe what IS shown rather than what is about to be.
         onToggle={(e) => setOpen(e.currentTarget.matches(':popover-open'))}
       >
-        {children}
+        {everOpened ? children : null}
       </div>
     </>
   )

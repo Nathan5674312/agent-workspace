@@ -89,29 +89,53 @@ export const VELOCITY_DECAY_NORMAL = 0.4
 // ── the release ─────────────────────────────────────────────────
 
 /**
- * The most energy a finished gesture may leave behind.
+ * The most energy a finished gesture may leave behind, PER PIXEL IT MOVED.
  *
- * A press drives the simulation to `HOLD.alpha` so neighbours answer your
- * hand. Releasing used to only stop DRIVING — `alphaTarget(0)` — and alpha
- * then bleeds off at d3's `alphaDecay`, about 2.3% a tick. That is slower than
- * a person letting go and grabbing again, so the heat from one gesture was
- * still in the graph when the next one added its own. Measured over six quick
- * press-drag-release cycles, alpha at each press ran
+ * This replaced a flat cap, and the flat cap was half a fix that shipped.
+ *
+ * The problem it solved is real and still solved: a press drives the
+ * simulation to `HOLD.alpha`, the release only stopped DRIVING, and alpha then
+ * bleeds off at about 2.3% a tick — slower than a person can let go and grab
+ * again. Alpha at each of six quick presses ran
  *
  *     0 -> 0.018 -> 0.032 -> 0.042 -> 0.050 -> 0.056
  *
- * and the node you let go of peaked at 0.807 px/tick and wandered 21px after
- * the pointer was up. That is the fling: not one bad release, a ratchet.
+ * and the node you let go of flew. A ceiling stops that ratchet dead.
  *
- * A CEILING rather than an undo. It is absolute, so no sequence of gestures
- * can climb past it however fast they come; and anything already below it is
- * left alone, so a graph that was genuinely disturbed still relaxes rather
- * than freezing. 0.005 is five times `alphaMin`, which is roughly 70 ticks of
- * settling — enough for `forceCollide` to separate a node dropped on top of
- * another. `bench/release.mjs` asserts that overlaps stay at zero, which is
- * the check that stops this from being a cure worse than the disease.
+ * WHAT THE FLAT CEILING ALSO STOPPED was the layout settling at all. At 0.005
+ * the simulation is barely above `alphaMin`, so a node dragged somewhere its
+ * links cannot reach just STAYS there: measured, a 260px drag left the held
+ * node's links stretched to 224px against a rest length of 102, and only 18% of
+ * that stretch ever came back. It looked like the node was stuck, because it
+ * was — until the next press reheated the graph and the whole neighbourhood
+ * snapped into place at once, which reads as the app undoing your drag.
+ *
+ * The two cases want opposite things and a single number cannot serve both.
+ * Measured across strategies:
+ *
+ *     strategy              relax after 260px drag   fling on 6 quick taps
+ *     flat 0.005                          18%                      0.049
+ *     flat 0.05                           85%                      0.388
+ *     flat 0.10                          100%                      0.564
+ *     scaled (this)                      101%                      0.047
+ *
+ * So the energy is proportional to the DISTURBANCE. A tap that moved a node
+ * three pixels has nothing to relax and earns almost no alpha; a drag across
+ * the board earns enough to pull its neighbours after it. Repeated taps cannot
+ * ratchet, because each release recomputes from that gesture's own travel
+ * rather than adding to what the last one left.
+ *
+ * `RELEASE_ALPHA_FULL` is the energy a drag of `RELEASE_ALPHA_REF` pixels gets,
+ * and the ceiling for anything longer.
  */
-export const RELEASE_ALPHA_CAP = 0.005
+export const RELEASE_ALPHA_REF = 260
+export const RELEASE_ALPHA_FULL = 0.15
+
+/** The alpha a release may leave, for a gesture that moved the node `px`. */
+export function releaseAlpha(px: number): number {
+  if (!Number.isFinite(px) || px <= 0) return 0
+  return Math.min(RELEASE_ALPHA_FULL, (px / RELEASE_ALPHA_REF) * RELEASE_ALPHA_FULL)
+}
 
 /**
  * How long damping takes to come back to its resting value, in ticks.
@@ -534,14 +558,19 @@ export function buildSimulation<
   /**
    * Called on press and release; owns the two levers that are not per-link.
    *
+   * `movedPx` is how far the held node travelled during the gesture, and is
+   * ignored on press. It is the difference between "nothing happened, leave the
+   * graph cold" and "this node is a long way from its links now, let them pull
+   * it back".
+   *
    * Release is not the mirror of press. Press is a step change the user
    * caused and can see the reason for; release is a step change nothing on
    * screen accounts for, so it reads as the app throwing the node. Letting go
    * therefore does three things where taking hold does one: put the rest
-   * lengths back, cap the heat the hold added (`RELEASE_ALPHA_CAP`), and hand
+   * lengths back, scale the heat it leaves to the distance moved, and hand
    * damping back over `RELEASE_RAMP_TICKS` instead of in a single frame.
    */
-  const setHolding = (holding: boolean) => {
+  const setHolding = (holding: boolean, movedPx = 0) => {
     if (holding) {
       // A new press cancels any ramp still running from the last release —
       // otherwise a fast regrab would keep ramping damping DOWN underneath a
@@ -550,7 +579,9 @@ export function buildSimulation<
       sim.velocityDecay(tuning.velocityDecay)
     } else {
       releasing = 0
-      sim.alpha(Math.min(sim.alpha(), RELEASE_ALPHA_CAP))
+      // Scaled by how far this gesture actually moved the node — see
+      // `releaseAlpha`. A flat ceiling here is what stranded a dragged node.
+      sim.alpha(Math.min(sim.alpha(), releaseAlpha(movedPx)))
     }
     refresh()
   }

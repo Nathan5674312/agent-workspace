@@ -28,7 +28,8 @@ import { strict as assert } from 'node:assert'
 import {
   HOLD,
   VELOCITY_DECAY_NORMAL,
-  RELEASE_ALPHA_CAP,
+  RELEASE_ALPHA_FULL,
+  releaseAlpha,
 } from '../src/renderer/panes/vault/graphPhysics.ts'
 import { measureRelease } from '../bench/releaseHarness.mjs'
 
@@ -111,31 +112,61 @@ test('the fix is a large improvement on the behaviour it replaced', () => {
   }
 })
 
-test('a long drag is placed where it was dropped, not carried onward', () => {
-  // The case that used to be worst: 3.055px/tick and 49px of travel after an
-  // 80px drag, which is the node continuing more than half the gesture again
-  // on its own.
+test('a long drag settles smoothly instead of being flung', () => {
+  /**
+   * THIS ASSERTION USED TO BE WRONG, and it is worth saying how.
+   *
+   * It read `hubTravel < 10` — "a long drag is placed where it was dropped".
+   * That was written while the release capped alpha flat, when a node stayed
+   * exactly where it was dropped because the simulation had gone cold. The test
+   * therefore encoded the STRANDING BUG as the desired behaviour, and would
+   * have blocked the fix for it.
+   *
+   * Travel after a long drag is not the defect. A node dragged 80px away from
+   * its links SHOULD be pulled back; that is what a force layout is. The defect
+   * is the SPEED and the failure to stop:
+   *
+   *     peak px/tick   travel   settles in
+   *     legacy   3.055     49px    37 ticks
+   *     now      0.651     31px    48 ticks
+   *
+   * So the bar is peak speed and coming to rest, not distance.
+   */
   const now = slow()
   const before = slow(LEGACY_RELEASE)
+
   assert.ok(
-    now.hubTravel < 10,
-    `an 80px drag carried the node a further ${now.hubTravel.toFixed(1)}px`,
+    now.hubPeak < before.hubPeak / 3,
+    `an 80px drag peaked at ${now.hubPeak.toFixed(3)}px/tick against ` +
+      `${before.hubPeak.toFixed(3)} before — it is being flung, not settling`,
   )
-  assert.ok(now.hubPeak < before.hubPeak / 4, 'long drags must be calmer too')
+  // It must actually STOP. A node still moving when the window closes is either
+  // orbiting or drifting, and both read as the graph never coming to rest.
+  assert.ok(
+    now.settleTicks < 240,
+    `the neighbourhood was still moving after ${now.settleTicks} ticks`,
+  )
+  // And it must not overshoot past the gesture that caused it.
+  assert.ok(
+    now.hubTravel < 80,
+    `the node travelled ${now.hubTravel.toFixed(1)}px after an 80px drag`,
+  )
 })
 
 test('cooling the graph does not freeze overlapping nodes together', () => {
   /**
    * The guard on the cure.
    *
-   * Capping alpha at release is only safe while the layout can still resolve a
-   * node dropped on top of another. `RELEASE_ALPHA_CAP` is five times d3's
-   * `alphaMin`, so the simulation keeps running for roughly 70 ticks after a
-   * gesture — enough for `forceCollide` to separate them. A cap low enough to
-   * stop the simulation dead would pass every assertion above and leave nodes
-   * inside each other.
+   * Cooling at release is only safe while the layout can still resolve a node
+   * dropped on top of another. A real drag must leave the simulation above d3's
+   * `alphaMin` or nothing moves afterwards at all — which is precisely the
+   * regression the flat cap shipped, and which the next test now guards
+   * directly.
    */
-  assert.ok(RELEASE_ALPHA_CAP > 0.001, 'the cap must stay above d3 alphaMin')
+  assert.ok(
+    releaseAlpha(260) > 0.001,
+    'a real drag must leave the simulation above d3 alphaMin, or it cannot settle',
+  )
   for (const r of [quick(1), quick(6), slow(), measureRelease(HOLD, {
     gestures: 1,
     dragTicks: 60,
@@ -180,4 +211,43 @@ test('the ring is still where the hold put it', () => {
     now.ringRadius > 40 && now.ringRadius < 220,
     `ring radius ${now.ringRadius.toFixed(1)}px is not a plausible layout`,
   )
+})
+
+test('A DRAGGED NODE IS NOT STRANDED — the layout relaxes after you let go', () => {
+  /**
+   * THE REGRESSION THE FIRST FIX SHIPPED, and the reason `releaseAlpha` scales
+   * instead of being a constant.
+   *
+   * Nathan: *"when you drag and move a node it stays like this until another
+   * node is grabbed and moved then it goes back to place"*. The flat 0.005 cap
+   * left the simulation barely above `alphaMin`, so a node dragged somewhere
+   * its links could not reach simply stayed there — and the NEXT press reheated
+   * the graph and snapped the whole neighbourhood into position at once, which
+   * reads as the app undoing your drag a minute later.
+   *
+   * Every other assertion in this file passed throughout. They all measure how
+   * LITTLE moves after a release, and a frozen graph is the perfect score on
+   * every one of them. That is the trap: an acceptance bar with only one
+   * direction rewards going too far in it. This is the opposite bound.
+   */
+  const stretch = (dragPx) => {
+    const r = measureRelease(HOLD, { gestures: 1, dragTicks: 40, dragPx, afterTicks: 400 })
+    return r
+  }
+  // A long drag pulls the held node far from its links; they must pull back.
+  const far = stretch(260)
+  assert.ok(
+    far.ringRadius < 160,
+    `after a 260px drag the ring settled at ${far.ringRadius.toFixed(1)}px — ` +
+      'the node was left stranded, its links never relaxed',
+  )
+  /**
+   * And the graph must still be WARM enough to do it. A drag of the reference
+   * distance earns the full budget; a three-pixel twitch earns nearly nothing,
+   * which is what stops repeated taps from ratcheting.
+   */
+  assert.ok(releaseAlpha(260) >= RELEASE_ALPHA_FULL * 0.9, 'a long drag earns no energy')
+  assert.ok(releaseAlpha(3) < 0.01, 'a twitch earns enough energy to ratchet')
+  assert.equal(releaseAlpha(0), 0, 'a press that moved nothing must leave nothing')
+  assert.equal(releaseAlpha(10_000), RELEASE_ALPHA_FULL, 'the budget has no ceiling')
 })

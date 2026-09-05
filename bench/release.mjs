@@ -17,7 +17,8 @@
 import {
   HOLD,
   VELOCITY_DECAY_NORMAL,
-  RELEASE_ALPHA_CAP,
+  RELEASE_ALPHA_REF,
+  RELEASE_ALPHA_FULL,
   RELEASE_RAMP_TICKS,
 } from '../src/renderer/panes/vault/graphPhysics.ts'
 import { measureRelease } from './releaseHarness.mjs'
@@ -80,8 +81,8 @@ console.log(
   '\npeak px/tick of the node you let go of  /  how far it wandered after you did',
 )
 console.log(
-  `cap ${RELEASE_ALPHA_CAP} alpha, damping ramped ${HOLD.velocityDecay} -> ${VELOCITY_DECAY_NORMAL}` +
-    ` over ${RELEASE_RAMP_TICKS} ticks.`,
+  `release alpha scales to ${RELEASE_ALPHA_FULL} over ${RELEASE_ALPHA_REF}px of travel;` +
+    ` damping ramped ${HOLD.velocityDecay} -> ${VELOCITY_DECAY_NORMAL} over ${RELEASE_RAMP_TICKS} ticks.`,
 )
 console.log(
   'Overlaps must stay 0: a release that cools the graph must still let',

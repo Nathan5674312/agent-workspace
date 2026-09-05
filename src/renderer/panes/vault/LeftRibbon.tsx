@@ -105,8 +105,8 @@ const SURFACES: {
 }[] = [
   { id: 'editor', label: 'Note', Icon: FileText, group: 'vault' },
   { id: 'graph', label: 'Graph', Icon: Waypoints, group: 'vault' },
-  { id: 'canvas', label: 'Canvas', Icon: Frame, group: 'vault' },
   { id: 'database', label: 'Database', Icon: Table2, group: 'vault' },
+  { id: 'canvas', label: 'Canvas', Icon: Frame, group: 'vault' },
   { id: 'planner', label: 'Planner', Icon: Calendar, group: 'vault' },
   { id: 'inbox', label: 'Inbox', Icon: Inbox, group: 'vault' },
   { id: 'terminal', label: 'Terminal', Icon: SquareTerminal, group: 'tools' },

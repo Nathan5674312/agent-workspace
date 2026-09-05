@@ -596,6 +596,26 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   border-bottom: 1px solid var(--separator);
   -webkit-app-region: drag;
 }
+/**
+ * THE TOP RESIZE EDGE, given back.
+ *
+ * `-webkit-app-region: drag` on an element touching the window edge swallows
+ * the OS resize handle — the window could be moved by the bar and then not
+ * resized from its top border at all. A no-drag strip along the very top hands
+ * those few pixels back to the frame.
+ *
+ * 4px matches what Windows uses for a border grab. It sits above the bar's
+ * content rather than beside it, so nothing in the row moves.
+ */
+.vault-tab-bar { position: relative; }
+.vault-tab-bar::before {
+  content: '';
+  position: absolute;
+  top: 0; left: 0; right: 0;
+  height: 4px;
+  -webkit-app-region: no-drag;
+}
+
 /* Everything you can actually press. A draggable ancestor eats pointer events
    on its children, so a control that is not listed here becomes decoration. */
 .vault-tab-bar button,
@@ -1785,7 +1805,21 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
    * so it says so.
    */
   position: fixed;
-  top: 0;
+  /**
+   * BELOW THE WINDOW CONTROLS, which now live in the app's own top strip.
+   *
+   * The window is `titleBarStyle: 'hidden'`, so content starts at y=0 and
+   * Windows draws minimise/maximise/close over the top-right — exactly where
+   * this panel is pinned. Without the offset the OS buttons are painted across
+   * the first card, and the card's own controls are unreachable underneath them.
+   *
+   * `env(titlebar-area-height)` is the overlay's real height as the browser
+   * reports it, so this tracks whatever `titleBarOverlay.height` is set to in
+   * src/main/index.ts instead of duplicating the number. The `0px` fallback is
+   * correct rather than defensive: on a build with no overlay there are no
+   * buttons here to avoid.
+   */
+  top: env(titlebar-area-height, 0px);
   right: 0;
   z-index: 5;
   margin: var(--space-5);

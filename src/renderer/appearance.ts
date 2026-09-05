@@ -66,13 +66,50 @@ export function applyAppearance(a: Appearance): void {
  */
 function paintWindowControls(): void {
   const css = getComputedStyle(document.documentElement)
-  const color = hex(css.getPropertyValue('--bg-app'))
+  /**
+   * THE TAB BAR'S TONE, NOT THE WINDOW'S.
+   *
+   * First attempt sent `--bg-app` and it left a visible seam: the strip behind
+   * the buttons is inside `.vault-tab-bar`, which paints `--material-regular`
+   * — a TRANSLUCENT lighter tone — over that ground. Sending the ground alone
+   * drew a darker rectangle in the middle of a lighter bar.
+   *
+   * The OS cannot composite for us; it takes one opaque colour. So the blend
+   * happens here, against the same two tokens the bar itself uses, and the
+   * result is the colour that bar actually appears to be.
+   */
+  const ground = hex(css.getPropertyValue('--bg-app'))
+  const color = ground
+    ? over(css.getPropertyValue('--material-regular'), ground)
+    : null
   const symbolColor = hex(css.getPropertyValue('--label'))
   if (!color || !symbolColor) return
   // Fire and forget. A window built without the overlay, or a platform that
   // has none, rejects — and a theme change must not fail over the colour of a
   // close button.
   void window.api?.window?.setOverlay(color, symbolColor).catch(() => {})
+}
+
+/**
+ * Composite a translucent CSS colour over an opaque `#rrggbb` ground.
+ *
+ * Source-over in sRGB, which is what the browser does when it paints one over
+ * the other. Returns the ground unchanged if the top colour cannot be read,
+ * because a seam is better than a wrong colour and a missing token should not
+ * take the whole theme change down.
+ */
+function over(raw: string, ground: string): string {
+  const m = raw.trim().match(/^rgba?\(\s*(\d+)[\s,]+(\d+)[\s,]+(\d+)[\s,/]*([\d.]+)?/i)
+  if (!m) return hex(raw) ?? ground
+  const a = m[4] === undefined ? 1 : Math.min(1, Math.max(0, Number(m[4])))
+  const g = [1, 3, 5].map((i) => parseInt(ground.slice(i, i + 2), 16))
+  return (
+    '#' +
+    [1, 2, 3]
+      .map((k) => Math.round(Number(m[k]) * a + g[k - 1] * (1 - a)))
+      .map((n) => Math.min(255, Math.max(0, n)).toString(16).padStart(2, '0'))
+      .join('')
+  )
 }
 
 /**

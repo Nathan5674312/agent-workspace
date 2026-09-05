@@ -12,7 +12,7 @@ import assert from 'node:assert/strict'
 import {
   DEFAULT_STATE_LABELS,
   STATE_ORDER,
-  labelOf,
+  headOf,
   stateOf,
   stateRank,
 } from '../src/shared/roadmapStates.ts'
@@ -50,17 +50,33 @@ test('the app roadmap vocabulary and the vault one meet', () => {
   assert.equal(stateOf('planned'), 'idea')
 })
 
-test('renaming one state leaves the other three alone', () => {
-  // The bug this is here for: `labels ?? DEFAULTS` blanks every key the stored
-  // object does not mention, so renaming Idea would empty Partial.
-  const labels = { idea: 'Backlog' }
-  assert.equal(labelOf('idea', labels), 'Backlog')
-  assert.equal(labelOf('partial', labels), DEFAULT_STATE_LABELS.partial)
-  assert.equal(labelOf('done', labels), DEFAULT_STATE_LABELS.done)
+test('a real status keeps its own word, minus the explanation', () => {
+  // The pill shows what the NOTE says, so this is what a reader actually sees.
+  // Verbatim from the vault: the state is the first clause, the rest is why.
+  // Case is the author's: this is what goes on the pill.
+  assert.equal(
+    headOf('IN PROGRESS — electron-builder landed `0871a02`, zip artifact builds'),
+    'IN PROGRESS',
+  )
+  assert.equal(headOf('SCOPED — brief written, drafting delegated'), 'SCOPED')
+  // ...and matching still works across that case difference.
+  assert.equal(stateOf('IN PROGRESS — electron-builder landed `0871a02`'), 'partial')
+  // A YAML comment is not part of the status. Verbatim from this vault's own
+  // template, where it used to render the instructions onto the pill.
+  assert.equal(headOf('idea   # idea | active | paused | abandoned | live'), 'idea')
+  assert.equal(stateOf('idea   # idea | active | paused | abandoned | live'), 'idea')
+  // A bare hyphen is part of a word, not a separator.
+  assert.equal(headOf('north-star'), 'north-star')
+  assert.equal(headOf('blocked-on-domain-access'), 'blocked-on-domain-access')
+  // And an unrecognised one still reads back whole, because nothing renames it.
+  assert.equal(stateOf('blocked-on-domain-access'), null)
 })
 
-test('a blank or absent vocabulary falls back rather than rendering empty', () => {
-  assert.equal(labelOf('complete', null), 'Complete')
-  assert.equal(labelOf('complete', undefined), 'Complete')
-  assert.equal(labelOf('complete', { complete: '   ' }), 'Complete')
+test('the pipeline summary has a name for every state', () => {
+  // The one place the app does the talking: counts across many vocabularies at
+  // once, where "48 partial" has to mean the same thing for every row.
+  for (const s of STATE_ORDER) {
+    assert.equal(typeof DEFAULT_STATE_LABELS[s], 'string')
+    assert.ok(DEFAULT_STATE_LABELS[s].length > 0, `${s} has no name`)
+  }
 })

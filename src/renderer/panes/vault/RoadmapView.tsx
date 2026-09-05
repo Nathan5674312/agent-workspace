@@ -7,8 +7,9 @@ import {
   type FeatureStatus,
 } from '../../../shared/roadmap.js'
 import {
+  DEFAULT_STATE_LABELS,
   STATE_ORDER,
-  labelOf,
+  headOf,
   stateOf,
   stateRank,
   type RoadmapState,
@@ -44,6 +45,17 @@ import type { VaultNoteMeta } from '../../../shared/notemeta.js'
  * Measured on this vault, 61 notes of 1853 carry one — a roadmap, not a dump.
  * So a person makes a row by writing a note the way they already write notes,
  * and an agent makes one with the tools it already has.
+ *
+ * THE VOCABULARY IS THE VAULT'S, NOT THE APP'S. Every row shows the status
+ * word the note itself uses — `RESEARCHED`, `SHIPPED`, `Backlog` — and the four
+ * states are used only to sort, count and colour it. Nathan asked for states
+ * "in different states depending on how the user's self or if an organisation
+ * would prefer", and this is that with nothing to configure: an organisation
+ * gets its own words by writing them, the way it already writes them.
+ *
+ * The first version of this had a `stateLabels` prop and a plan for a settings
+ * tree behind it. That was a worse answer to the same question — it would have
+ * renamed four buckets while still overwriting whatever a note actually said.
  *
  * Read-only, like the view it replaces. Status lives in the note's frontmatter
  * and the note is the place to change it; an editable pill here would make this
@@ -96,21 +108,27 @@ function FeatureRow({ feature }: { feature: Feature }) {
 function NoteRow({
   note,
   state,
-  labels,
   open,
   onToggle,
   onOpenNote,
 }: {
   note: VaultNoteMeta
   state: RoadmapState | null
-  labels?: Partial<Record<RoadmapState, string>> | null
   open: boolean
   onToggle: () => void
   onOpenNote?: (path: string) => void
 }) {
-  // An unrecognised status keeps the word the note actually used. Showing
-  // nothing would hide a real value; showing "Idea" would invent one.
-  const pill = state ? labelOf(state, labels) : note.status || 'No state'
+  /**
+   * THE NOTE'S OWN WORD, always — never the canonical state name.
+   *
+   * `headOf` drops the explanation after the dash, because a real status reads
+   * `IN PROGRESS — electron-builder landed 0871a02` and the pill is not where
+   * that sentence goes; the row expands for detail. What is left is what the
+   * author wrote, so a vault that says RESEARCHED does not get told it means
+   * "Partial". The state is still doing its job — it decides the colour and
+   * where the row sorts — it just does not do the talking.
+   */
+  const pill = headOf(note.status) || 'no state'
   return (
     <li className={`roadmap-row roadmap-row--${state ?? 'unknown'}`}>
       <button
@@ -161,11 +179,9 @@ export interface RoadmapViewProps {
    *  different answers and the empty state says which. */
   notes: VaultNoteMeta[] | null
   onOpenNote?: (path: string) => void
-  /** What this person or organisation calls each state. */
-  stateLabels?: Partial<Record<RoadmapState, string>> | null
 }
 
-export function RoadmapView({ notes, onOpenNote, stateLabels }: RoadmapViewProps) {
+export function RoadmapView({ notes, onOpenNote }: RoadmapViewProps) {
   const [query, setQuery] = useState('')
   const [sort, setSort] = useState<Sort>('state')
   const [openRows, setOpenRows] = useState<Set<string>>(() => new Set())
@@ -267,7 +283,7 @@ export function RoadmapView({ notes, onOpenNote, stateLabels }: RoadmapViewProps
         <div className="roadmap-counts">
           {STATE_ORDER.map((s) => (
             <span className={`roadmap-pill roadmap-pill--${s}`} key={s}>
-              {stateCounts.get(s) ?? 0} {labelOf(s, stateLabels).toLowerCase()}
+              {stateCounts.get(s) ?? 0} {DEFAULT_STATE_LABELS[s].toLowerCase()}
             </span>
           ))}
         </div>
@@ -310,7 +326,6 @@ export function RoadmapView({ notes, onOpenNote, stateLabels }: RoadmapViewProps
                       key={n.path}
                       note={n}
                       state={stateOf(n.status)}
-                      labels={stateLabels}
                       open={openRows.has(n.path)}
                       onToggle={() => setOpenRows((s) => toggle(s, n.path))}
                       onOpenNote={onOpenNote}

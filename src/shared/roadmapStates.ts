@@ -92,7 +92,7 @@ const SYNONYMS: Record<string, RoadmapState> = {
  * lie that sorts.
  */
 export function stateOf(status: string): RoadmapState | null {
-  return SYNONYMS[headOf(status)] ?? null
+  return SYNONYMS[headOf(status).toLowerCase()] ?? null
 }
 
 /**
@@ -104,11 +104,20 @@ export function stateOf(status: string): RoadmapState | null {
  * whole string finds nothing and the note falls out of the pipeline for having
  * been documented too well.
  *
- * Cuts at an em or en dash, a spaced hyphen, or a colon. NOT at a bare hyphen:
- * `north-star` and `in-progress` are single words that contain one.
+ * CASE IS PRESERVED, because this is what the roadmap pane puts on the pill and
+ * the whole point is that the words are the author's. `stateOf` lowercases for
+ * its own lookup; a reader gets `RESEARCHED` if that is what the note says.
+ *
+ * Cuts at an em or en dash, a spaced hyphen, a colon, or a `#`. The last one
+ * is a YAML comment — `status: idea   # idea | active | paused` is a real line
+ * in this vault's own template — and without it the pill renders the template's
+ * instructions and the row matches no state at all.
+ *
+ * NOT at a bare hyphen: `north-star` and `in-progress` are single words that
+ * contain one.
  */
-function headOf(status: string): string {
-  return status.split(/[—–]| - |:/)[0].trim().toLowerCase()
+export function headOf(status: string): string {
+  return status.split(/[—–]| - |:|#/)[0].trim()
 }
 
 /**
@@ -120,17 +129,16 @@ export function stateRank(state: RoadmapState | null): number {
   return state === null ? STATE_ORDER.length : STATE_ORDER.indexOf(state)
 }
 
-/**
- * What to call a state, given whatever vocabulary is configured.
+/*
+ * THERE IS NO `labelOf`, AND THAT IS THE ANSWER RATHER THAN A GAP.
  *
- * Falls back per-key rather than all-or-nothing: renaming one state must not
- * blank the other three, which is what a plain `labels ?? DEFAULTS` would do
- * the moment a partial object was stored.
+ * It existed to map a state onto a configurable word, for an organisation that
+ * calls `idea` "Backlog". The pane does something better and simpler: it shows
+ * the word the NOTE uses and spends the state only on sorting, counting and
+ * colour. So the vocabulary is already whatever a person or an organisation
+ * writes, with nothing to configure and nothing to keep in step.
+ *
+ * DEFAULT_STATE_LABELS above is still used, in the one place that is counting
+ * across every vocabulary at once — the pipeline summary at the top of the
+ * pane, where "48 partial" has to mean the same thing for every row it covers.
  */
-export function labelOf(
-  state: RoadmapState,
-  labels?: Partial<Record<RoadmapState, string>> | null,
-): string {
-  const custom = labels?.[state]?.trim()
-  return custom || DEFAULT_STATE_LABELS[state]
-}

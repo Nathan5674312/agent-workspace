@@ -296,15 +296,15 @@
         paper should show. Laid over parchment it is a grey smear, and no
         opacity value rescues it because the treatment is in the pixels.
 
-        So the slot is emptied, exactly as `[data-artwork='off']` does it, and
-        `none` is a valid background-image — tokens.css calls this a slot and
-        ships it empty, so the scrim sibling and the stacking context in
-        .vault-main::before are untouched.
+        This theme therefore gets its OWN treatment of the same master, which is
+        the fix the previous version of this comment named and declined to do:
+        `scripts/make-parchment-art.py` runs the tokens.css recipe in the other
+        direction — no invert, mirrored autocontrast, duotone Umber -> Paper —
+        so the drawing is dark marks made of THIS palette on this paper.
 
-        HONEST CONSEQUENCE: the Background artwork switch in Settings has no
-        visible effect while Parchment is selected. Re-treating the master with
-        the recipe in tokens.css inverted (skip step 2, duotone Paper -> Umber)
-        would give this theme its own artwork; that is a new asset, not a token,
-        so it is not done here. */
-  --canvas-art: none;
+        Until it existed the slot was simply empty (`--canvas-art: none`), which
+        is why the artwork appeared to be "white on white" on Parchment: it was
+        not faint, it was absent, and the Background artwork switch in Settings
+        did nothing while this theme was selected. Both are fixed. */
+  --canvas-art: url('./assets/canvas-art-parchment.jpg');
 }

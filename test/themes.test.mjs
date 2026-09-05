@@ -266,13 +266,21 @@ test('the scrim follows the ground, or a brown film lands on a green app', () =>
   }
 })
 
-test('Parchment is the light theme and empties the artwork slot', () => {
-  // The treated jpg has a duotone Ink -> Sand LUT baked in, so it is made of the
-  // DARK palette; on paper it is a grey smear no opacity rescues.
+test('Parchment is the light theme and brings its own artwork', () => {
+  // The default treated jpg has a duotone Ink -> Sand LUT baked in, so it is
+  // made of the DARK palette; on paper it is a grey smear no opacity rescues.
+  // Parchment used to answer that by emptying the slot, which is why the
+  // artwork looked "white on white" there — it was absent, not faint. It now
+  // points at its own treatment of the same master, built by
+  // scripts/make-parchment-art.py.
   const p = P.get('parchment')
   assert.ok(lum(p.get('--bg-app')) > 0.5, 'parchment ground should be light')
   assert.ok(lum(p.get('--label')) < 0.2, 'parchment ink should be dark')
-  assert.equal(p.get('--canvas-art'), 'none')
+  assert.match(p.get('--canvas-art'), /canvas-art-parchment\.jpg/)
+  assert.ok(
+    !/canvas-art-treated/.test(p.get('--canvas-art')),
+    'parchment must not point at the dark-palette treatment',
+  )
   // And it is the ONLY light one, so the artwork exception needs no other case.
   for (const [id, tokens] of P) {
     if (id === 'parchment') continue

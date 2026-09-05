@@ -43,6 +43,13 @@ type Props = {
    * changelog must never quietly withdraw the update.
    */
   changes: Changelog | null
+  /**
+   * Every version newer than the one running, newest first. One entry is an
+   * ordinary update; more than one means releases were missed, and saying so is
+   * the difference between "a small update" and "three releases of changes",
+   * which the changelog alone cannot convey.
+   */
+  versions: string[]
   /** Still fetching the comparison. Distinct from `changes === null`. */
   loading: boolean
   onGet: () => void
@@ -59,6 +66,7 @@ export function UpdateDialog({
   latest,
   url,
   changes,
+  versions,
   loading,
   onGet,
   onLater,
@@ -111,6 +119,16 @@ export function UpdateDialog({
           You are running {current}. Nothing has been downloaded, and nothing will be
           installed unless you choose it.
         </p>
+
+        {/* Only when versions were actually MISSED. At one release ahead this
+            says nothing the heading has not already said, and a line that
+            restates the heading trains people to skip the line. */}
+        {versions.length > 1 && (
+          <p className="update-skipped">
+            {versions.length} releases since yours: {versions.join(', ')}. Everything
+            below covers all of them.
+          </p>
+        )}
 
         {loading ? (
           <p className="settings-hint">Reading what changed…</p>

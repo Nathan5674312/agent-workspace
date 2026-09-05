@@ -121,3 +121,59 @@ test('the compare url names both ends', () => {
     'https://api.github.com/repos/Nathan5674312/agent-workspace/compare/v1.0.0...v1.0.1',
   )
 })
+
+// ── which versions were missed ─────────────────────────────────────
+// Pushing two or more releases before someone opens the app is the ordinary
+// case, not the edge one: the panel names a single latest version, so without
+// this the size of the gap is invisible.
+
+const { parseReleases } = await import('../src/shared/changelog.ts')
+
+const rel = (tag, over = {}) => ({ tag_name: tag, draft: false, prerelease: false, ...over })
+
+test('every release newer than the running one, newest first', () => {
+  const list = [rel('v1.0.3'), rel('v1.0.2'), rel('v1.0.1'), rel('v1.0.0'), rel('v0.9.0')]
+  assert.deepEqual(parseReleases(list, '1.0.0'), ['1.0.3', '1.0.2', '1.0.1'])
+})
+
+test('the running version and older ones are not "newer"', () => {
+  assert.deepEqual(parseReleases([rel('v1.0.0'), rel('v0.9.9')], '1.0.0'), [])
+})
+
+test('order does not depend on the order GitHub returned', () => {
+  const list = [rel('v1.0.1'), rel('v1.0.3'), rel('v1.0.2')]
+  assert.deepEqual(parseReleases(list, '1.0.0'), ['1.0.3', '1.0.2', '1.0.1'])
+})
+
+test('drafts and prereleases are excluded, as /releases/latest excludes them', () => {
+  const list = [rel('v1.0.3', { draft: true }), rel('v1.0.2', { prerelease: true }), rel('v1.0.1')]
+  assert.deepEqual(parseReleases(list, '1.0.0'), ['1.0.1'])
+})
+
+test('a retagged version is listed once, not as two updates', () => {
+  assert.deepEqual(parseReleases([rel('v1.0.1'), rel('1.0.1')], '1.0.0'), ['1.0.1'])
+})
+
+test('a tag that is not a version is skipped rather than guessed at', () => {
+  const list = [rel('nightly'), rel('v1.0.1'), rel(''), { tag_name: 42 }]
+  assert.deepEqual(parseReleases(list, '1.0.0'), ['1.0.1'])
+})
+
+test('a prerelease sorts before the release it precedes', () => {
+  // 1.0.1-beta.1 is older than 1.0.1, so a user on 1.0.1 is offered neither.
+  assert.deepEqual(parseReleases([rel('v1.0.1-beta.1'), rel('v1.0.1')], '1.0.1'), [])
+})
+
+for (const [what, raw] of [
+  ['a non-array', { releases: [] }],
+  ['null', null],
+  ['a string', 'nope'],
+]) {
+  test(`${what} is not a release list`, () => {
+    assert.deepEqual(parseReleases(raw, '1.0.0'), [])
+  })
+}
+
+test('an unreadable running version means saying nothing about the gap', () => {
+  assert.deepEqual(parseReleases([rel('v1.0.1')], 'not-a-version'), [])
+})

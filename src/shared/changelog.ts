@@ -7,6 +7,8 @@
  * panel renders it next to a button that installs software.
  */
 
+import { compareVersions, isVersion, normalise } from './update.js'
+
 /** One file, and how much of it moved. `path` is the "location" a user reads. */
 export type FileChange = { path: string; added: number; removed: number }
 
@@ -85,4 +87,38 @@ export function parseCompare(raw: unknown): Changelog | null {
   if (commits.length === 0 && files.length === 0) return null
 
   return { commits, files, added, removed, truncated }
+}
+
+/** Every published release, newest first. Used only when an update exists. */
+export const RELEASES_FEED =
+  'https://api.github.com/repos/Nathan5674312/agent-workspace/releases?per_page=100'
+
+/**
+ * The versions newer than the one running, newest first.
+ *
+ * WHY THIS EXISTS AT ALL: the changelog already spans every release between the
+ * running version and the newest, because the comparison is
+ * `<running>...<latest>` and not `<previous>...<latest>`. So someone three
+ * releases behind already sees all three releases' worth of changes. What they
+ * could not see is that it WAS three — the panel named one version and the
+ * count of skipped ones was invisible, which reads as a small update when it is
+ * a large one.
+ *
+ * Drafts and prereleases are skipped, the same two exclusions `/releases/latest`
+ * applies, so this list can never offer a version the update check itself would
+ * not. Anything whose tag is not a version is skipped rather than guessed at.
+ */
+export function parseReleases(raw: unknown, current: string): string[] {
+  if (!Array.isArray(raw) || !isVersion(current)) return []
+  const out: string[] = []
+  for (const r of raw) {
+    const rec = r as Record<string, unknown>
+    if (rec?.draft === true || rec?.prerelease === true) continue
+    const tag = rec?.tag_name
+    if (typeof tag !== 'string' || !isVersion(tag)) continue
+    if (compareVersions(tag, current) > 0) out.push(normalise(tag))
+  }
+  // Newest first, and deduplicated: two releases can carry the same version if
+  // one was retagged, and listing it twice would read as two updates.
+  return [...new Set(out)].sort((a, b) => compareVersions(b, a))
 }

@@ -324,6 +324,7 @@ export function VaultPane(): React.ReactElement {
     latest: string
     url: string
     changes: Changelog | null
+    versions: string[]
     loading: boolean
   } | null>(null)
   useEffect(() => {
@@ -339,13 +340,19 @@ export function VaultPane(): React.ReactElement {
           latest: check.latest,
           url: check.url,
           changes: null,
+          versions: [],
           loading: true,
         })
         // Second request, and the slow one — the dialog is already up and
         // readable while it lands, because the version number is the part that
         // matters and the changelog is the part that elaborates.
-        const changes = await window.api.update.changes(check.version, check.latest)
-        if (live) setUpdate((u) => (u ? { ...u, changes, loading: false } : u))
+        // Both are only worth asking once an update is known to exist, and they
+        // are independent, so they go together rather than one after the other.
+        const [changes, versions] = await Promise.all([
+          window.api.update.changes(check.version, check.latest),
+          window.api.update.releases(check.version),
+        ])
+        if (live) setUpdate((u) => (u ? { ...u, changes, versions, loading: false } : u))
       } catch {
         /* silent, deliberately — see above */
       }
@@ -1425,6 +1432,7 @@ export function VaultPane(): React.ReactElement {
           latest={update.latest}
           url={update.url}
           changes={update.changes}
+          versions={update.versions}
           loading={update.loading}
           onGet={() => setUpdate(null)}
           onLater={() => setUpdate(null)}

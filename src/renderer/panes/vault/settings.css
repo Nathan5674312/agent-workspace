@@ -414,3 +414,13 @@
   text-transform: uppercase;
   color: var(--label-tertiary, var(--label-secondary));
 }
+
+/* Only rendered when releases were missed, so it may be emphatic: the whole
+   point is that the heading's single version number understates the change. */
+.update-skipped {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--separator);
+  font-size: var(--text-sm);
+  color: var(--label);
+}

@@ -85,6 +85,7 @@ const api: Api = {
     // `isVersion` the feed's own tag goes through before either reaches a URL.
     // The host is still a constant; only the two version numbers cross.
     changes: (base: string, head: string) => ipcRenderer.invoke(CH.updateChanges, base, head),
+    releases: (current: string) => ipcRenderer.invoke(CH.updateReleases, current),
   },
 }
 

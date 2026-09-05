@@ -474,6 +474,9 @@ export const CH = {
    */
   updateChanges: 'update:changes',
 
+  /** Which versions the running build has missed. Asked only when one exists. */
+  updateReleases: 'update:releases',
+
   terminalProcesses: 'terminal:processes',
   terminalExits: 'terminal:exits',
   terminalKill: 'terminal:kill',
@@ -663,5 +666,12 @@ export type Api = {
      * must never take the update offer down with it.
      */
     changes(base: string, head: string): Promise<Changelog | null>
+    /**
+     * The versions newer than `current`, newest first, drafts and prereleases
+     * excluded. Empty when there are none, when the list could not be fetched,
+     * or when `current` is not a version — all three are "say nothing about how
+     * far behind you are", which is the safe answer.
+     */
+    releases(current: string): Promise<string[]>
   }
 }

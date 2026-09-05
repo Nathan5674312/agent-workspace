@@ -30,7 +30,13 @@
 import { app } from 'electron'
 import { get } from 'node:https'
 import { UPDATE_FEED, decide, isVersion, type UpdateCheck } from '../shared/update.js'
-import { compareUrl, parseCompare, type Changelog } from '../shared/changelog.js'
+import {
+  RELEASES_FEED,
+  compareUrl,
+  parseCompare,
+  parseReleases,
+  type Changelog,
+} from '../shared/changelog.js'
 import { CH } from '../shared/ipc.js'
 import type { Handle } from './ipc.js'
 
@@ -199,7 +205,31 @@ export async function changes(base: string, head: string): Promise<Changelog | n
   return null
 }
 
+/**
+ * Which versions the running build has missed, newest first.
+ *
+ * Only ever called once an update is known to exist, so the third request of a
+ * launch is paid for only by someone who is actually behind. Someone up to date
+ * makes one request and stops.
+ *
+ * The list of releases carries release NOTES, so it is not a few hundred bytes
+ * either; it gets the feed's cap times sixteen rather than a comparison's 4 MB,
+ * because a hundred release bodies is a different order of thing from a hundred
+ * file patches.
+ */
+export async function releases(current: string): Promise<string[]> {
+  if (!isVersion(current)) return []
+  const body = await fetchJson(RELEASES_FEED, MAX_BYTES * 16)
+  if (body === null) return []
+  try {
+    return parseReleases(JSON.parse(body), current)
+  } catch {
+    return []
+  }
+}
+
 export function register(handle: Handle): void {
   handle(CH.updateCheck, () => check())
+  handle(CH.updateReleases, (current: string) => releases(current))
   handle(CH.updateChanges, (base: string, head: string) => changes(base, head))
 }

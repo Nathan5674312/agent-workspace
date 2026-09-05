@@ -34,6 +34,11 @@ you agree to take it. 1.0.0 could only be asked; it could never say.
 - **`scripts/release-preflight.mjs`** — refuses to cut a release whose tag does
   not name the built commit, whose tree is dirty, or whose `dist/` does not
   match the version.
+- **`docs/AGENT-RELEASE.md`** — the binding procedure for anyone, human or
+  agent, shipping an update: the release sequence, the rubric commit subjects
+  must meet (they are rendered verbatim to users in the update panel), the
+  rubric for changelog entries, and the rules that exist because they were
+  already broken once.
 
 ### Changed
 

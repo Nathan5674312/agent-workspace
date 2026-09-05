@@ -9,6 +9,51 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [1.0.5] — 2026-09-05
+
+The window is the app's own, top to bottom. Nothing in it says Electron any
+more.
+
+### Changed
+
+- **No operating-system title bar.** The app's chrome now runs to the top edge
+  of the window and Windows draws minimise, maximise and close over it. They
+  are the real system buttons, not drawn ones, so snap layouts on maximise
+  hover, the oversized hit target in the screen corner and every accessibility
+  affordance still work exactly as they did.
+- **The window controls follow your theme.** Their background and symbol colour
+  are read from the palette every time you change it. This matters most on
+  Parchment, which is the one light theme: a fixed dark strip would have been
+  visibly wrong in six of the seven.
+- **The menu bar is gone.** `File / Edit / View / Window / Help` was Electron's
+  stock menu — nothing in this app created it and every entry on it was a
+  framework default. There is no File command Fate has, clipboard shortcuts are
+  handled by the editor itself, and Help is the `?` beside the vault name.
+
+### Fixed
+
+- **The app printed an error to its log on every single launch.** It read
+  `ENOENT ... .obsidian/bookmarks.json`, and nothing was broken: the bookmark
+  menu item read that file when it mounted, to decide whether its row should
+  say Bookmark or Remove bookmark, and most vaults have never had one. The
+  cause was not the read but WHEN — every menu in the app mounted its contents
+  while closed, so a closed menu was reading a file to label a row nobody could
+  see. Menus now build their contents the first time they are opened. An error
+  printed every launch for a normal condition is how real errors stop being
+  read.
+
+### Known limitations
+
+- **The window no longer displays its own title.** With the OS bar gone there is
+  nowhere in the window that says "Fate"; the taskbar button and the task
+  switcher still do.
+- **The themed window icon has one fewer place to appear.** It set the icon for
+  the title bar, the task switcher and the taskbar button. There is no title
+  bar now, so it governs the other two.
+- **Windows only, as before.** The overlay that draws these controls is a
+  Windows feature. The macOS and Linux targets remain configured and never
+  built.
+
 ## [1.0.4] — 2026-09-04
 
 The taskbar shows the app's own icon.
@@ -247,5 +292,6 @@ Stated so they are not discovered. Each is tracked in `src/shared/roadmap.ts`.
 - **No import** from Notion, Evernote or anywhere else. Obsidian needs none —
   it is the same folder.
 
-[Unreleased]: https://github.com/Nathan5674312/agent-workspace/compare/v1.0.0...HEAD
+[Unreleased]: https://github.com/Nathan5674312/agent-workspace/compare/v1.0.5...HEAD
+[1.0.5]: https://github.com/Nathan5674312/agent-workspace/compare/v1.0.4...v1.0.5
 [1.0.0]: https://github.com/Nathan5674312/agent-workspace/releases/tag/v1.0.0

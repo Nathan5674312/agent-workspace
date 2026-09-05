@@ -78,6 +78,20 @@ export const ipcMain = {
   },
 }
 
+/**
+ * `nativeImage` exists so src/main/windowIcon.ts can be imported — settings.ts
+ * pulls it in, so without this EVERY suite that touches settings dies at import
+ * with "does not provide an export named 'nativeImage'".
+ *
+ * `isEmpty: () => true` is the load-bearing part: windowIcon treats an empty
+ * image as "do not set an icon and leave the previous one", so under test the
+ * icon path runs all its guards and then does nothing, which is the correct
+ * behaviour when there is no window and no compositor to show one.
+ */
+export const nativeImage = {
+  createFromPath: () => ({ isEmpty: () => true }),
+}
+
 export const contextBridge = { exposeInMainWorld() {} }
 export const ipcRenderer = { invoke() {}, on() {}, removeListener() {} }
 
@@ -104,6 +118,7 @@ export default {
   Menu,
   dialog,
   BrowserWindow,
+  nativeImage,
   ipcMain,
   contextBridge,
   ipcRenderer,

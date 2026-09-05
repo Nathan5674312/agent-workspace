@@ -3,7 +3,8 @@ import { join } from 'node:path'
 import { registerIpc } from './ipc.js'
 import * as activity from './activity.js'
 import { checkRoots } from './vault.js'
-import { applySettings, setRootMismatch } from './settings.js'
+import { applySettings, currentTheme, setRootMismatch } from './settings.js'
+import { applyWindowIcon } from './windowIcon.js'
 import { killAll } from './supervisor.js'
 
 /**
@@ -80,6 +81,11 @@ function createWindow(): BrowserWindow {
       webviewTag: false,
     },
   })
+
+  // Before first paint, so the title bar and taskbar button never show the
+  // default mark and then swap — a flicker on every launch for anyone not on
+  // the default theme.
+  applyWindowIcon(win, currentTheme())
 
   win.once('ready-to-show', () => win.show())
 

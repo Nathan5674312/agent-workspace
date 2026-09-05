@@ -1,54 +1,50 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <!--
-    Fate — application icon, HINTED VARIANT for 16px and 24px only. Everything
-    32px and up comes from icon.svg. `npm run icons` picks per size.
+    Fate — the 16px and 24px hint. Same mark as build/icon.svg, drawn for a
+    tile that is sixteen pixels across.
 
-    WHY A SECOND FILE. Downscaling icon.svg to 16px was measured and it fails:
-    a 50-unit thread is 0.78 of a pixel there, the 4-unit rim is 0.06 of one,
-    and the ring's 60-unit stroke around an 88-unit radius closes its hole
-    completely. What arrives is three brown smudges. This is the ordinary reason
-    icon sets ship hand-tuned small sizes rather than one master resampled.
+    WHY A SEPARATE FILE. One master resampled to 16px loses the rim entirely and
+    softens the thread into a grey smear that reads as dirt on the taskbar.
+    Three differences, each measured at 16px rather than reasoned about:
 
-    THREE CHANGES, each because of the pixel budget at 16px (64 units = 1px):
-      1. The thread thickens 50 -> 96, so it is ~1.5px and survives.
-      2. Every stop grows and the RING GOES SOLID. A ring needs its hole, its
-         stroke and a gap all inside 2-3px and there is no arrangement of those
-         that reads. The three stops still differ — small, large, medium — so
-         the mark keeps the same silhouette family; it just loses the one detail
-         that cannot exist at this size.
-      3. The rim highlight is dropped. It is sub-pixel, so all it does is lift
-         the outermost row of pixels and make the corners look soft.
+      - NO RIM. A 4px frame at 1024 is a quarter of a pixel at 16 and renders as
+        a uniform haze around the whole tile, which looks like a rendering fault
+        rather than an edge.
+      - NO GROUND GRADIENT. Across 16 pixels a three-stop gradient is banding,
+        not depth. Flat mid-tone is honest at this size.
+      - THICKER THREAD, SMALLER DISC. 58 and r194 at 1024 are 0.9px and 3px at
+        16. The thread disappears and the disc swallows the tile. 118 and r140
+        hold the same relationship at the size that gets seen.
 
-    The mark also sits ~38 units higher than the geometry in icon.svg. At 16px
-    the lower two stops otherwise land in the last row of pixels inside the
-    rounded corner and read as though they are falling out of the frame.
+    Colours are rewritten per theme by scripts/make-icons.mjs, exactly as in
+    icon.svg. Keep the property names identical in both files.
   -->
+  <style>
+    :root {
+      --ground-mid: #1a0f09;
+      --mark: #f0cba5;
+    }
+  </style>
+
   <defs>
-    <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2b1a0d"/>
-      <stop offset="0.55" stop-color="#1a0f09"/>
-      <stop offset="1" stop-color="#120a06"/>
-    </linearGradient>
-    <clipPath id="squircle">
-      <rect x="16" y="16" width="992" height="992" rx="220" ry="220"/>
+    <clipPath id="squircle-s">
+      <rect x="34" y="34" width="956" height="956" rx="215" ry="215"/>
     </clipPath>
-    <mask id="thread-gaps">
+    <!-- Wider gap than the master: at 16px anti-aliasing bleeds further in
+         proportional terms, so +18 closes up and the disc grows a beard. -->
+    <mask id="thread-gap-s">
       <rect x="0" y="0" width="1024" height="1024" fill="#fff"/>
-      <circle cx="250" cy="722" r="130" fill="#000"/>
-      <circle cx="500" cy="378" r="210" fill="#000"/>
-      <circle cx="790" cy="668" r="170" fill="#000"/>
+      <circle cx="512" cy="512" r="212" fill="#000"/>
     </mask>
   </defs>
 
-  <rect x="16" y="16" width="992" height="992" rx="220" ry="220" fill="url(#ground)"/>
+  <rect x="34" y="34" width="956" height="956" rx="215" ry="215" fill="var(--ground-mid)"/>
 
-  <g clip-path="url(#squircle)">
-    <path d="M 6 556 L 250 722 L 500 378 L 790 668 L 1018 492"
-          fill="none" stroke="#f0cba5" stroke-opacity="0.72"
-          stroke-width="96" stroke-linecap="round" stroke-linejoin="round"
-          mask="url(#thread-gaps)"/>
-    <circle cx="250" cy="722" r="110" fill="#f0cba5"/>
-    <circle cx="500" cy="378" r="190" fill="#f0cba5"/>
-    <circle cx="790" cy="668" r="150" fill="#f0cba5"/>
+  <g clip-path="url(#squircle-s)">
+    <rect x="272" y="232" width="480" height="72" rx="36" fill="var(--mark)"/>
+    <rect x="272" y="720" width="480" height="72" rx="36" fill="var(--mark)"/>
+    <path d="M 322 312 L 702 312 L 512 502 Z" fill="var(--mark)"/>
+    <path d="M 322 712 L 702 712 L 512 522 Z"
+          fill="none" stroke="var(--mark)" stroke-width="76" stroke-linejoin="round"/>
   </g>
 </svg>

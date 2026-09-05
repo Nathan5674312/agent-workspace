@@ -9,6 +9,44 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [1.0.3] — 2026-09-04
+
+A new app icon, and it wears whatever theme you are in.
+
+### Added
+
+- **The icon follows your theme.** Pick Forest and the title bar, task switcher
+  and taskbar button go green; pick Parchment and they go to dark ink on warm
+  paper. It changes the moment you change the theme, not on the next launch.
+  The seven icons are generated from the same two SVGs as the app icon and
+  coloured by reading the real values out of `tokens.css` and `themes.css`, so
+  a palette edit produces a new icon with nothing else touched.
+
+### Changed
+
+- **New mark: an hourglass.** The old one was a thread walked through a graph
+  with three stops — right about the idea, wrong about the size. At 24px the
+  three stops fused into a lump and the mark stopped being anything. An
+  hourglass has a silhouette that survives 16px, which is the size that
+  actually gets seen. The top is solid and the bottom is hollow: sand not yet
+  fallen, the step not taken, which is the same thing the old hollow ring said.
+
+### Fixed
+
+- **"1 changes across 3 files".** The update panel did not make its counts
+  singular, which 1.0.1 and 1.0.2 both shipped. Small, and the first sentence of
+  a panel whose whole claim is that what it lists can be trusted.
+
+### Known limitations
+
+- **The installer, Start Menu and desktop icons do not follow the theme, and
+  cannot.** Those are read by Windows from the executable's own resource, long
+  before any of this app's code runs, and nothing may rewrite an installed
+  binary. Only a running window's icon can change. The binary keeps the
+  Founder's palette.
+- Unchanged from 1.0.1: the update is not downloaded for you, and builds are
+  unsigned.
+
 ## [1.0.2] — 2026-09-04
 
 **No change to the app itself.** This release fixes the release tooling and

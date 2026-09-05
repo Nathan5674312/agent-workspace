@@ -1,95 +1,91 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1024 1024" width="1024" height="1024">
   <!--
-    Fate — application icon. This file is the source; build/icon.png and
-    build/icon.ico are generated from it by `npm run icons`. Edit here, never
-    there. It must stay valid XML, not merely valid HTML: an SVG loaded as an
-    image is parsed strictly, and a mismatched tag fails as a bare "the SVG
-    failed to decode" with nothing pointing at the line.
+    Fate — application icon. THIS FILE IS THE SOURCE; build/icon.png,
+    build/icon.ico and build/themed/*.png are generated from it by
+    `npm run icons`. Edit here, never there. It must stay valid XML, not merely
+    valid HTML: an SVG loaded as an image is parsed strictly, and a mismatched
+    tag fails as a bare "the SVG failed to decode" with nothing naming the line.
 
-    THE MARK is a thread walked through a graph, not a closed triangle. Fate is
-    the thread; the app's own model of work is a path an agent walks through
-    notes (cards are files, edges are the order). A closed triangle says "three
-    connected things" and is the generic knowledge-graph glyph. An OPEN polyline
-    cut off by both edges of the frame says the walk started before this frame
-    and continues after it, which is the actual product.
+    THE MARK is one thread and one stop. It replaced a three-stop zigzag that
+    was right about the idea and wrong about the size: at 24px the three stops
+    fused into a lumpy bar and the mark stopped being anything. One disc and one
+    line survive 16px, which is the size that actually gets seen — in a taskbar,
+    a task switcher, and the top-left corner of the app's own title bar.
 
-    Three stops, deliberately unequal: a small one already walked, the hub, and
-    a HOLLOW one — the step not taken yet. The ring is the only shape here that
-    is not solid, so it is where the eye lands last.
+    What it means is unchanged. The thread is cut off by BOTH edges of the
+    frame: the walk started before this frame and continues after it, which is
+    the product — cards are files, edges are the order an agent walks them. The
+    disc is the one you are in. A closed shape would say "three connected
+    things", which is the generic knowledge-graph glyph and says nothing.
 
-    COLOUR is the app's own, from src/renderer/tokens.css: Ink #160C08 ground,
-    Cream #F0CBA5 mark. The palette has no accent hue by design (tokens §4b) —
-    emphasis is luminance — so a coloured icon would be the one place in the
-    product that lies about it. Cream on Ink is ~13:1, which is what makes this
-    legible at 16px against both a light and a dark taskbar.
+    COLOUR IS NOT FIXED HERE. The two custom properties below are rewritten per
+    theme by scripts/make-icons.mjs, which reads the real values out of
+    src/renderer/tokens.css and src/renderer/themes.css. They are never
+    duplicated into a script or into src/shared/themes.ts — that file is a list
+    of ids and words for exactly this reason. The values in this file are the
+    Founder's palette, so the file standing alone renders the default icon.
   -->
+  <style>
+    :root {
+      --ground-top: #2b1a0d;
+      --ground-mid: #1a0f09;
+      --ground-bot: #120a06;
+      --mark: #f0cba5;
+    }
+  </style>
+
   <defs>
-    <!-- Ground is not flat: Bistre at the top falling to Ink lifts the mark off
-         a dark taskbar without introducing a second hue. -->
+    <!-- Ground is not flat: a lift at the top separates the tile from a dark
+         taskbar without introducing a second hue. -->
     <linearGradient id="ground" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#2b1a0d"/>
-      <stop offset="0.55" stop-color="#1a0f09"/>
-      <stop offset="1" stop-color="#120a06"/>
+      <stop offset="0" stop-color="var(--ground-top)"/>
+      <stop offset="0.55" stop-color="var(--ground-mid)"/>
+      <stop offset="1" stop-color="var(--ground-bot)"/>
     </linearGradient>
-    <!-- The frame keeps the mark from touching a same-dark background edge. -->
+
+    <!-- The frame keeps the tile off a same-dark background edge. -->
     <linearGradient id="rim" x1="0" y1="0" x2="0" y2="1">
-      <stop offset="0" stop-color="#f0cba5" stop-opacity="0.22"/>
-      <stop offset="1" stop-color="#f0cba5" stop-opacity="0.04"/>
+      <stop offset="0" stop-color="var(--mark)" stop-opacity="0.22"/>
+      <stop offset="1" stop-color="var(--mark)" stop-opacity="0.04"/>
     </linearGradient>
-    <!-- Cuts the thread flush with the ground instead of letting it poke out
-         past the rounded corners. -->
+
     <clipPath id="squircle">
       <rect x="34" y="34" width="956" height="956" rx="215" ry="215"/>
     </clipPath>
-    <!--
-      Punches the thread out around each stop so it does not run visibly through
-      one. The obvious alternative — a ground-coloured disc painted under the
-      stop — was tried first and is wrong: the ground is a gradient, so a flat
-      #1a0f09 disc reads as a lighter blob at the bottom of the icon and a darker
-      one at the top. Masking removes pixels instead of repainting them, so the
-      gap is whatever the gradient is at that point, which is nothing.
 
-      Each radius is its stop's outer radius plus 16. That number was measured,
-      not chosen: at +30 the thread visibly stops short and the mark falls apart
-      into three floating objects joined by dashes, and at 0 the anti-aliased
-      edges of thread and stop fuse into one lumpy shape. 16 separates them and
-      still reads as one connected walk.
+    <!--
+      Punches the thread out around the disc so it does not run visibly through
+      it. A ground-coloured disc painted underneath was tried on the previous
+      mark and is wrong: the ground is a gradient, so a flat fill reads lighter
+      at the bottom and darker at the top. Masking removes pixels rather than
+      repainting them, so the gap is exactly whatever the gradient is there.
+
+      Radius is the disc's own plus 58. The gap has to grow with the thread's
+      width, not with the disc's radius: it is the thread's half-width plus a
+      constant, because what is being cleared is the stroke, not the circle.
     -->
-    <mask id="thread-gaps">
+    <mask id="thread-gap">
       <rect x="0" y="0" width="1024" height="1024" fill="#fff"/>
-      <circle cx="262" cy="730" r="92" fill="#000"/>
-      <circle cx="500" cy="424" r="158" fill="#000"/>
-      <circle cx="786" cy="694" r="134" fill="#000"/>
+      <circle cx="512" cy="512" r="204" fill="#000"/>
     </mask>
   </defs>
 
   <rect x="34" y="34" width="956" height="956" rx="215" ry="215" fill="url(#ground)"/>
 
   <g clip-path="url(#squircle)">
-    <!-- The thread ZIGZAGS rather than running a straight diagonal. A straight
-         corner-to-corner line leaves two dead quadrants and the mark reads as a
-         slash; the zigzag puts something in all four. It is deliberately not
-         symmetric — the hub sits high and left of centre — because a symmetric
-         zigzag reads as a letter W or a line chart.
+    <!-- An hourglass: Fate, and the one shape that survives 16px because its
+         silhouette is unmistakable at any size. Caps are bars, not outlines, so
+         nothing here is a hairline that vanishes when downsampled.
 
-         Same cream as the stops at 0.62, not a browner mix. At 0.5 it stopped
-         looking like dimmer thread and started looking like a different, dirtier
-         material. -->
-    <path d="M 20 566 L 262 730 L 500 424 L 786 694 L 1004 520"
-          fill="none" stroke="#f0cba5" stroke-opacity="0.62"
-          stroke-width="50" stroke-linecap="round" stroke-linejoin="round"
-          mask="url(#thread-gaps)"/>
-
-    <!-- Stop 1 — small, already walked. -->
-    <circle cx="262" cy="730" r="76" fill="#f0cba5"/>
-
-    <!-- Hub — the note you are in. -->
-    <circle cx="500" cy="424" r="142" fill="#f0cba5"/>
-
-    <!-- Stop 3 — hollow. The step not taken. The stroke is deliberately more
-         than half the radius: a thinner ring is prettier at 1024 and closes up
-         into a plain dot by 24px, which is the size that actually gets seen. -->
-    <circle cx="786" cy="694" r="88" fill="none" stroke="#f0cba5" stroke-width="60"/>
+         The top is SOLID and the bottom is HOLLOW — sand not yet fallen, the
+         step not taken. That is the same idea the previous mark carried in a
+         hollow ring, kept because it is the honest thing to say about a tool
+         whose whole model is a path partly walked. -->
+    <rect x="286" y="242" width="452" height="56" rx="28" fill="var(--mark)"/>
+    <rect x="286" y="726" width="452" height="56" rx="28" fill="var(--mark)"/>
+    <path d="M 330 306 L 694 306 L 512 500 Z" fill="var(--mark)"/>
+    <path d="M 330 718 L 694 718 L 512 524 Z"
+          fill="none" stroke="var(--mark)" stroke-width="52" stroke-linejoin="round"/>
   </g>
 
   <rect x="36" y="36" width="952" height="952" rx="213" ry="213"

@@ -22,10 +22,11 @@ import {
   type Approvals,
   type AppSettings,
 } from '../shared/ipc.js'
-import { THEME_IDS } from '../shared/themes.js'
+import { THEME_IDS, type ThemeId } from '../shared/themes.js'
 import { checkRoots, getVaultDir, setVaultDir } from './vault.js'
 import { getApprovalsPolicy, setApprovalsPolicy } from './consent.js'
 import type { Handle } from './ipc.js'
+import { applyWindowIcon } from './windowIcon.js'
 
 const settingsPath = join(app.getPath('userData'), 'settings.json')
 
@@ -159,6 +160,11 @@ function save(s: Stored): void {
  * vaultDir wins over the env default", since setVaultDir simply overwrites the
  * value vault.ts initialised from AGENT_WORKSPACE_VAULT_DIR.
  */
+/** The theme in force, for anything outside this module that has to match it. */
+export function currentTheme(): ThemeId {
+  return (current.appearance ?? DEFAULT_APPEARANCE).theme
+}
+
 export function applySettings(): void {
   current = load()
   vaultDirRefused = null
@@ -258,6 +264,14 @@ function setNotifyUpdates(on: boolean): AppSettings {
 function setAppearance(a: Appearance): AppSettings {
   current = { ...current, appearance: sanitize(a) }
   save(current)
+  // The window icon is part of the appearance, so it changes with it and not on
+  // the next launch. Read back from `current` rather than from `a`: sanitize()
+  // may have refused an unknown theme, and the icon must match what is actually
+  // in force, not what was asked for.
+  applyWindowIcon(
+    BrowserWindow.getFocusedWindow() ?? BrowserWindow.getAllWindows()[0] ?? null,
+    (current.appearance ?? DEFAULT_APPEARANCE).theme,
+  )
   return state()
 }
 

@@ -57,6 +57,13 @@ type Props = {
   onNever: () => void
 }
 
+/**
+ * "1 changes across 3 files" shipped in 1.0.1 and 1.0.2. It is a small thing
+ * and it is the first sentence of a panel whose whole claim is that what it
+ * lists can be trusted, which is a bad place to look careless.
+ */
+const plural = (n: number, word: string) => (n === 1 ? word : `${word}s`)
+
 /** Enough to see the shape of a release without becoming a scrollable wall. */
 const FILES_SHOWN = 12
 const COMMITS_SHOWN = 8
@@ -136,9 +143,9 @@ export function UpdateDialog({
           <div className="update-changes">
             <p className="update-totals">
               <strong>{changes.commits.length}</strong>
-              {changes.truncated ? '+' : ''} changes across{' '}
+              {changes.truncated ? '+' : ''} {plural(changes.commits.length, 'change')} across{' '}
               <strong>{changes.files.length}</strong>
-              {changes.truncated ? '+' : ''} files{' — '}
+              {changes.truncated ? '+' : ''} {plural(changes.files.length, 'file')}{' — '}
               <span className="update-added">+{changes.added.toLocaleString()}</span>{' '}
               <span className="update-removed">−{changes.removed.toLocaleString()}</span> lines
             </p>

@@ -40,6 +40,62 @@ const SOURCES = [
   { file: 'icon-small.svg', sizes: [16, 24] },
   { file: 'icon.svg', sizes: [32, 48, 64, 128, 256] },
 ]
+
+/**
+ * The size of the per-theme window icon.
+ *
+ * One size, not a set: `BrowserWindow.setIcon` takes a single image and Windows
+ * scales it, unlike the .ico in the binary which carries every size. 256 is
+ * what the task switcher asks for at 200% scaling and downsamples cleanly to
+ * the 16px title bar.
+ */
+const THEMED_SIZE = 256
+
+/**
+ * WHERE THEME COLOURS COME FROM, and why they are read rather than listed.
+ *
+ * `src/shared/themes.ts` is a list of ids and words and says at length why it
+ * holds no hex values: duplicating a colour so a second file can render it is
+ * exactly the drift the token system exists to prevent. That applies here too.
+ * So the icons are coloured by PARSING the stylesheets that already define the
+ * palettes — tokens.css for the default, themes.css for the overrides — and a
+ * theme whose colours change gets a new icon on the next `npm run icons` with
+ * nothing else edited.
+ *
+ * Each theme needs four values. `--bg-app` is the ground; the top and bottom
+ * gradient stops are derived from it rather than found, because no theme
+ * defines a second ground tone and inventing token names to hold one would put
+ * icon concerns into the app's stylesheet.
+ */
+function paletteOf(css, selector) {
+  const block = css.slice(css.indexOf(selector))
+  const body = block.slice(block.indexOf('{') + 1, block.indexOf('}'))
+  const read = (name) => {
+    const m = body.match(new RegExp(`--${name}\\s*:\\s*(#[0-9a-fA-F]{3,8})`))
+    return m ? m[1] : null
+  }
+  const bg = read('bg-app')
+  const mark = read('accent') ?? read('label')
+  return bg && mark ? { bg, mark } : null
+}
+
+/** Lighten or darken a hex by a fraction, staying in gamut. */
+function shift(hex, amount) {
+  const n = parseInt(hex.slice(1).padEnd(6, '0').slice(0, 6), 16)
+  const parts = [(n >> 16) & 255, (n >> 8) & 255, n & 255].map((c) =>
+    Math.max(0, Math.min(255, Math.round(amount > 0 ? c + (255 - c) * amount : c * (1 + amount)))),
+  )
+  return '#' + parts.map((c) => c.toString(16).padStart(2, '0')).join('')
+}
+
+/** Substitute a palette into either source SVG. */
+function paint(svg, { bg, mark }) {
+  return svg
+    .replace(/--ground-top:\s*#[0-9a-fA-F]+/, `--ground-top: ${shift(bg, 0.1)}`)
+    .replace(/--ground-mid:\s*#[0-9a-fA-F]+/, `--ground-mid: ${bg}`)
+    .replace(/--ground-bot:\s*#[0-9a-fA-F]+/, `--ground-bot: ${shift(bg, -0.25)}`)
+    .replace(/--mark:\s*#[0-9a-fA-F]+/, `--mark: ${mark}`)
+}
 const ICO_SIZES = SOURCES.flatMap((s) => s.sizes)
 const MASTER = 1024
 
@@ -142,6 +198,51 @@ app.whenReady().then(async () => {
 
   console.log(`icon.png  ${MASTER}x${MASTER}  (icon.svg)`)
   for (const { file, sizes } of SOURCES) console.log(`icon.ico  ${sizes.join(', ').padEnd(24)}  (${file})`)
+
+  /**
+   * One icon per theme, for the window and the taskbar at runtime.
+   *
+   * The .ico inside the binary CANNOT follow the theme — it is read by the
+   * shell for the Start Menu, the installer and the file on disk, long before
+   * any of our code runs, and nothing may rewrite an installed executable.
+   * `BrowserWindow.setIcon` is the part that can change, and it governs the
+   * title bar, the task switcher and the taskbar button of a running window.
+   * So: the binary keeps the default mark, and the running app wears the
+   * user's.
+   */
+  const themedDir = join(out, 'themed')
+  mkdirSync(themedDir, { recursive: true })
+
+  const tokens = readFileSync(join(root, 'src/renderer/tokens.css'), 'utf8')
+  const themesCss = readFileSync(join(root, 'src/renderer/themes.css'), 'utf8')
+  const master = readFileSync(join(out, 'icon.svg'), 'utf8')
+
+  // `founders` sets no data-theme attribute — its palette IS tokens.css — so it
+  // is read from a different file and a different selector than the rest.
+  const wanted = [
+    ['founders', tokens, ':root {'],
+    ...['dark', 'midnight', 'nord', 'forest', 'rosepine', 'parchment'].map((id) => [
+      id,
+      themesCss,
+      `:root[data-theme='${id}']`,
+    ]),
+  ]
+
+  for (const [id, css, selector] of wanted) {
+    const palette = paletteOf(css, selector)
+    if (!palette) {
+      // Loud, and not fatal for the other six. A theme whose tokens were
+      // renamed should fail visibly here rather than ship an icon in some other
+      // theme's colours, which nobody would report as a bug.
+      console.error(`themed/${id}.png  SKIPPED — no --bg-app/--accent under ${selector}`)
+      continue
+    }
+    const out1 = await win.webContents.executeJavaScript(
+      `(${rasterise})(${JSON.stringify(paint(master, palette))}, [${THEMED_SIZE}], ${MASTER})`,
+    )
+    writeFileSync(join(themedDir, `${id}.png`), png(out1[THEMED_SIZE]))
+    console.log(`themed/${id}.png`.padEnd(26) + `ground ${palette.bg}  mark ${palette.mark}`)
+  }
 
   app.quit()
 })

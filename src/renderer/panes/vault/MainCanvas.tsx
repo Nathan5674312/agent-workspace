@@ -213,7 +213,10 @@ export function MainCanvas({
    * strip could be deleted without taking the data with it.
    */
   useEffect(() => {
-    if (view !== 'database') return
+    // Two readers now. The roadmap is frontmatter over the same note list —
+    // `type: roadmap`, `status:` — so it wants the same fresh round trip and
+    // the same "no cache" reasoning below, not a second loader beside it.
+    if (view !== 'database' && view !== 'roadmap') return
     let live = true
     setLoadingNotes(true)
     setNotesError(null)
@@ -444,7 +447,16 @@ export function MainCanvas({
            */
           <TerminalView onClose={() => onViewChange('editor')} />
         ) : view === 'roadmap' ? (
-          <RoadmapView />
+          <RoadmapView
+            notes={notes}
+            onOpenNote={(path) => {
+              // Same contract the table and the graph keep: opening a row goes
+              // to the note, not to a file page behind this pane.
+              void onOpenNote(path).then((opened) => {
+                if (opened) onViewChange('editor')
+              })
+            }}
+          />
         ) : view === 'canvas' ? (
           <CanvasView
             path={canvasPath}

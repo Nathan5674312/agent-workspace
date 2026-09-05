@@ -79,7 +79,7 @@ import {
   type WikilinkRef,
 } from './helpers.js'
 import type { VaultNoteBody } from '../../../shared/ipc.js'
-import { setFrontmatter, inboxCount as inboxCountOf } from '../../../shared/notemeta.js'
+import { setFrontmatter } from '../../../shared/notemeta.js'
 import { listTemplates, type Template } from '../../../shared/templates.js'
 import { startupNote } from '../../../shared/startup.js'
 import {
@@ -242,8 +242,6 @@ export function VaultPane(): React.ReactElement {
    * draw the same — no badge — but only one of them is honest before the first
    * read lands.
    */
-  const inboxCount = vault.tree ? inboxCountOf(vault.tree) : null
-
   const view: MainView = tabs.find((t) => t.id === activeTabId)?.view ?? 'editor'
 
   /**
@@ -1236,11 +1234,7 @@ export function VaultPane(): React.ReactElement {
          * screen cannot disagree — they are the same value, not two copies of
          * it kept in step by hand.
          */}
-        <LeftRibbon
-          surface={view}
-          onSurfaceChange={(next) => handleViewChange(next)}
-          inboxCount={inboxCount}
-        />
+        <LeftRibbon surface={view} onSurfaceChange={(next) => handleViewChange(next)} />
 
         <div className="vault-sidebar">
           {/**

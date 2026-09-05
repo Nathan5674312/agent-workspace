@@ -93,7 +93,7 @@ test('left ribbon carries every view, and no icon promises a cut feature', () =>
     'canvas',
     'database',
     'planner',
-    'inbox',
+    'roadmap',
     'terminal',
     'versions',
   ]) {
@@ -107,16 +107,26 @@ test('left ribbon carries every view, and no icon promises a cut feature', () =>
     )
   }
   /**
-   * ROADMAP IS DELIBERATELY NOT AN ICON, and this is the assertion that keeps
-   * that a decision rather than an oversight. Fate is a notes app; every icon
-   * in that column is about the user's notes, and the roadmap is the app
-   * grading itself. It is reached from the help dialog instead.
+   * ROADMAP IS AN ICON AGAIN, and INBOX IS THE ONE THAT LEFT — Nathan's ask on
+   * 2026-09-04, and the reversal of the decision this block used to defend.
    *
-   * The next assertion is the one that matters: removing the icon must not have
-   * removed the only way in. A surface with no entry point is dead code that
-   * still renders.
+   * The old argument was that the roadmap is the app grading itself, which is
+   * not what a column about your notes is for. That argument was right and it
+   * is untouched: Fate's own feature list now sits shut at the bottom of the
+   * pane. What the icon opens is roadmaps in the VAULT — any note carrying
+   * `type: roadmap` — which is notes, in exactly the sense every other icon
+   * here is notes.
+   *
+   * The assertion that still matters is the one below: the help dialog must
+   * keep working. A second entry point is fine; a surface reachable from
+   * nowhere is dead code that still renders.
    */
-  assert.doesNotMatch(code, /id: 'roadmap'/, 'the roadmap is a surface again')
+  assert.doesNotMatch(code, /id: 'inbox'/, 'inbox came back to the ribbon')
+  assert.match(
+    src('RoadmapView.tsx'),
+    /n\.status\.trim\(\) !== ''/,
+    'the roadmap pane no longer reads roadmap rows out of the vault',
+  )
   assert.match(
     src('HelpDialog.tsx'),
     /onOpenRoadmap/,

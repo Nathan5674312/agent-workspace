@@ -34,7 +34,7 @@ import {
   FileText,
   Frame,
   History,
-  Inbox,
+  Route,
   SquareTerminal,
   Table2,
   Waypoints,
@@ -47,20 +47,16 @@ export interface LeftRibbonProps {
   /** The surface the active tab is on. One value, one lit icon. */
   surface: MainView
   onSurfaceChange: (surface: MainView) => void
-  /**
-   * How many items are waiting in the inbox, or null before it has looked.
-   *
-   * The badge came with the Inbox when it moved out of the deleted strip, and
-   * it had to: "the count is the point of a queue -- it has to be legible
-   * without opening the tab, or nobody opens the tab". Promoting the surface
-   * and leaving the count behind would have been a feature regression wearing
-   * a refactor's clothes.
-   *
-   * `null` rather than 0 while unknown, for the reason the old strip gave: a
-   * badge reading 0 before anything has looked is a false all-clear.
-   */
-  inboxCount: number | null
 }
+
+/*
+ * THE INBOX BADGE WENT WITH THE INBOX ICON. It carried the waiting count, on
+ * the rule that "the count is the point of a queue — it has to be legible
+ * without opening the tab, or nobody opens the tab". That rule is intact; it
+ * simply has nothing to count here any more, and a badge with no icon to sit
+ * on is the inert chrome this file exists to refuse. `inboxCount` in
+ * shared/notemeta.ts is untouched, so if the icon comes back the count does.
+ */
 
 /**
  * Every surface the app has, in the order they are reached for, in three
@@ -73,14 +69,18 @@ export interface LeftRibbonProps {
  *   vault    what your notes are, seen six ways
  *   tools    things you do to a note rather than views of the vault
  *
- * ROADMAP IS NOT HERE, and it is the second icon removed rather than moved.
- * Fate is a notes app with an agent in it, so this column is about YOUR NOTES;
- * the roadmap is the app grading itself, which is a question you ask from the
- * help dialog rather than a place you go to work. The VIEW still exists and is
- * unchanged — `HelpDialog` opens it — so what left the ribbon is an entry
- * point, not a feature. A column where eight icons are about your vault and
- * one is about the software is the same category error, one icon wide, that
- * the second navigation strip was.
+ * ROADMAP IS HERE NOW, AND THE ARGUMENT AGAINST IT STILL STANDS — it was
+ * about a different roadmap. What used to be behind this id was Fate grading
+ * its own code, which is genuinely not what a column about YOUR NOTES is for,
+ * and that is still true: it now sits shut at the bottom of the pane.
+ *
+ * What the icon opens is your own long-horizon work, read out of the vault —
+ * any note carrying `type: roadmap`. That is notes, in the same sense every
+ * other icon here is notes, so the category error the old comment named does
+ * not apply to it. `HelpDialog` still opens the same surface.
+ *
+ * INBOX IS WHAT IT REPLACED, at Nathan's ask. The view and its loader are
+ * untouched and still routable; what went is the entry point.
  *
  * EDITOR HAS AN ICON NOW. The old main strip deliberately omitted one, on the
  * grounds that "a button that only ever showed the note you already opened was
@@ -108,7 +108,7 @@ const SURFACES: {
   { id: 'database', label: 'Database', Icon: Table2, group: 'vault' },
   { id: 'canvas', label: 'Canvas', Icon: Frame, group: 'vault' },
   { id: 'planner', label: 'Planner', Icon: Calendar, group: 'vault' },
-  { id: 'inbox', label: 'Inbox', Icon: Inbox, group: 'vault' },
+  { id: 'roadmap', label: 'Roadmap', Icon: Route, group: 'vault' },
   { id: 'terminal', label: 'Terminal', Icon: SquareTerminal, group: 'tools' },
   { id: 'versions', label: 'Versions', Icon: History, group: 'tools' },
 ]
@@ -116,11 +116,7 @@ const SURFACES: {
 /** Exported so the pane's test can assert every surface has exactly one icon. */
 export const RIBBON_SURFACES = SURFACES.map((s) => s.id)
 
-export function LeftRibbon({
-  surface,
-  onSurfaceChange,
-  inboxCount,
-}: LeftRibbonProps) {
+export function LeftRibbon({ surface, onSurfaceChange }: LeftRibbonProps) {
   return (
     <nav className="vault-ribbon" aria-label="Surfaces">
       {SURFACES.map(({ id, label, Icon, group }, i) => (
@@ -140,23 +136,11 @@ export function LeftRibbon({
             onClick={() => onSurfaceChange(id)}
             // The button carries the accessible name; the icon is decorative and
             // must not announce itself twice.
-            aria-label={
-              id === 'inbox' && inboxCount !== null && inboxCount > 0
-                ? `${label}, ${inboxCount} waiting`
-                : label
-            }
+            aria-label={label}
             aria-pressed={surface === id}
             title={label}
           >
             <Icon size={18} strokeWidth={1.75} aria-hidden="true" />
-            {id === 'inbox' && inboxCount !== null && inboxCount > 0 && (
-              /* aria-hidden: the count is already in the button's accessible
-                 name below, and a screen reader reading the number twice is
-                 worse than not drawing it. */
-              <span className="vault-ribbon-badge" aria-hidden="true">
-                {inboxCount}
-              </span>
-            )}
           </button>
         </div>
       ))}

@@ -49,11 +49,14 @@ test('no ribbon: surface points at an id the ribbon does not have', () => {
    * count rather than a floor, for the reason it always was: adding or dropping
    * an icon should be a deliberate act that shows up right here.
    *
-   * The roadmap surface is not among them on purpose; `review-s2` asserts both
-   * that it is absent and that Help still opens it.
+   * The roadmap surface IS among them now (2026-09-04): the icon opens the
+   * vault's own roadmap notes, not Fate's feature list. It took Inbox's slot,
+   * so the count is unchanged — which is the point of asserting a count rather
+   * than a floor. `review-s2` holds the reasoning and asserts Help still opens
+   * the same surface.
    */
   assert.equal(ids.length, 8, 'expected the eight surfaces')
-  assert.ok(!ids.includes('roadmap'), 'the roadmap is a ribbon icon again')
+  assert.ok(ids.includes('roadmap'), 'the roadmap icon is gone again')
   for (const f of ALL_FEATURES.filter((f) => f.surface?.startsWith('ribbon:'))) {
     const id = f.surface.slice('ribbon:'.length)
     assert.ok(ids.includes(id), `roadmap points at ribbon:${id}, which no icon declares`)

@@ -9,6 +9,68 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [1.0.1] — 2026-09-04
+
+The app can now tell you an update exists, and show you what is in it before
+you agree to take it. 1.0.0 could only be asked; it could never say.
+
+### Added
+
+- **Update panel on launch** — when a newer release exists, one panel on open
+  listing what changed: the commit subjects, the files, and the lines added and
+  removed in each. Three answers of equal weight — take it, not now, or stop
+  asking — under the line "Your device, your choice on what happens to your
+  app." Escape and the backdrop mean "not now" and can never mean "never",
+  because switching notifications off is a decision and needs a button.
+- **Notification setting** — `notifyUpdates` in `settings.json`, off from the
+  panel itself, permanently. Absent means on, so only a refusal is ever
+  written and an untouched install keeps no key. Settings are read BEFORE the
+  request, so declining means the request is never made rather than that its
+  answer is discarded. Settings → About keeps its manual button either way:
+  declining to be told is not declining to be able to ask.
+- **Skipped-release count** — miss two or more releases and the panel says how
+  many and which. The changelog always spanned them all, because the comparison
+  is `<your version>...<latest>`; what was missing was saying so.
+- **`scripts/release-preflight.mjs`** — refuses to cut a release whose tag does
+  not name the built commit, whose tree is dirty, or whose `dist/` does not
+  match the version.
+
+### Changed
+
+- **The app now checks for updates when it opens.** 1.0.0 promised, in the
+  README and in three places in the source, that it never would. That promise
+  is withdrawn deliberately and the reasoning is in the header of
+  `src/main/update.ts`: a user who is never told about a fix cannot choose to
+  take it. The control moved rather than disappearing — see the setting above.
+  There is still no timer, and still nothing sent: no identifier, no version,
+  no telemetry.
+- **`docs/RELEASING.md`** gained the tagging rules, and the rate-limit note
+  gained arithmetic: one launch is one request when up to date, three when
+  behind, against an anonymous ceiling of 60 an hour.
+
+### Fixed
+
+- **`v1.0.0`'s tag named the wrong commit.** It pointed at `aef15d7`
+  (2026-08-11); the binaries published under it were built from `de80b34`
+  (2026-09-01), 155 commits and +26,872/-1,514 lines later. Confirmed by
+  rebuilding `de80b34` from a clean clone — its `app.asar` came out within 2 KB
+  of the shipped one. The tag has been moved to `de80b34`. Nothing about the
+  1.0.0 binary changes; it was always this code.
+- **The graph flung the camera** when a drag stopped before the button was
+  released. `VelocityTracker` measured across its own samples, and a stationary
+  pointer emits no events, so it reported mid-drag speed indefinitely — the
+  longer you held still, the more wrong it got. Measured after the fix: held
+  still 200 ms, 0 px/s; released mid-motion, unchanged.
+
+### Known limitations
+
+- **The update is not downloaded for you.** "Get the update" opens the release
+  page; you download and run the installer yourself. Auto-download needs code
+  signing first.
+- **Builds are unsigned**, so SmartScreen warns on first run.
+- **Anyone on 1.0.0 will not be told about this release automatically** — 1.0.0
+  has no launch check. This is the last update that has to be found by hand.
+
 ## [1.0.0] — 2026-09-01
 
 First release. 143 commits over three weeks, from an empty repository on

@@ -1,6 +1,6 @@
 {
   "name": "agent-workspace",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "description": "Full-screen vault workspace with a floating agent corner.",
   "author": "Divine Construct",
   "homepage": "https://github.com/Nathan5674312/agent-workspace",
@@ -12,11 +12,12 @@
     "start": "electron-vite preview",
     "typecheck": "tsc --noEmit",
     "test": "node --experimental-strip-types --no-warnings --test test/",
-    "dist": "npm run build && electron-builder",
+    "dist": "npm run build && electron-builder --publish never",
     "icons": "electron scripts/make-icons.mjs"
   },
   "dependencies": {
     "@anthropic-ai/claude-agent-sdk": "^0.1.77",
+    "electron-updater": "^6.8.9",
     "lucide-react": "^1.31.0",
     "zod": "^4.4.3"
   },
@@ -41,7 +42,13 @@
     "directories": {
       "output": "dist"
     },
-    "publish": null,
+    "publish": [
+      {
+        "provider": "github",
+        "owner": "Nathan5674312",
+        "repo": "agent-workspace"
+      }
+    ],
     "files": [
       "out/**",
       "package.json",
@@ -67,6 +74,7 @@
       "icon": "build/icon.ico"
     },
     "nsis": {
+      "artifactName": "${productName}-Setup-${version}.${ext}",
       "oneClick": false,
       "allowToChangeInstallationDirectory": true,
       "installerIcon": "build/icon.ico",

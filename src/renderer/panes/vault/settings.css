@@ -424,3 +424,29 @@
   font-size: var(--text-sm);
   color: var(--label);
 }
+
+/* The download, once the button has been pressed. It replaces the three
+   answers rather than sitting under them: the question has been answered, and
+   leaving "Not now" on screen next to a running download offers a dismissal
+   that would not actually stop anything. */
+.update-progress progress {
+  width: 100%;
+  height: 4px;
+  margin-bottom: var(--space-2);
+  accent-color: var(--label);
+}
+
+/* An indeterminate <progress> (no value) is the state before the first block
+   lands, which on a small differential update can be the whole download. */
+.update-progress p {
+  margin: 0;
+}
+
+/* Carries the release-page link, so it is a way out rather than a dead end. */
+.update-error {
+  margin: 0;
+  padding: var(--space-2) var(--space-3);
+  border-left: 2px solid var(--danger, var(--red, #d9503f));
+  color: var(--label);
+  font-size: var(--text-sm);
+}

@@ -1,5 +1,6 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CH, EV, type Api, type Activity } from '../shared/ipc.js'
+import type { UpdateProgress } from '../shared/update.js'
 
 /**
  * The ONLY bridge between renderer and main. Nothing else crosses.
@@ -92,6 +93,10 @@ const api: Api = {
     // The host is still a constant; only the two version numbers cross.
     changes: (base: string, head: string) => ipcRenderer.invoke(CH.updateChanges, base, head),
     releases: (current: string) => ipcRenderer.invoke(CH.updateReleases, current),
+    // The one call that ends with the app gone: on success the process exits
+    // mid-promise, so the renderer only ever sees this resolve when it failed.
+    install: () => ipcRenderer.invoke(CH.updateInstall),
+    onProgress: (cb) => on<[UpdateProgress]>(EV.updateProgress, cb),
   },
 }
 

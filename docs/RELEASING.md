@@ -1,20 +1,24 @@
 # Releasing
 
-How a version reaches the people running the last one. Short, because the whole
-mechanism is a static JSON file and a button.
+How a version reaches the people running the last one.
 
 ## The update channel
 
-There isn't an auto-updater, and that is a decision rather than a gap.
+The app updates itself, on a button press and never otherwise.
 
 - **In the app:** Settings → About → *Check for updates*. It reads
   `https://api.github.com/repos/Nathan5674312/agent-workspace/releases/latest`,
   compares the tag to the running build, and either says you are current or
-  offers a link to the release page. It sends nothing, downloads nothing
-  executable, and runs on launch and when the button is pressed — no timer.
-  The launch check is gated by `notifyUpdates` in settings.json, which the
-  update panel can switch off permanently; settings are read before the request,
-  so a refusal means it is never made. See the header of `src/main/update.ts`.
+  offers it. It sends nothing and runs on launch and when the button is
+  pressed — no timer. The launch check is gated by `notifyUpdates` in
+  settings.json, which the update panel can switch off permanently; settings are
+  read before the request, so a refusal means it is never made. See the header
+  of `src/main/update.ts`.
+- **Accepting is what downloads anything.** "Get the update" fetches the
+  installer, verifies it against the sha512 in `latest.yml`, runs it silently
+  and relaunches. `autoDownload` and `autoInstallOnAppQuit` are both off, so
+  nothing arrives in the background and a half-finished download never primes
+  itself to install on the next quit.
 - **Cutting a release IS publishing the version.** There is no second file to
   remember to update, which is the failure mode a hand-written feed has.
 - **This only works because the repository is public.** It was private until
@@ -24,12 +28,33 @@ There isn't an auto-updater, and that is a decision rather than a gap.
   is one line to repoint and `parseFeed()` already understands the
   `{ "version": "1.0.1", "url": "…" }` file shape as well as GitHub's
   `tag_name`/`html_url`.
-- **Not electron-updater**, which would need a real publish target and a
-  differential-download story. A version number and a link is the whole
-  requirement.
-- **`publish` is `null`** in `package.json`: nothing is auto-uploaded. Artifacts
-  go up with `gh release create`, deliberately, so no build ever publishes
-  itself as a side effect of running.
+- **electron-updater, for the download only.** The version check and the
+  changelog stay hand-written against the releases API, because electron-updater
+  has no equivalent of `compare/<old>...<new>` and the panel's whole claim is
+  that it shows what it is asking you to accept. So there are two feeds:
+  `/releases/latest` answers "is there one, and what is in it", `latest.yml`
+  answers "fetch it". Both are published by the same act and cannot disagree for
+  longer than it takes to attach the files.
+- **The installer's filename has no spaces, deliberately.**
+  `nsis.artifactName` is pinned to `${productName}-Setup-${version}.${ext}`
+  because electron-builder writes that name into `latest.yml` and GitHub
+  rewrites spaces to dots when an asset is uploaded. Left at the default the yml
+  asks for `Fate-Setup-1.0.6.exe` while the release actually holds
+  `Fate.Setup.1.0.6.exe`, and every updater 404s against a release that looks
+  perfectly complete. A name with no spaces cannot be rewritten.
+- **The download is a diff.** The `.blockmap` beside the installer lets an
+  existing install fetch only the blocks that changed. Around 350 MB of the
+  380 MB install is the Electron runtime and is byte-identical between releases,
+  so a code-only update moves single-digit MB rather than the 100 MB installer.
+  This is the whole reason `publish` is configured — see below.
+- **`publish` names the GitHub repo, and `npm run dist` passes
+  `--publish never`.** The config has to be there or electron-builder writes no
+  `latest.yml` and no `.blockmap`, and the updater has nothing to read. The flag
+  is what keeps the old promise underneath it: artifacts still go up by hand
+  with `gh release create`, and no build publishes itself as a side effect of
+  running. Do not remove either half — the config without the flag is a build
+  that uploads itself, the flag without the config is a release nobody can
+  install.
 
 Two things the GitHub API demands that are easy to get wrong, both handled in
 `src/main/update.ts` and both silent failures if removed:
@@ -78,10 +103,17 @@ appearing broken.
    It prints the `gh release create` line with the sha filled in.
 7. **Publish the release LAST**, once the artifacts are built and verified.
    ```bash
-   gh release create v1.0.1 dist/*.exe dist/*.zip \
+   gh release create v1.0.1 dist/*.exe dist/*.zip dist/*.blockmap dist/latest.yml \
      --target <sha printed by the preflight> \
      --title "Fate 1.0.1" --notes-from-file CHANGELOG.md
    ```
+
+   **`latest.yml` and the `.blockmap` are neither optional nor cosmetic.**
+   Without them the release page looks perfect and every installed app's "Get
+   the update" button fails — at the exact moment someone has agreed to update.
+   The preflight refuses to print this line if either is missing from `dist/`.
+   Releases before 1.0.6 have neither, which is why updating FROM one of them
+   still means downloading the installer by hand, once.
    Creating the release is what tells every existing install that a new version
    exists, because `/releases/latest` starts answering with the new tag the
    moment it is published. So the artifacts have to be attached in the same

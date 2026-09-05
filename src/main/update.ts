@@ -21,13 +21,16 @@
  *   - It sends nothing. A GET for a static JSON file, no query string, no
  *     identifier, no version header. The server learns an IP fetched a public
  *     file, which is what any download would tell it anyway.
- *   - It downloads nothing executable. The answer is a version string and a
- *     page URL; installing is the person opening that page.
+ *   - IT USED TO DOWNLOAD NOTHING EXECUTABLE. It does now, and only when a
+ *     person presses the button in the update panel: see `install()` at the
+ *     bottom of this file for what was traded and what was kept. The CHECK is
+ *     still a bare GET that sends nothing, and it is still the only thing that
+ *     happens without being asked for.
  *
  * All the judgement lives in src/shared/update.ts, which is pure and tested.
  * This file is transport and nothing else.
  */
-import { app } from 'electron'
+import { BrowserWindow, app } from 'electron'
 import { get } from 'node:https'
 import { UPDATE_FEED, decide, isVersion, type UpdateCheck } from '../shared/update.js'
 import {
@@ -37,7 +40,7 @@ import {
   parseReleases,
   type Changelog,
 } from '../shared/changelog.js'
-import { CH } from '../shared/ipc.js'
+import { CH, EV } from '../shared/ipc.js'
 import type { Handle } from './ipc.js'
 
 /** Past this, give up and say so. Long enough for a slow link, short enough
@@ -228,8 +231,122 @@ export async function releases(current: string): Promise<string[]> {
   }
 }
 
+/** The first line of an error, capped. See the catch in `install()`. */
+function first(e: unknown): string {
+  const raw = (e instanceof Error ? e.message : String(e)).trim()
+  const line = raw.split('\n', 1)[0] ?? raw
+  return line.length > 160 ? `${line.slice(0, 157)}…` : line
+}
+
+/**
+ * DOWNLOAD THE UPDATE AND RESTART INTO IT.
+ *
+ * This is the promise at the top of this file being partly bought out, and it
+ * is worth saying exactly which part. "No timer, no telemetry" still holds.
+ * "It downloads nothing executable" does not, and the reason is that the old
+ * flow did not work: clicking the offer opened a release page, and the person
+ * was left to find a 100 MB installer, run it, and reinstall the app over
+ * itself — every time, for every release. Almost nobody does that twice, so the
+ * effect of refusing to download was that fixes did not reach anyone.
+ *
+ * What is kept instead of the refusal:
+ *   - NOTHING IS FETCHED UNTIL A BUTTON IS PRESSED. Not on launch, not in the
+ *     background, not "while you were reading the changelog". `autoDownload`
+ *     is off, and it is off explicitly rather than by default.
+ *   - NOTHING INSTALLS ITSELF ON QUIT. `autoInstallOnAppQuit` is off too;
+ *     abandoning a download must not leave an installer primed to run the next
+ *     time the app closes.
+ *   - THE DOWNLOAD IS A DIFF, NOT THE APP. electron-updater reads the
+ *     `.blockmap` published beside the installer and fetches only the blocks
+ *     that changed. The Electron runtime is ~350 MB of the install and is
+ *     byte-identical between releases, so a code-only update moves a few MB.
+ *     THIS IS WHY `publish` IS CONFIGURED IN package.json — without it
+ *     electron-builder writes neither `latest.yml` nor the blockmap, and this
+ *     whole path fails at the first request. See docs/RELEASING.md.
+ *   - IT IS VERIFIED BEFORE IT RUNS. electron-updater checks the downloaded
+ *     bytes against the sha512 in `latest.yml`, which is generated at build
+ *     time and served from the same release. A truncated or substituted file
+ *     never reaches the installer.
+ *
+ * UNPACKAGED BUILDS REFUSE RATHER THAN TRY. `app.getVersion()` is Electron's
+ * own version under `npm run dev`, so a developer is offered nothing to install
+ * and this says so instead of throwing an internal error at them.
+ */
+export async function install(): Promise<string | null> {
+  if (!app.isPackaged) {
+    return 'This is a development build, so there is nothing to install into. Updates work in the packaged app.'
+  }
+
+  /**
+   * IMPORTED HERE, NOT AT THE TOP, for two reasons that both bite silently.
+   *
+   * electron-updater is CommonJS whose exports are defined with getters, so
+   * Node's ESM loader cannot see a named `autoUpdater` binding — a static
+   * `import { autoUpdater }` throws at parse time, which the test suite catches
+   * because it loads these modules directly. The default import is the whole
+   * module object and destructures fine.
+   *
+   * And it reaches for `electron` as it initialises, so importing it at module
+   * scope would drag the updater into every test that touches main/ipc.ts.
+   * Nothing here runs until someone presses the button, so nothing needs to be
+   * loaded until then either.
+   */
+  const { autoUpdater } = (await import('electron-updater')).default
+
+  autoUpdater.autoDownload = false
+  autoUpdater.autoInstallOnAppQuit = false
+
+  // Progress is the whole reason the dialog stays up. Registered per call and
+  // removed after, because a listener that outlives its dialog pushes into a
+  // component that is no longer mounted.
+  const onProgress = (p: {
+    percent: number
+    transferred: number
+    total: number
+    bytesPerSecond: number
+  }) => {
+    for (const win of BrowserWindow.getAllWindows()) {
+      if (!win.isDestroyed()) win.webContents.send(EV.updateProgress, p)
+    }
+  }
+  autoUpdater.on('download-progress', onProgress)
+
+  try {
+    const found = await autoUpdater.checkForUpdates()
+    if (!found?.updateInfo) {
+      return 'The update could not be found on the release page. Try the download page instead.'
+    }
+    await autoUpdater.downloadUpdate()
+    /**
+     * SILENT, AND RELAUNCH. The person already agreed in the dialog; making
+     * them click through an installer wizard is asking the same question twice.
+     * The second argument is what turns "the app vanished" into "the app came
+     * back on the new version", which is the behaviour being asked for.
+     *
+     * This does not return — the app quits inside it.
+     */
+    autoUpdater.quitAndInstall(true, true)
+    return null
+  } catch (e) {
+    // Offline, rate-limited, a release with no `latest.yml`, a checksum that
+    // did not match. All of them mean the same thing to the person in front of
+    // it: this did not work, the download page still does.
+    //
+    // THE MESSAGE IS TRIMMED, and that is not tidying. electron-updater's
+    // errors carry the failing URL, the HTTP status and a re-quoted request
+    // block across several lines — 250-odd characters of which the first
+    // sentence is the only part anyone can act on. Rendered whole it turns the
+    // panel into a stack trace at the exact moment someone needs to be told,
+    // briefly, what to do next.
+    return `The update could not be installed: ${first(e)}`
+  } finally {
+    autoUpdater.removeListener('download-progress', onProgress)
+  }
+}
+
 export function register(handle: Handle): void {
   handle(CH.updateCheck, () => check())
   handle(CH.updateReleases, (current: string) => releases(current))
   handle(CH.updateChanges, (base: string, head: string) => changes(base, head))
+  handle(CH.updateInstall, () => install())
 }

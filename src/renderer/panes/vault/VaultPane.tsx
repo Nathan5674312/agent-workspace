@@ -61,6 +61,7 @@ const VIEW_LABEL: Record<MainView, string> = {
 import { ConflictDialog } from './ConflictDialog.js'
 import { SettingsDialog } from './SettingsDialog.js'
 import { UpdateDialog } from './UpdateDialog.js'
+import type { UpdateProgress } from '../../../shared/update.js'
 import type { Changelog } from '../../../shared/changelog.js'
 import { HelpDialog } from './HelpDialog.js'
 import { NameDialog } from './NameDialog.js'
@@ -327,6 +328,15 @@ export function VaultPane(): React.ReactElement {
     versions: string[]
     loading: boolean
   } | null>(null)
+  /**
+   * The install, which outlives the check above. Kept in three pieces rather
+   * than folded into `update` because they have different lifetimes: `update`
+   * is cleared the moment someone dismisses the panel, and a download must not
+   * be able to disappear with it.
+   */
+  const [installing, setInstalling] = useState(false)
+  const [progress, setProgress] = useState<UpdateProgress | null>(null)
+  const [updateError, setUpdateError] = useState<string | null>(null)
   useEffect(() => {
     let live = true
     void (async () => {
@@ -361,6 +371,27 @@ export function VaultPane(): React.ReactElement {
       live = false
     }
   }, [])
+
+  useEffect(() => window.api.update.onProgress(setProgress), [])
+
+  /**
+   * Start the download. On success this never resolves in any way the user
+   * sees — the app quits inside `quitAndInstall` and comes back on the new
+   * version. A resolved string is therefore always a failure.
+   */
+  async function installUpdate(): Promise<void> {
+    setUpdateError(null)
+    setProgress(null)
+    setInstalling(true)
+    try {
+      const failed = await window.api.update.install()
+      if (failed) setUpdateError(failed)
+    } catch (e) {
+      setUpdateError(String(e))
+    } finally {
+      setInstalling(false)
+    }
+  }
 
   const [conflictOpen, setConflictOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
@@ -1434,7 +1465,10 @@ export function VaultPane(): React.ReactElement {
           changes={update.changes}
           versions={update.versions}
           loading={update.loading}
-          onGet={() => setUpdate(null)}
+          installing={installing}
+          progress={progress}
+          error={updateError}
+          onGet={() => void installUpdate()}
           onLater={() => setUpdate(null)}
           onNever={() => {
             setUpdate(null)

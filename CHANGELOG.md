@@ -9,6 +9,49 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [1.0.6] — 2026-09-05
+
+The update button updates the app. It used to open a web page.
+
+### Changed
+
+- **"Get the update" now downloads, installs and restarts.** It was a link to
+  the release page: the app told you a version existed and then left you to
+  find a 100 MB installer, run it, and reinstall Fate over itself — every time,
+  for every release. It worked exactly as written and still read as broken,
+  because that is not what the button says. Pressing it now fetches the update,
+  checks it, closes Fate and reopens it on the new version.
+- **The download is only what changed.** Around 350 MB of the install is the
+  Electron runtime and it is identical between releases, so the update fetches
+  the blocks that actually differ rather than the whole installer. A release
+  that only changes app code moves single-digit megabytes.
+- **Nothing downloads until you press the button.** No background download, no
+  timer, and an abandoned download is not left primed to install the next time
+  you quit. The launch check is still a single GET that sends nothing, and
+  "Don't notify me about updates" still ends it for good.
+- **A failed update leaves the download page on offer** rather than a dead end,
+  and says what went wrong.
+
+### Fixed
+
+- **1.0.5 installed and then never opened.** The window is created hidden and
+  shown when Electron reports it has painted, and in a packaged 1.0.5 build
+  that report never arrived: the app started, loaded, rendered its whole
+  interface and put nothing on screen. Found by attaching a debugger to the
+  packaged build — the page was complete and error-free while Windows was told
+  about no window at all. There is now a second, independent trigger, so the
+  app becoming visible no longer depends on one event that can go missing.
+- **The installer's filename no longer contains spaces.** GitHub rewrites
+  spaces to dots when an asset is uploaded, which would have left the update
+  metadata asking for a file the release does not have, on a release page that
+  looks perfectly complete.
+
+### Note
+
+- **Updating FROM 1.0.5 or earlier is still manual, once.** Those releases were
+  published before any of this existed and carry no update metadata, so 1.0.6
+  has to be installed by hand. Every release after it updates in place.
+
 ## [1.0.5] — 2026-09-05
 
 The window is the app's own, top to bottom. Nothing in it says Electron any
@@ -292,6 +335,7 @@ Stated so they are not discovered. Each is tracked in `src/shared/roadmap.ts`.
 - **No import** from Notion, Evernote or anywhere else. Obsidian needs none —
   it is the same folder.
 
-[Unreleased]: https://github.com/Nathan5674312/agent-workspace/compare/v1.0.5...HEAD
+[Unreleased]: https://github.com/Nathan5674312/agent-workspace/compare/v1.0.6...HEAD
+[1.0.6]: https://github.com/Nathan5674312/agent-workspace/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/Nathan5674312/agent-workspace/compare/v1.0.4...v1.0.5
 [1.0.0]: https://github.com/Nathan5674312/agent-workspace/releases/tag/v1.0.0

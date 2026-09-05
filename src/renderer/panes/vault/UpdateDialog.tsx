@@ -28,6 +28,7 @@
  */
 import { useEffect, useRef } from 'react'
 import type { Changelog } from '../../../shared/changelog.js'
+import type { UpdateProgress } from '../../../shared/update.js'
 
 type Props = {
   /** The version running now. */
@@ -52,6 +53,16 @@ type Props = {
   versions: string[]
   /** Still fetching the comparison. Distinct from `changes === null`. */
   loading: boolean
+  /** Download running. The dialog stays up and the three answers go away. */
+  installing: boolean
+  /** How far the download has got, or null before the first block lands. */
+  progress: UpdateProgress | null
+  /**
+   * Why the install failed, or null. Shown WITH the release page still on
+   * offer: a failed download must leave a person better off than not trying,
+   * and the manual route is what it falls back to.
+   */
+  error: string | null
   onGet: () => void
   onLater: () => void
   onNever: () => void
@@ -64,6 +75,9 @@ type Props = {
  */
 const plural = (n: number, word: string) => (n === 1 ? word : `${word}s`)
 
+/** Bytes as MB, one decimal. The numbers here are megabytes or they are wrong. */
+const mb = (n: number) => `${(n / 1024 / 1024).toFixed(1)} MB`
+
 /** Enough to see the shape of a release without becoming a scrollable wall. */
 const FILES_SHOWN = 12
 const COMMITS_SHOWN = 8
@@ -75,6 +89,9 @@ export function UpdateDialog({
   changes,
   versions,
   loading,
+  installing,
+  progress,
+  error,
   onGet,
   onLater,
   onNever,
@@ -104,11 +121,17 @@ export function UpdateDialog({
         downOnBackdrop.current = e.target === e.currentTarget
       }}
       onMouseUp={(e) => {
+        if (installing) return
         if (downOnBackdrop.current && e.target === e.currentTarget) onLater()
       }}
       onCancel={(e) => {
+        // Always prevented: Escape must never reach the platform's own close,
+        // which would take the dialog away without telling anyone.
         e.preventDefault()
-        onLater()
+        // Mid-download there is nothing to dismiss TO. The bytes keep arriving
+        // either way, and a hidden download that restarts the app unannounced
+        // is the one outcome worse than no updater at all.
+        if (!installing) onLater()
       }}
       onKeyDown={(e) => {
         if (e.key === 'Escape') e.stopPropagation()
@@ -184,32 +207,61 @@ export function UpdateDialog({
           </p>
         )}
 
-        <div className="settings-actions update-actions">
-          {/* An anchor, not a button: it opens the release page. target="_blank"
-              is load-bearing — an in-app navigation is blocked by will-navigate,
-              and this routes through setWindowOpenHandler, which refuses
-              anything but http(s) before it reaches the OS. */}
-          <a
-            className="settings-close"
-            href={url}
-            target="_blank"
-            rel="noreferrer noopener"
-            onClick={onGet}
-          >
-            Get the update
-          </a>
-          <button className="settings-close" onClick={onLater}>
-            Not now
-          </button>
-          <button className="settings-close" onClick={onNever}>
-            Don&apos;t notify me about updates
-          </button>
-        </div>
+        {/* A FAILED INSTALL MUST NOT LEAVE SOMEONE WORSE OFF than never having
+            pressed the button, so the error arrives with the manual route
+            attached rather than as a dead end. */}
+        {error && (
+          <p className="update-error" role="alert">
+            {error}{' '}
+            <a href={url} target="_blank" rel="noreferrer noopener">
+              Open the download page
+            </a>
+            .
+          </p>
+        )}
 
-        <p className="settings-hint">
-          Turning notifications off does not remove the check — Settings → About still
-          has the button, whenever you want to ask.
-        </p>
+        {installing ? (
+          /* The three answers are gone on purpose: the question has been
+             answered and there is nothing to decide while bytes are moving. */
+          <div className="update-progress">
+            <progress value={progress ? progress.percent : undefined} max={100} />
+            <p className="settings-hint">
+              {progress
+                ? `${Math.round(progress.percent)}% — ${mb(progress.transferred)} of ${mb(
+                    progress.total,
+                  )}. `
+                : 'Working out what actually changed. '}
+              Only the parts that differ from the version you have are downloaded, so
+              this is far smaller than the whole app. Fate will close and reopen on
+              {' '}
+              {latest} when it finishes.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="settings-actions update-actions">
+              {/* A BUTTON, NOT A LINK, and that is the whole fix. This used to
+                  be an <a> to the release page: it worked exactly as written
+                  and was still read as broken, because "it opened a browser at
+                  a 100 MB installer" is not what "get the update" promises.
+                  It now downloads, verifies and restarts. */}
+              <button className="settings-close" onClick={onGet}>
+                {error ? 'Try again' : 'Get the update'}
+              </button>
+              <button className="settings-close" onClick={onLater}>
+                Not now
+              </button>
+              <button className="settings-close" onClick={onNever}>
+                Don&apos;t notify me about updates
+              </button>
+            </div>
+
+            <p className="settings-hint">
+              Turning notifications off does not remove the check — Settings → About still
+              has the button, whenever you want to ask.
+            </p>
+          </>
+        )}
       </div>
     </dialog>
   )

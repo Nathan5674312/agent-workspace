@@ -6,13 +6,12 @@ import { CanvasView } from './CanvasView.js'
 import { isCanvasPath } from '../../../shared/canvas.js'
 import { DatabaseView } from './DatabaseView.js'
 import { PlannerView } from './PlannerView.js'
-import { InboxView } from './InboxView.js'
 import { RoadmapView } from './RoadmapView.js'
 import { VersionsView } from './VersionsView.js'
 import { TerminalView } from './TerminalView.js'
 import { PaneMenu, PaneMenuItem } from './PaneMenu.js'
 import { BookmarkToggleItem } from './BookmarksView.js'
-import type { VaultNoteMeta, InboxItem } from '../../../shared/notemeta.js'
+import type { VaultNoteMeta } from '../../../shared/notemeta.js'
 import type { WikilinkRef } from './helpers.js'
 import { ArrowLeft, ArrowRight, Ellipsis } from 'lucide-react'
 
@@ -32,7 +31,6 @@ export type MainView =
   | 'versions'
   | 'graph'
   | 'database'
-  | 'inbox'
   | 'roadmap'
   | 'canvas'
   | 'planner'
@@ -76,7 +74,6 @@ export interface MainCanvasProps {
   onAddLink: (from: string, to: string) => Promise<boolean>
   getGraph: () => Promise<VaultGraph>
   getNotes: () => Promise<VaultNoteMeta[]>
-  getInbox: () => Promise<InboxItem[]>
   /**
    * The open board's path. Pane state in <VaultPane>, not tab state, for the
    * same reason `splitView` is: one board at a time is the v1 scope, and a
@@ -117,7 +114,6 @@ export function MainCanvas({
   onAddLink,
   getGraph,
   getNotes,
-  getInbox,
   canvasPath,
   backlinks,
   onOpenNote,
@@ -137,8 +133,6 @@ export function MainCanvas({
   const [notes, setNotes] = useState<VaultNoteMeta[] | null>(null)
   const [loadingNotes, setLoadingNotes] = useState(false)
   const [notesError, setNotesError] = useState<string | null>(null)
-  const [inbox, setInbox] = useState<InboxItem[] | null>(null)
-  const [inboxError, setInboxError] = useState<string | null>(null)
 
   /**
    * Always re-fetch. This used to early-return whenever `graph` was non-null,
@@ -195,7 +189,7 @@ export function MainCanvas({
   }, [view])
 
   /**
-   * DATABASE AND INBOX LOAD FROM THE VIEW TOO, for the reason the graph effect
+   * DATABASE AND ROADMAP LOAD FROM THE VIEW TOO, for the reason the graph effect
    * above already documents at length.
    *
    * Both used to load inside an onClick — `handleSwitchToDatabase` and
@@ -291,27 +285,6 @@ export function MainCanvas({
    *    onto the editor too and the split showed one view twice.
    */
 
-  /**
-   * Re-fetch every time, for the strongest version of the reason the other two
-   * have: this queue's whole job is to tell you what arrived since you last
-   * looked. A cached inbox is a lie about the present.
-   */
-  useEffect(() => {
-    if (view !== 'inbox') return
-    let live = true
-    setInboxError(null)
-    getInbox()
-      .then((i) => {
-        if (live) setInbox(i)
-      })
-      .catch((e: unknown) => {
-        if (live) setInboxError(String(e))
-      })
-    return () => {
-      live = false
-    }
-  }, [view])
-
   return (
     <div className="vault-main-canvas">
       {/* Note header — back / forward, the title, and the view menu, in the
@@ -350,9 +323,7 @@ export function MainCanvas({
               ? 'Database view'
               : view === 'planner'
               ? 'Planner'
-              : view === 'inbox'
-                ? 'Inbox'
-                : view === 'terminal'
+              : view === 'terminal'
                 ? 'Terminal'
               : view === 'roadmap'
                   ? 'Roadmap'
@@ -476,18 +447,6 @@ export function MainCanvas({
           />
         ) : view === 'versions' ? (
           <VersionsView note={note} onRestore={onRestore} />
-        ) : view === 'inbox' ? (
-          <InboxView
-            items={inbox}
-            error={inboxError}
-            // Opening a capture is reading it, not filing it: the note stays in
-            // Inbox/ until something actually moves it.
-            onOpenNote={async (path) => {
-              const opened = await onOpenNote(path)
-              if (opened) onViewChange('editor')
-              return opened
-            }}
-          />
         ) : view === 'planner' ? (
           <PlannerView
             getNotes={getNotes}

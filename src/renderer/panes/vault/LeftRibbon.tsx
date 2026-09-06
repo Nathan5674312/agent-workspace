@@ -49,14 +49,6 @@ export interface LeftRibbonProps {
   onSurfaceChange: (surface: MainView) => void
 }
 
-/*
- * THE INBOX BADGE WENT WITH THE INBOX ICON. It carried the waiting count, on
- * the rule that "the count is the point of a queue — it has to be legible
- * without opening the tab, or nobody opens the tab". That rule is intact; it
- * simply has nothing to count here any more, and a badge with no icon to sit
- * on is the inert chrome this file exists to refuse. `inboxCount` in
- * shared/notemeta.ts is untouched, so if the icon comes back the count does.
- */
 
 /**
  * Every surface the app has, in the order they are reached for, in three
@@ -79,8 +71,14 @@ export interface LeftRibbonProps {
  * other icon here is notes, so the category error the old comment named does
  * not apply to it. `HelpDialog` still opens the same surface.
  *
- * INBOX IS WHAT IT REPLACED, at Nathan's ask. The view and its loader are
- * untouched and still routable; what went is the entry point.
+ * INBOX IS WHAT IT REPLACED, at Nathan's ask, and on 2026-09-06 the rest of it
+ * followed: the view, its loader, `InboxItem`, `parseProposal`, `inboxCount`
+ * and the badge that read it are all deleted. Losing the icon left a surface
+ * nothing could route to, which is the dead-code-that-still-renders state this
+ * column exists to refuse — so it went whole rather than sat there unreachable.
+ * `Inbox/` is still an ordinary vault folder and agents still capture into it;
+ * what is gone is Fate's dedicated view of it. `shared/roadmap.ts` records what
+ * a future version would have to rebuild.
  *
  * EDITOR HAS AN ICON NOW. The old main strip deliberately omitted one, on the
  * grounds that "a button that only ever showed the note you already opened was

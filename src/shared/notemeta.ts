@@ -224,28 +224,6 @@ export function monthOf(updated: string): string {
 }
 
 /**
- * One captured item waiting in Inbox/, as the agent left it.
- *
- * These are PROPOSALS, not filed notes: the capture path writes where it thinks
- * the note should go and stops, so a human can agree or correct. That is the
- * whole reason the folder exists, and nothing in this app rendered it until
- * now — ten items have been sitting there since 2026-08-06.
- */
-export type InboxItem = {
-  path: string
-  /** `proposed_title`, or the filename when the capture had no heading to copy. */
-  title: string
-  /** Where the agent wants it to go. `''` when it did not venture a guess. */
-  folder: string
-  /** The runner-up folders, in rank order. */
-  alternatives: string[]
-  type: string
-  captured: string
-  /** The note itself, frontmatter stripped. */
-  body: string
-}
-
-/**
  * A deliberately small frontmatter reader, matching the one that WROTE these
  * files (`bench/writer.py` parse_fm): flat `key: value`, quotes stripped. Not a
  * YAML parser, because a YAML parser would be a dependency and a lie — nothing
@@ -418,24 +396,6 @@ export function stripFrontmatter(text: string): string {
   return end === -1 ? text.trim() : text.slice(end + 4).trim()
 }
 
-/** Read one inbox capture. */
-export function parseProposal(path: string, text: string): InboxItem {
-  const stem = path.split('/').pop()!.replace(/\.md$/i, '')
-  const fm = parseFrontmatter(text)
-
-  return {
-    path,
-    title: fm.proposed_title || stem,
-    folder: fm.proposed_folder || '',
-    // `alternatives: [System, Business]` — a bare inline list, not JSON, so it
-    // is split rather than parsed.
-    alternatives: parseList(fm.alternatives || ''),
-    type: fm.proposed_type || '',
-    captured: fm.captured || '',
-    body: stripFrontmatter(text),
-  }
-}
-
 /**
  * Normalise one row off the wire.
  *
@@ -573,26 +533,4 @@ export function groupValues(
     case 'linked': return [linkBucket(n.backlinks)]
     default: return ['']
   }
-}
-
-/**
- * How many captures are waiting in `Inbox/`, straight off the folder tree.
- *
- * The badge on the ribbon needs a NUMBER, and `useVault().getInbox()` gets it
- * by reading and parsing every file in that folder — 33 reads on this vault, on
- * every launch and every tree reload, for one digit. Its own comment concedes
- * the shape ("Ten reads is affordable"), and it was written when nothing called
- * it until you opened the Inbox.
- *
- * The tree is already in memory and already knows what is in the folder, so the
- * count is free. It agrees with `getInbox().length` because that function
- * filters the same way — `kind === 'note'` under `Inbox/` — and then maps every
- * one it could read. The only divergence is a file that fails to READ, which
- * getInbox drops and this counts; a note in the tree that cannot be opened is
- * rare enough, and wrong by one is a better trade than 33 reads a launch.
- */
-export function inboxCount(tree: { children?: { kind: string; name: string; children?: { kind: string }[] }[] } | null): number {
-  const dir = tree?.children?.find((c) => c.kind === 'folder' && c.name === 'Inbox')
-  if (!dir) return 0
-  return (dir.children ?? []).filter((c) => c.kind === 'note').length
 }

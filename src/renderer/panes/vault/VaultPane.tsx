@@ -52,7 +52,6 @@ const VIEW_LABEL: Record<MainView, string> = {
   versions: 'Versions',
   graph: 'Graph',
   database: 'Database',
-  inbox: 'Inbox',
   roadmap: 'Roadmap',
   canvas: 'Canvas',
   planner: 'Planner',
@@ -228,20 +227,6 @@ export function VaultPane(): React.ReactElement {
    * The primary canvas's view IS the active tab's view. Derived, not mirrored:
    * a second copy in state would drift the moment a tab switch raced a view
    * click, and there is no state here that the tabs array does not already hold.
-   */
-  /**
-   * The inbox badge's number. DERIVED from the tree, not fetched.
-   *
-   * This was a `useState` plus an effect calling `vault.getInbox()`, which
-   * reads and parses every file in `Inbox/` — 33 reads on this vault, at every
-   * launch and after every create, move and agent write, to produce one digit.
-   * The tree is already here and already lists that folder, so the count costs
-   * nothing and cannot go stale against the tree it is read from.
-   *
-   * `null` while there is no tree yet, which keeps the distinction the ribbon
-   * documents: null is "has not looked", 0 is "looked, nothing waiting". They
-   * draw the same — no badge — but only one of them is honest before the first
-   * read lands.
    */
   const view: MainView = tabs.find((t) => t.id === activeTabId)?.view ?? 'editor'
 
@@ -554,8 +539,8 @@ export function VaultPane(): React.ReactElement {
       setOpenError(null)
       // The tab records the note HERE rather than in each caller, because this
       // is the single point where a note actually became current — the tree, a
-      // wikilink, a backlink, a graph node, a database row and the inbox all
-      // funnel through it, and six copies of this line would drift.
+      // wikilink, a backlink, a graph node and a database row all funnel
+      // through it, and five copies of this line would drift.
       //
       // `tabId` is a parameter and not just `activeTabId` for the tab-click
       // case: that click has to open the note BEFORE it switches tabs (the open
@@ -1232,7 +1217,6 @@ export function VaultPane(): React.ReactElement {
       onAddLink={handleAddLink}
       getGraph={vault.getGraph}
       getNotes={vault.getNotes}
-      getInbox={vault.getInbox}
       canvasPath={canvasPath}
       backlinks={backlinks}
       onBack={goBack}

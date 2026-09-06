@@ -122,6 +122,10 @@ test('left ribbon carries every view, and no icon promises a cut feature', () =>
    * nowhere is dead code that still renders.
    */
   assert.doesNotMatch(code, /id: 'inbox'/, 'inbox came back to the ribbon')
+  // The icon left first and the feature followed on 2026-09-06. Asserted here
+  // because the failure mode is silent: a routable view with no way in renders
+  // for nobody, which is the state this file spends its length refusing.
+  assert.doesNotMatch(src('MainCanvas.tsx'), /'inbox'/, 'the inbox view is routable again')
   assert.match(
     src('RoadmapView.tsx'),
     /n\.status\.trim\(\) !== ''/,

@@ -147,10 +147,6 @@ export function HelpDialog({ isOpen, onClose, onOpenRoadmap }: HelpDialogProps) 
               it.
             </li>
             <li>
-              <strong>Inbox</strong> — what agents captured but did not file.
-              The number on the icon is how many are waiting.
-            </li>
-            <li>
               <strong>Terminal</strong> — slash commands run here freely;{' '}
               <code className="help-code">!</code> reaches the operating system
               and asks first, every time, showing the exact text it will run.

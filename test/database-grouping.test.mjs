@@ -19,7 +19,6 @@ import {
   sortField,
   groupValues,
   FAMILY_LABEL,
-  inboxCount,
 } from '../src/shared/notemeta.ts'
 
 /** A row, with only the fields these three functions read. */
@@ -183,54 +182,4 @@ test('the family labels and the icon map cover the same four families', () => {
     'structure',
     'work',
   ])
-})
-
-// ------------------------------------------------------------ inboxCount
-
-test('the inbox badge counts notes without reading a single file', () => {
-  /**
-   * This replaced a `useState` plus an effect that called `getInbox()`, which
-   * reads and parses EVERY file in Inbox/ — 33 reads on the author's vault, at
-   * every launch and after every create, move and agent write, to produce one
-   * digit. Measured with a probe in `vault.read`, which is also how the cost
-   * was found at all.
-   */
-  const tree = {
-    children: [
-      { kind: 'folder', name: 'Notes', children: [{ kind: 'note' }, { kind: 'note' }] },
-      {
-        kind: 'folder',
-        name: 'Inbox',
-        children: [{ kind: 'note' }, { kind: 'note' }, { kind: 'note' }],
-      },
-    ],
-  }
-  assert.equal(inboxCount(tree), 3, 'counted the wrong folder, or the wrong kinds')
-})
-
-test('a vault with no Inbox folder counts zero rather than throwing', () => {
-  assert.equal(inboxCount({ children: [{ kind: 'folder', name: 'Notes', children: [] }] }), 0)
-  assert.equal(inboxCount({ children: [] }), 0)
-  assert.equal(inboxCount({}), 0)
-  assert.equal(inboxCount(null), 0)
-})
-
-test('only notes count — not folders, canvases or loose files', () => {
-  // The same `kind === 'note'` filter getInbox applies, so the badge and the
-  // Inbox view cannot disagree about how many things are waiting.
-  const tree = {
-    children: [
-      {
-        kind: 'folder',
-        name: 'Inbox',
-        children: [
-          { kind: 'note' },
-          { kind: 'canvas' },
-          { kind: 'file' },
-          { kind: 'folder' },
-        ],
-      },
-    ],
-  }
-  assert.equal(inboxCount(tree), 1)
 })

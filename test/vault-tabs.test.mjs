@@ -75,7 +75,7 @@ test('every view switch goes through the callback, not a local setter', () => {
    * keeps a local view state and always reports upward — and it is the
    * `setView(` check above that carries it. This is the floor for the switches
    * that legitimately remain: a note opened from the graph, the table, the
-   * inbox, the planner or the terminal's close, all of which have to bring the
+   * planner or the terminal's close, all of which have to bring the
    * editor forward.
    */
   assert.ok(
@@ -118,7 +118,7 @@ test('the old fall-through form is gone', () => {
 
 test('a tab with no note is named after its view', () => {
   assert.match(PANE, /const VIEW_LABEL: Record<MainView, string>/)
-  for (const v of ['versions', 'graph', 'database', 'inbox', 'roadmap']) {
+  for (const v of ['versions', 'graph', 'database', 'roadmap']) {
     assert.match(PANE, new RegExp(`${v}:\\s*'`), `no label for the ${v} view`)
   }
 })

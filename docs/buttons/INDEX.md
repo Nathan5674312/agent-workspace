@@ -17,6 +17,14 @@ answer their scope question. Test baseline now: **274 passing, 0 failing**
 they were written as briefs and are kept as the record of why each control was
 built the way it was, not as a description of the code today.
 
+One consequence worth naming, because several briefs cite it as a model to
+copy: `src/renderer/panes/vault/InboxView.tsx` **no longer exists**. The Inbox
+lost its ribbon icon on 2026-09-04 and the rest of the surface followed on
+2026-09-06, so every `InboxView.tsx:NN` citation below points at a deleted
+file. The list-with-an-empty-state pattern those briefs were pointing at is
+still in the repo — read `DailyNotesView.tsx` or `SearchView.tsx` instead.
+`Inbox/` is still an ordinary vault folder; only Fate's view of it is gone.
+
 **Settings (the gear in `VaultSwitcher`) is BUILT and is not in this queue** —
 `src/renderer/panes/vault/VaultSwitcher.tsx` opens the real modal at
 `src/renderer/panes/vault/SettingsDialog.tsx`. It is the model to copy for any

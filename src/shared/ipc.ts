@@ -421,7 +421,7 @@ export type NetworkTrust = {
 import type { Activity } from './transcript.js'
 import type { NoteHits } from './search.js'
 import { DEFAULT_THEME, type ThemeId } from './themes.js'
-import type { UpdateCheck } from './update.js'
+import type { UpdateCheck, UpdateProgress } from './update.js'
 import type { Changelog } from './changelog.js'
 export type { Activity }
 
@@ -479,6 +479,20 @@ export const CH = {
   /** Which versions the running build has missed. Asked only when one exists. */
   updateReleases: 'update:releases',
 
+  /**
+   * THE ONLY CHANNEL THAT DOWNLOADS SOMETHING EXECUTABLE, and it exists because
+   * "here is a link, go and reinstall the whole app yourself" is a flow people
+   * abandon. A click is still what starts it — nothing here runs on a timer and
+   * nothing downloads before the button is pressed.
+   *
+   * What arrives is not the 100 MB installer. electron-updater reads the
+   * `.blockmap` published beside it and fetches only the blocks that differ
+   * from the build already on disk, which for a code-only release is a few MB.
+   * Integrity is checked against the sha512 in `latest.yml` before anything
+   * runs. Reasoning in src/main/update.ts.
+   */
+  updateInstall: 'update:install',
+
   terminalProcesses: 'terminal:processes',
   terminalExits: 'terminal:exits',
   terminalKill: 'terminal:kill',
@@ -500,6 +514,8 @@ export const EV = {
   cornerResolved: 'corner:resolved',
   agentActivity: 'agents:activity',
   networkChanged: 'network:changed',
+  /** Download progress while an update installs. See CH.updateInstall. */
+  updateProgress: 'update:progress',
 } as const
 
 /** The full surface exposed on `window.api`. Implemented in preload/index.ts. */
@@ -682,5 +698,16 @@ export type Api = {
      * far behind you are", which is the safe answer.
      */
     releases(current: string): Promise<string[]>
+    /**
+     * Download the update and restart into it. The app quits on success, so a
+     * resolved call is only ever a FAILURE: the string is a sentence to show,
+     * and the release page is still there as the way out.
+     *
+     * Never rejects, for the same reason `check` does not — the dialog has one
+     * place to put a problem and it is not an exception message.
+     */
+    install(): Promise<string | null>
+    /** Fires repeatedly while `install` downloads. Returns its unsubscribe. */
+    onProgress(cb: (p: UpdateProgress) => void): () => void
   }
 }

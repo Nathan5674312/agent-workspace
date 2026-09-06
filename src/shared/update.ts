@@ -59,6 +59,22 @@ export const DOWNLOAD_PAGE =
  */
 const VERSION = /^\d+(\.\d+){0,3}(-[0-9A-Za-z.-]+)?$/
 
+/**
+ * How far a download has got. Pushed while an update installs, and the only
+ * reason the dialog stays on screen after the button is pressed: a click that
+ * appears to do nothing is what made the old link-only flow read as broken.
+ *
+ * `total` is the size of the blocks actually being fetched, not the size of
+ * the installer — electron-updater downloads only the parts that differ from
+ * the build already on disk, so it is normally a small fraction of it.
+ */
+export type UpdateProgress = {
+  percent: number
+  transferred: number
+  total: number
+  bytesPerSecond: number
+}
+
 export type UpdateCheck =
   /** Nothing newer. `version` is what is running. */
   | { state: 'current'; version: string }

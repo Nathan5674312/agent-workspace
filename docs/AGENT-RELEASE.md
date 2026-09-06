@@ -180,8 +180,9 @@ npm run build
 git add package.json CHANGELOG.md
 git commit -m "release: 1.0.2"
 
-# 5. Build the artifacts.
-npm run dist          # -> dist/Fate Setup 1.0.2.exe, dist/Fate-1.0.2-win.zip
+# 5. Build the artifacts. FOUR of them, not two.
+npm run dist          # -> dist/Fate-Setup-1.0.2.exe, dist/Fate-1.0.2-win.zip,
+                      #    dist/Fate-Setup-1.0.2.exe.blockmap, dist/latest.yml
 
 # 6. Preflight. This is the gate. It refuses a dirty tree, a dist/ that does
 #    not match the version, and a tag that already exists at another commit.
@@ -191,7 +192,7 @@ node scripts/release-preflight.mjs
 git push origin main
 
 # 8. Publish. --target is the sha the preflight printed, not "main".
-gh release create v1.0.2 "dist/Fate Setup 1.0.2.exe" "dist/Fate-1.0.2-win.zip" \
+gh release create v1.0.2 dist/*.exe dist/*.zip dist/*.blockmap dist/latest.yml \
   --target <sha from preflight> \
   --title "Fate 1.0.2" --notes-from-file <(sed -n '/## \[1.0.2\]/,/## \[1.0.1\]/p' CHANGELOG.md)
 
@@ -201,8 +202,23 @@ curl -sS -H "user-agent: Fate-Desktop" \
   | python -c "import sys,json;j=json.load(sys.stdin);print(j['tag_name'],[a['name'] for a in j['assets']])"
 ```
 
-Step 9 must print the new tag AND both assets. A release whose assets are
+Step 9 must print the new tag AND all four assets. A release whose assets are
 missing has already told every user to go to a page with nothing on it.
+
+**`latest.yml` AND THE `.blockmap` ARE TWO OF THE FOUR.** This step named two
+files until 1.0.6, and that is how v1.0.4 and v1.0.5 came to be published
+carrying only the installer and the zip. Nothing about those releases looks
+wrong — the installer is right there, the download page works — but an
+installed app reads `latest.yml` to learn the version exists and its sha512,
+and reads the blockmap to fetch only the blocks that changed. Without them
+every "Get the update" fails at the moment someone has agreed to update, and
+the app goes on asking the same question on every launch forever. That is a
+real user on 1.0.4, not a hypothetical. It globs `dist/*` now rather than
+naming files, because the set grew once and the names carry the version.
+
+`scripts/release-preflight.mjs` refuses to print the publish line if either is
+missing from `dist/`, so step 6 is the gate that stops it happening again — but
+it can only check what step 5 built, never what step 8 remembers to upload.
 
 ## 6. The rules that exist because they were broken
 

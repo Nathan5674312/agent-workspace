@@ -87,7 +87,31 @@ function createWindow(): BrowserWindow {
   // the default theme.
   applyWindowIcon(win, currentTheme())
 
+  /**
+   * TWO WAYS TO BECOME VISIBLE, because one of them does not always happen.
+   *
+   * `show: false` plus `ready-to-show` is the standard way to avoid a white
+   * flash on launch, and it is right until the event does not arrive — at which
+   * point the app has no window at all. That is not hypothetical: a packaged
+   * 1.0.5 build starts, loads its preload, renders the whole vault pane and
+   * paints nothing, forever. Measured by attaching a debugger to the packaged
+   * app — `document.readyState` was `complete`, `#root` was fully populated and
+   * no exception had been thrown, while the process reported no window handle
+   * to Windows. The same code run unpackaged, and the released 1.0.4 build in
+   * the same shell, both show normally.
+   *
+   * So `did-finish-load` is a second, independent trigger rather than a
+   * replacement. `show()` on a window that is already showing is harmless, and
+   * whichever event arrives first wins. The flash this pattern exists to
+   * prevent is still prevented in the normal case, because `ready-to-show`
+   * fires first when it fires at all.
+   *
+   * DO NOT COLLAPSE THESE INTO ONE. Dropping `ready-to-show` costs the
+   * flash-free launch; dropping `did-finish-load` restores a build that
+   * installs successfully and then never opens.
+   */
   win.once('ready-to-show', () => win.show())
+  win.webContents.once('did-finish-load', () => win.show())
 
   // Never let the renderer navigate itself somewhere else, and open real links
   // in the real browser rather than in a chromeless window with our preload.

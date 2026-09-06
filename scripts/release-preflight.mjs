@@ -157,6 +157,37 @@ if (!existsSync(dist)) {
       for (const f of artifacts) note(`artifact  ${f}`)
     }
   }
+
+  /**
+   * 4. THE UPDATE METADATA, which is the file everyone forgets because nothing
+   *    on the release page looks wrong without it.
+   *
+   *    `latest.yml` is what an installed app reads to learn a version exists
+   *    and what its sha512 is; the `.blockmap` is what lets it fetch only the
+   *    changed blocks instead of the whole 100 MB installer. Publish without
+   *    them and the release LOOKS complete — the installer is right there —
+   *    but every existing install's "Get the update" button fails, and it
+   *    fails at the exact moment someone has agreed to update. The manual
+   *    download page still works, which is why nobody notices for a release.
+   *
+   *    Both exist only because `publish` is configured in package.json.
+   *    Missing metadata therefore usually means that config was reset.
+   */
+  const blockmaps = readdirSync(dist).filter((f) => f.endsWith('.blockmap'))
+  if (!existsSync(resolve(dist, 'latest.yml'))) {
+    problems.push(
+      `dist/latest.yml is missing, so no installed app can update itself.` +
+        `\n      electron-builder writes it only when \`publish\` is configured in` +
+        `\n      package.json. Check it has not been reset to null, then rebuild.`,
+    )
+  } else if (blockmaps.length === 0) {
+    problems.push(
+      `dist/ has latest.yml but no .blockmap, so every update would download` +
+        `\n      the whole installer instead of the parts that changed. Rebuild.`,
+    )
+  } else {
+    for (const f of ['latest.yml', ...blockmaps]) note(`update    ${f}`)
+  }
 }
 
 if (problems.length) {
@@ -166,6 +197,10 @@ if (problems.length) {
 }
 
 console.log(`\nOK. Publish with the sha pinned, so a moving main cannot retarget the tag:\n`)
-console.log(`  gh release create ${tag} dist/*.exe dist/*.zip \\`)
+// latest.yml and the blockmap go up in the SAME command as the installer, for
+// the reason the installer does: publishing the release is what tells every
+// existing install that a version exists, and it must not be told before the
+// files its updater needs are on the page.
+console.log(`  gh release create ${tag} dist/*.exe dist/*.zip dist/*.blockmap dist/latest.yml \\`)
 console.log(`    --target ${head} \\`)
 console.log(`    --title "Fate ${version}" --notes-from-file CHANGELOG.md\n`)

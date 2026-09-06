@@ -138,7 +138,6 @@ export function MainCanvas({
   const [loadingNotes, setLoadingNotes] = useState(false)
   const [notesError, setNotesError] = useState<string | null>(null)
   const [inbox, setInbox] = useState<InboxItem[] | null>(null)
-  const [loadingInbox, setLoadingInbox] = useState(false)
   const [inboxError, setInboxError] = useState<string | null>(null)
 
   /**
@@ -300,7 +299,6 @@ export function MainCanvas({
   useEffect(() => {
     if (view !== 'inbox') return
     let live = true
-    setLoadingInbox(true)
     setInboxError(null)
     getInbox()
       .then((i) => {
@@ -308,9 +306,6 @@ export function MainCanvas({
       })
       .catch((e: unknown) => {
         if (live) setInboxError(String(e))
-      })
-      .finally(() => {
-        if (live) setLoadingInbox(false)
       })
     return () => {
       live = false
@@ -484,7 +479,6 @@ export function MainCanvas({
         ) : view === 'inbox' ? (
           <InboxView
             items={inbox}
-            loading={loadingInbox}
             error={inboxError}
             // Opening a capture is reading it, not filing it: the note stays in
             // Inbox/ until something actually moves it.

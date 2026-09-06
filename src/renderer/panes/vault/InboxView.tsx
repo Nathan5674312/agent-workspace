@@ -20,16 +20,27 @@ import type { InboxItem } from '../../../shared/notemeta.js'
  */
 export interface InboxViewProps {
   items: InboxItem[] | null
-  loading: boolean
   error: string | null
   onOpenNote: (path: string) => Promise<boolean>
 }
 
-export function InboxView({ items, loading, error, onOpenNote }: InboxViewProps) {
+export function InboxView({ items, error, onOpenNote }: InboxViewProps) {
   if (error) return <div className="vault-graph-error">Inbox failed: {error}</div>
-  if (loading && !items) return <div className="db-empty">Loading inbox…</div>
+  /**
+   * `!items`, not `loading && !items`.
+   *
+   * The old guard only covered null WHILE loading, so a finished load that
+   * yielded null fell through to `items!.length` below and threw
+   * "Cannot read properties of null" — which the error boundary turned into a
+   * dead vault pane, not a dead panel. The `!` was the tell: it told the
+   * compiler to trust the one case the guards did not actually cover.
+   *
+   * Two ways to arrive here with null and not loading: the very first render
+   * before the effect has run, and any path that resolves without a list.
+   */
+  if (!items) return <div className="db-empty">Loading inbox…</div>
 
-  if (items && items.length === 0) {
+  if (items.length === 0) {
     return (
       <div className="inbox-zero">
         <InboxIcon size={20} aria-hidden="true" />
@@ -43,12 +54,12 @@ export function InboxView({ items, loading, error, onOpenNote }: InboxViewProps)
   return (
     <div className="inbox-view">
       <div className="inbox-head">
-        <span className="inbox-count">{items!.length} waiting</span>
+        <span className="inbox-count">{items.length} waiting</span>
         <span className="inbox-hint">Captured by an agent, not yet filed</span>
       </div>
 
       <ul className="inbox-list">
-        {items!.map((item) => (
+        {items.map((item) => (
           <li key={item.path} className="inbox-item">
             <button
               type="button"

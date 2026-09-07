@@ -40,6 +40,7 @@ import {
   VelocityTracker,
   project,
   rubberband,
+  dropStart,
   prefersReducedMotion,
   DRAG_THRESHOLD,
 } from '../../motion.js'
@@ -133,15 +134,34 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
         [forcesToggleRef.current, forcesPanelRef.current].filter(
           (el): el is HTMLButtonElement | HTMLDivElement => el !== null,
         )
-      /** Null while the popover is closed — a `display: none` box has no top. */
-      const topOf = (el: HTMLElement): number | null => {
+      /**
+       * WHERE CSS PUTS IT, WITH OUR OWN TRANSFORM TAKEN BACK OUT.
+       *
+       * This is the whole bug that shipped in the first version and it is worth
+       * naming precisely. `getBoundingClientRect()` reports the position you
+       * can SEE, which mid-tween includes the `y` GSAP is currently writing.
+       * Measuring that and treating it as the resting position means every
+       * observer firing during a tween computes its delta against a moving
+       * target, then launches a fresh tween from that wrong number. The result
+       * on screen is a control that hunts up and down instead of moving once —
+       * reported, and correctly, as "it keeps checking and keeps going up and
+       * down".
+       *
+       * Subtracting our own `y` makes the reading a fact about the STYLESHEET
+       * — where the control rests — which is stable whatever the animation is
+       * doing at the time. It is the only measurement this can safely compare.
+       *
+       * Null while the popover is closed: a `display: none` box has no top.
+       */
+      const restingTopOf = (el: HTMLElement): number | null => {
         const r = el.getBoundingClientRect()
-        return r.width === 0 && r.height === 0 ? null : r.top
+        if (r.width === 0 && r.height === 0) return null
+        return r.top - Number(gsap.getProperty(el, 'y'))
       }
 
       const wasAt = new WeakMap<HTMLElement, number>()
       for (const el of targets()) {
-        const t = topOf(el)
+        const t = restingTopOf(el)
         if (t !== null) wasAt.set(el, t)
       }
 
@@ -150,7 +170,7 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       // callback that runs after the hook is neither scoped nor reverted.
       const settle = contextSafe!(() => {
         for (const el of targets()) {
-          const now = topOf(el)
+          const now = restingTopOf(el)
           if (now === null) continue
           const before = wasAt.get(el)
           wasAt.set(el, now)
@@ -158,15 +178,26 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
           // visible — the popover opening, say. It appears where it belongs
           // rather than flying in from a position it never occupied.
           if (before === undefined) continue
-          const jumped = before - now
-          if (Math.abs(jumped) < 0.5) continue
+          const from = dropStart(before, now, Number(gsap.getProperty(el, 'y')))
+          if (from === null) continue
           if (prefersReducedMotion()) {
             gsap.set(el, { y: 0 })
             continue
           }
+          /**
+           * START FROM THE PIXEL IT IS ON, not from the size of the jump.
+           *
+           * `y: jumped` assumed the element was already at rest. Interrupt a
+           * move half way — a second agent starting, a card growing a line —
+           * and that assumption throws away the offset still on the element,
+           * which is the second half of the hunting this fixes. Adding the
+           * jump to the CURRENT `y` keeps the control exactly where the eye
+           * last saw it, and `overwrite: 'auto'` lets the new tween take over
+           * from there rather than fight the old one.
+           */
           gsap.fromTo(
             el,
-            { y: jumped },
+            { y: from },
             {
               y: 0,
               duration: 0.32,

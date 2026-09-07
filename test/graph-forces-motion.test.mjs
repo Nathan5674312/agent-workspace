@@ -32,7 +32,49 @@ import { dirname, join } from 'node:path'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (...p) => readFileSync(join(ROOT, ...p), 'utf8')
 
-const { prefersReducedMotion } = await import('../src/renderer/motion.ts')
+const { prefersReducedMotion, dropStart } = await import('../src/renderer/motion.ts')
+
+/**
+ * THE BUG NATHAN WATCHED, as arithmetic.
+ *
+ * First version on screen: "it does not smoothly move it keeps checking for the
+ * agent box and keeps going up and down." Two mistakes compounding, both of
+ * which look fine in a diff and neither of which a source regex can catch —
+ * which is why `dropStart` is a function in motion.ts and these are real cases
+ * rather than another grep.
+ */
+test('a move that is already under way is continued, not restarted', () => {
+  // THE HUNTING. The control is 12px off its resting place, mid-drop, when the
+  // agent card grows another line and CSS moves the rest 20px further down.
+  // Correct start: 32 — where the eye currently sees it. The shipped version
+  // used the jump alone (20), which teleports it 12px and starts again. Do
+  // that on every republish and it walks up and down instead of arriving.
+  assert.equal(dropStart(100, 80, 12), 32)
+  // Same interruption going back up as the agents finish.
+  assert.equal(dropStart(80, 100, -12), -32)
+})
+
+test('a control at rest starts from the jump itself', () => {
+  // The simple case has to keep working: nothing on the element, so the offset
+  // it starts from IS the distance CSS just moved it.
+  assert.equal(dropStart(100, 60, 0), 40)
+})
+
+test('a republished but unchanged position animates nothing', () => {
+  // THE OTHER HALF OF THE TWITCH. The activity panel republishes its edge while
+  // a card is still growing, so the same position arrives repeatedly, sometimes
+  // a fraction off. Animating those is a settled control that will not settle.
+  assert.equal(dropStart(100, 100, 0), null)
+  assert.equal(dropStart(100, 100.4, 8), null, 'sub-pixel noise started a tween')
+  assert.equal(dropStart(100, 99, 0), 1, 'a real one-pixel move was swallowed')
+})
+
+test('a position that cannot be measured moves nothing', () => {
+  // A closed popover reports no box. Better to sit still than to fly in from
+  // NaN, which reads as the control vanishing.
+  assert.equal(dropStart(NaN, 80, 0), null)
+  assert.equal(dropStart(100, NaN, 0), null)
+})
 
 /** Stand in for the two globals the helper reads, then put them back. */
 function withEnvironment({ attr, osPrefers }, run) {
@@ -109,6 +151,22 @@ test('the drop is wired through GSAP with the teardown React needs', () => {
     src,
     /prefersReducedMotion\(\)/,
     'the tween fires without asking about reduced motion',
+  )
+  assert.match(
+    src,
+    /dropStart\(/,
+    'GraphView computes the offset itself again, where nothing can test it',
+  )
+  /**
+   * THE MEASUREMENT THAT CAUSED THE HUNTING. A bare `rect.top` includes the
+   * transform GSAP is mid-way through writing, so comparing two of them
+   * measures against a moving target. The reading has to take our own `y`
+   * back out before it means anything.
+   */
+  assert.match(
+    src,
+    /r\.top - Number\(gsap\.getProperty\(el, 'y'\)\)/,
+    'the resting position is measured with the animation offset still in it',
   )
   assert.match(
     src,

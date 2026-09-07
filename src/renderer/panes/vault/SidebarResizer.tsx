@@ -42,11 +42,42 @@ const MAX = 720
 const STEP = 16
 
 export interface SidebarResizerProps {
-  /** The element carrying `--vault-sidebar-w`. Its subtree reads the value. */
+  /** The element carrying the size variable. Its subtree reads the value. */
   targetRef: React.RefObject<HTMLElement | null>
+  /**
+   * Which axis this handle drags on.
+   *
+   * The canvas sidebar is two stacked lists — boards above, the vault below —
+   * and the seam between them needs exactly the machinery this file already
+   * has: a pixel written to a custom property, window listeners for the drag,
+   * arrow keys for a keyboard. Duplicating a hundred lines to change `clientX`
+   * to `clientY` would be two copies of the same teardown bug waiting to
+   * diverge. Everything below reads the axis instead.
+   */
+  orientation?: 'vertical' | 'horizontal'
+  /** Custom property written on `targetRef`. */
+  variable?: string
+  /** Selector for the box whose live size seeds a drag. */
+  measure?: string
+  min?: number
+  max?: number
+  /** What a double-click returns to. */
+  reset?: number
+  label?: string
 }
 
-export function SidebarResizer({ targetRef }: SidebarResizerProps) {
+export function SidebarResizer({
+  targetRef,
+  orientation = 'vertical',
+  variable = '--vault-sidebar-w',
+  measure = '.vault-sidebar',
+  min = MIN,
+  max = MAX,
+  reset = 240,
+  label = 'Resize the sidebar',
+}: SidebarResizerProps) {
+  /* A vertical separator is dragged left/right; a horizontal one up/down. */
+  const horizontal = orientation === 'horizontal'
   const handleRef = useRef<HTMLDivElement>(null)
   /** Pointer origin and the width at the moment the drag began. */
   const drag = useRef<{ x: number; width: number } | null>(null)
@@ -59,16 +90,18 @@ export function SidebarResizer({ targetRef }: SidebarResizerProps) {
 
   const currentWidth = (): number => {
     const el = targetRef.current
-    if (!el) return MIN
-    // Read the sidebar's real box rather than the variable: on the first drag
-    // the variable is unset, and parsing "" would start every resize from zero.
-    const sidebar = el.querySelector('.vault-sidebar')
-    return sidebar ? Math.round(sidebar.getBoundingClientRect().width) : MIN
+    if (!el) return min
+    // Read the real box rather than the variable: on the first drag the
+    // variable is unset, and parsing "" would start every resize from zero.
+    const box = el.querySelector(measure)
+    if (!box) return min
+    const r = box.getBoundingClientRect()
+    return Math.round(horizontal ? r.height : r.width)
   }
 
   const apply = (width: number): void => {
-    const clamped = Math.max(MIN, Math.min(MAX, Math.round(width)))
-    targetRef.current?.style.setProperty('--vault-sidebar-w', `${clamped}px`)
+    const clamped = Math.max(min, Math.min(max, Math.round(width)))
+    targetRef.current?.style.setProperty(variable, `${clamped}px`)
     // aria-valuenow is set the same way, for the same reason the width is: a
     // screen reader needs the live number, and routing it through React state
     // would reintroduce the per-frame re-render this file exists to avoid.
@@ -78,14 +111,19 @@ export function SidebarResizer({ targetRef }: SidebarResizerProps) {
   return (
     <div
       ref={handleRef}
-      className="vault-sidebar-resizer"
+      className={
+        horizontal ? 'vault-sidebar-resizer vault-sidebar-resizer--h' : 'vault-sidebar-resizer'
+      }
       // A separator with a value is the role a resizable split has. Without
       // `tabIndex` it is announced and unreachable, which is worse than silent.
       role="separator"
-      aria-orientation="vertical"
-      aria-label="Resize the sidebar"
-      aria-valuemin={MIN}
-      aria-valuemax={MAX}
+      /* ARIA names a separator by the axis it SEPARATES along, which is the
+         opposite of the axis it is dragged on: a handle you drag up and down
+         divides the column horizontally. */
+      aria-orientation={horizontal ? 'horizontal' : 'vertical'}
+      aria-label={label}
+      aria-valuemin={min}
+      aria-valuemax={max}
       tabIndex={0}
       onPointerDown={(e) => {
         // Ignore anything but the primary button: a right-click drag on a
@@ -94,11 +132,12 @@ export function SidebarResizer({ targetRef }: SidebarResizerProps) {
         // A second pointerdown without a release (a lost pointerup, a second
         // finger) must not stack a second pair of listeners.
         endDrag.current?.()
-        drag.current = { x: e.clientX, width: currentWidth() }
+        drag.current = { x: horizontal ? e.clientY : e.clientX, width: currentWidth() }
 
         const onMove = (ev: PointerEvent): void => {
           if (!drag.current) return
-          apply(drag.current.width + (ev.clientX - drag.current.x))
+          const now = horizontal ? ev.clientY : ev.clientX
+          apply(drag.current.width + (now - drag.current.x))
         }
         const stop = (): void => {
           drag.current = null
@@ -119,17 +158,19 @@ export function SidebarResizer({ targetRef }: SidebarResizerProps) {
         e.preventDefault()
       }}
       onKeyDown={(e) => {
-        if (e.key === 'ArrowLeft') apply(currentWidth() - STEP)
-        else if (e.key === 'ArrowRight') apply(currentWidth() + STEP)
-        else if (e.key === 'Home') apply(MIN)
-        else if (e.key === 'End') apply(MAX)
+        const less = horizontal ? 'ArrowUp' : 'ArrowLeft'
+        const more = horizontal ? 'ArrowDown' : 'ArrowRight'
+        if (e.key === less) apply(currentWidth() - STEP)
+        else if (e.key === more) apply(currentWidth() + STEP)
+        else if (e.key === 'Home') apply(min)
+        else if (e.key === 'End') apply(max)
         else return
         // Only for the keys handled above: Tab and Escape must still do their
         // jobs, and the arrow keys must not also scroll the pane behind.
         e.preventDefault()
       }}
       // Double-click resets, the convention every split pane has.
-      onDoubleClick={() => apply(240)}
+      onDoubleClick={() => apply(reset)}
       title="Drag to resize · double-click to reset"
     />
   )

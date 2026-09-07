@@ -242,6 +242,59 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   overflow-y: auto;
 }
 
+/**
+ * THE BOARDS LIST TAKES A FIXED SHARE OF THE COLUMN, and the vault takes the
+ * rest. Measured, before: the file tree under it was 16px tall and the search
+ * panel was 0.
+ *
+ * `.canvas-list` sets `height: 100%` — right when it is the only thing in a
+ * panel, catastrophic when it is stacked above the finder. In a flex column
+ * `height` becomes the flex basis, so the list asked for the whole sidebar
+ * while the tree below it (`flex: 1`, basis 0) asked for nothing. Flexbox
+ * distributes shrinkage in proportion to basis, so every pixel of the overflow
+ * came off the list and NONE of the leftover space reached the tree: the tree
+ * kept its basis of zero and rendered as a 16px sliver you cannot drag a note
+ * out of. The search panel, same basis, rendered at literally zero — and its
+ * field, which has margins and a fixed height, spilled out of the empty box and
+ * painted on top of the vault name underneath. That is one bug, not three.
+ *
+ * `flex: none` plus an explicit height is what makes the split deterministic:
+ * the list is exactly what the user dragged it to and the finder below gets
+ * everything else. The percentage default means it is sensible before anyone
+ * drags anything, at any window height.
+ *
+ * `max-height` in the same breath as the resizer's own clamp, because the
+ * resizer's bounds are pixels and a short window can put 320px past the point
+ * where the tree is unusable again.
+ */
+.vault-sidebar > .canvas-list {
+  flex: none;
+  height: var(--canvas-list-h, 38%);
+  min-height: 4rem;
+  max-height: 65%;
+}
+
+/* The lower half of the canvas sidebar, whichever finder is showing. Both of
+   these already carry `flex: 1; min-height: 0` in their own stylesheets; this
+   is here so a third finder cannot be added without one. */
+.vault-sidebar > .vault-folder-tree,
+.vault-sidebar > .search-panel,
+.vault-sidebar > .bookmarks-view {
+  flex: 1 1 0;
+}
+
+/* Says what the tree is FOR while a board is open. The tree has always been a
+   drag source and never said so, and the report was "I cannot find where to get
+   files to drag onto the canvas" — the answer was on screen the whole time, 16
+   pixels tall and unlabelled. */
+.vault-sidebar-hint {
+  flex: none;
+  padding: var(--space-2) var(--space-3) 0;
+  color: var(--label-tertiary);
+  font-size: var(--text-xs);
+  line-height: 1.35;
+}
+
 .vault-explorer-header {
   display: flex; align-items: center; gap: var(--space-1);
   padding: var(--space-3);

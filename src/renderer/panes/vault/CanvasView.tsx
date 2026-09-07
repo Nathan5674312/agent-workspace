@@ -297,6 +297,13 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
   const [connect, setConnect] = useState(false)
   /** The first endpoint picked, while the second is still being chosen. */
   const [linkFrom, setLinkFrom] = useState<string | null>(null)
+  /**
+   * "You can label that arrow", shown for the first few arrows anyone draws.
+   * Set by `addEdge`. Cleared when the user is plainly done with it: opening
+   * the arrow menu it points at, leaving Connect mode, or leaving the board.
+   * No timer — this pane is not allowed one, see the Connect button.
+   */
+  const [edgeHint, setEdgeHint] = useState(false)
   /** The text card currently open for editing, by id. */
   const [editing, setEditing] = useState<string | null>(null)
   /**
@@ -362,6 +369,9 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
       // stops the ones that belong to an open editor.
       setConnect(false)
       setLinkFrom(null)
+      // Putting the tool away puts its hint away with it. See the Connect
+      // button for the other half of the same rule.
+      setEdgeHint(false)
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
@@ -617,7 +627,8 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
    * a dependency list here would be a list of ways to forget.
    */
   /**
-   * The board this view has already framed.
+   * The board this view has already framed, keyed by PATH — not by the `doc`
+   * object, which is the bug this ref used to have.
    *
    * Framing CANNOT happen in the load effect, which is where it started and
    * where it silently did nothing. At that moment `doc` is still null, so the
@@ -625,13 +636,24 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
    * `fit()` took its no-surface early return every single time and every board
    * opened at 1:1 regardless of where its cards were. It has to run after the
    * surface exists, which is here.
+   *
+   * WHY THE KEY IS THE PATH. "Frame on open" is a statement about the FILE, and
+   * an identity check against the doc object made it a statement about the
+   * object instead. `undo` calls `setDoc(parseCanvas(prev))` — a brand new
+   * object for the same file — so every Ctrl+Z failed the check and refit the
+   * board, throwing away the pan and zoom the user was working at. The
+   * mutations do not, because they mutate `doc` in place and re-render through
+   * `repaint()`, which is why only undo showed it. Keyed by path, the frame
+   * happens once per board no matter how many objects that board's contents
+   * pass through, and switching boards still frames the new one because `path`
+   * is what changed.
    */
-  const framed = useRef<CanvasDoc | null>(null)
+  const framed = useRef<string | null>(null)
 
   useLayoutEffect(() => {
     if (!doc) return
-    if (framed.current !== doc) {
-      framed.current = doc
+    if (framed.current !== path) {
+      framed.current = path
       fit(doc)
     }
     for (const n of doc.nodes) applyNode(n)
@@ -678,6 +700,8 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     // does not exist in the file it lands in. Connect MODE is left alone —
     // that is a tool the user turned on, not state belonging to a file.
     setLinkFrom(null)
+    // The hint describes an arrow on the board that just closed.
+    setEdgeHint(false)
     // History belongs to a FILE. Carried across, a Ctrl+Z on the new board
     // would restore a snapshot of the old one and save it over the new path —
     // the same cross-board write the mtime guard above only narrowly prevents.
@@ -1509,6 +1533,17 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     void persist(doc)
   }
 
+  /**
+   * How many times a fresh install is told that an arrow can be labelled.
+   *
+   * The arrow menu is right-click only, and a control with no visible trigger
+   * is a control nobody finds. Three is enough to read it once and recognise it
+   * twice; a hint that never stops is noise, and noise is how the toolbar's
+   * real hints stop being read.
+   */
+  const EDGE_HINT_TIMES = 3
+  const EDGE_HINT_KEY = 'fate.canvas.edge-hint-seen'
+
   const addEdge = (fromNode: string, toNode: string) => {
     if (!doc) return
     /**
@@ -1530,6 +1565,33 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     // and edgeAnchor already derives the nearest sides from the geometry, so
     // writing them would freeze a routing decision that should follow the cards.
     doc.edges.push({ id: canvasId(), fromNode, toNode })
+    /**
+     * Shown AFTER the arrow exists, not while connect mode is armed: the thing
+     * being described is now on screen and can be right-clicked, which is what
+     * makes the sentence actionable rather than a rule to memorise.
+     *
+     * localStorage, same store and same reasoning as the onboarding tour — this
+     * is "has this person seen the app", which belongs to the install and not to
+     * the vault, and a vault synced to a second machine should not arrive with
+     * someone else's hints already dismissed.
+     */
+    let seen = 0
+    try {
+      seen = Number(localStorage.getItem(EDGE_HINT_KEY)) || 0
+    } catch {
+      // Storage can be unavailable or full. A hint is not worth an exception
+      // that takes the board down with it, so treat it as "never seen" and let
+      // the setItem below fail the same silent way.
+      seen = 0
+    }
+    if (seen < EDGE_HINT_TIMES) {
+      try {
+        localStorage.setItem(EDGE_HINT_KEY, String(seen + 1))
+      } catch {
+        /* see above */
+      }
+      setEdgeHint(true)
+    }
     repaint()
     void persist(doc)
   }
@@ -2276,15 +2338,41 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
             // Leaving the mode drops a half-finished pick, or the next entry
             // would start with an endpoint the user has forgotten choosing.
             setLinkFrom(null)
+            /**
+             * And it drops the hint, which is how the hint goes away.
+             *
+             * A timer would be the obvious way to expire it and this pane is
+             * not allowed one — `test/review-s2-vault-pane.test.mjs` forbids
+             * every timer in these files, and that invariant is worth more than
+             * a self-dismissing tip. So the hint is tied to the three moments
+             * that mean the user is done with it: putting the tool away here or
+             * with Escape, opening the arrow menu the hint is pointing at, and
+             * leaving the board. Nothing has to be dismissed by hand, and
+             * nothing outlives the thing it describes.
+             */
+            setEdgeHint(false)
           }}
         >
           Connect
         </button>
-        {connect && (
+        {/**
+         * ONE hint slot, not two stacked.
+         *
+         * Connect mode stays on after an arrow is drawn, so its own prompt is
+         * showing at exactly the moment the arrow hint fires. Two sentences in
+         * the same row, one of them telling you to click a card and the other
+         * telling you to right-click a line, is worse than either alone — so the
+         * newer, rarer one wins for the ten seconds it lives.
+         */}
+        {edgeHint ? (
+          <span className="canvas-tool-hint canvas-tool-hint--tip">
+            Right-click the arrow to label it, or to delete it.
+          </span>
+        ) : connect ? (
           <span className="canvas-tool-hint">
             {linkFrom ? 'Click the card to connect to.' : 'Click the first card.'}
           </span>
-        )}
+        ) : null}
       </div>
 
       <div
@@ -2429,6 +2517,9 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
                       e.stopPropagation()
                       if (connect) return
                       const w = toWorld(e.clientX, e.clientY)
+                      // They found it. Saying it again over the open menu is
+                      // the app talking over itself.
+                      setEdgeHint(false)
                       setMenu({
                         x: e.clientX,
                         y: e.clientY,

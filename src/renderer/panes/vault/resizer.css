@@ -35,6 +35,17 @@
   outline-offset: -2px;
 }
 
+/* The same handle turned through ninety degrees, for the seam between the
+   boards list and the vault finder below it. Height rather than width, and it
+   stretches across the sidebar rather than down the pane — everything else,
+   including the hover and focus treatment above, is shared. */
+.vault-sidebar-resizer--h {
+  width: auto;
+  height: 6px;
+  align-self: stretch;
+  cursor: row-resize;
+}
+
 @media (prefers-reduced-transparency: reduce) {
   .vault-sidebar-resizer {
     background: var(--separator-opaque);

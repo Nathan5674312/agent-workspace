@@ -1282,6 +1282,32 @@ export function VaultPane(): React.ReactElement {
               onCreated={vault.reload}
             />
           )}
+          {/**
+           * The seam between the boards list and the vault finder below it, and
+           * the answer to "I cannot resize it".
+           *
+           * The same component as the sidebar's own edge, on the other axis —
+           * see SidebarResizer.tsx for why that is one file rather than two.
+           * `targetRef` is the LAYOUT element, not the sidebar, because that is
+           * where `--vault-sidebar-w` already lives and one element carrying
+           * both split sizes is one place to look when a size is wrong.
+           *
+           * Only in canvas view, because it is the only view that stacks two
+           * lists. In every other view the finder already owns the column and
+           * there is no seam to drag.
+           */}
+          {view === 'canvas' && (
+            <SidebarResizer
+              targetRef={layoutRef}
+              orientation="horizontal"
+              variable="--canvas-list-h"
+              measure=".canvas-list"
+              min={64}
+              max={640}
+              reset={260}
+              label="Resize the canvas list"
+            />
+          )}
           {view === 'planner' && (
             /* Daily notes. The tree is the source for which days exist, so this
                reads the same data the explorer draws rather than asking again. */
@@ -1308,6 +1334,13 @@ export function VaultPane(): React.ReactElement {
           )}
 
           <SidebarFinder value={finder} onChange={setFinder} />
+
+          {/* Only while a board is open, and only over the tree — this is the
+              one place in the app where a note in the tree is a thing you pick
+              UP rather than a thing you open, and nothing said so. */}
+          {view === 'canvas' && finder === 'files' && (
+            <p className="vault-sidebar-hint">Drag a note onto the board to add it as a page.</p>
+          )}
 
           {/**
            * Three finders, all three always reachable, and no fourth branch.

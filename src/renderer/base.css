@@ -23,11 +23,22 @@ body {
   height: 100%;
 }
 
+/* `hidden`, not `auto`. Every surface inside the vault already owns its own
+   scroller — the folder tree, the search results, the note, the canvas — so the
+   only thing this box could ever scroll is a layout that has overflowed by
+   accident, and scrolling it hides the bug while breaking everything above it.
+
+   What it broke, measured: opening Search inside the canvas sidebar pushed the
+   column 30px past the window, so a scrollbar appeared down the right of the
+   WHOLE APP, and a wheel notch over the board zoomed the canvas and scrolled
+   the app underneath it at the same time — the board stayed still and the
+   window slid. With nothing to scroll here, a wheel event over the canvas has
+   nowhere to go but the canvas. */
 .pane-vault {
   height: 100%;
   min-width: 0;
   min-height: 0;
-  overflow: auto;
+  overflow: hidden;
 }
 
 /* Fixed, not absolute: it must sit over the vault regardless of what the vault

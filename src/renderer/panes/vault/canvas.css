@@ -248,10 +248,12 @@
 }
 
 /* The fat invisible hit path is what a press actually lands on, so it is the
-   thing that has to advertise the arrow is clickable at all. */
-.canvas-edge-hit {
-  cursor: pointer;
-}
+   thing that has to advertise the arrow is clickable at all.
+
+   `pointer`, and it has to be declared with the rest of the hit path's geometry
+   further down rather than here — a second block later in the file set
+   `context-menu` and won on order, so the arrow advertised a menu when a plain
+   click selects it. One block now; see `.canvas-edge-hit` below. */
 
 /* `context-stroke` resolves to the stroke of the line that referenced the
    marker, so one head follows whatever colour its edge is drawn in — including
@@ -755,6 +757,15 @@
   color: var(--label-tertiary);
   font-size: var(--text-xs);
 }
+/* The first-few-times hint, which has to be findable in a row of controls the
+   eye has already learned to skip. Same box as the connect prompt it replaces —
+   only the accent and the weight differ, so the row does not change height and
+   the toolbar does not jump when it appears. */
+.canvas-tool-hint--tip {
+  color: var(--accent);
+  font-weight: var(--weight-medium);
+}
+
 
 /* Connect mode retargets the whole surface: nothing here drags, so the grab
    cursor would be a promise the board does not keep. */
@@ -1016,12 +1027,27 @@
 /* The invisible hit target along each arrow. The edge LAYER is
    pointer-events: none so it never steals a press meant for the board; this
    opts back in for its STROKE only, so the area enclosed by a curve stays
-   click-through. Fat, because the drawn line is 2px and nobody can hit that. */
+   click-through. Fat, because the drawn line is 2px and nobody can hit that.
+
+   THE WIDTH CANCELS THE ZOOM, which the flat `14` did not.
+
+   This path lives inside the world, so its stroke is in WORLD units and the
+   board's `scale(k)` shrinks the target along with the picture. 14 world units
+   is 14px only at 1:1 — at the 30% you actually survey a board from it is four
+   screen pixels, which is a smaller target than the line looked like at 100%
+   and is why an arrow gets harder to click the further out you go, exactly when
+   there are most of them to click. Dividing by `--canvas-k` (published by
+   applyView, on the surface, so it is inherited here) holds the target at a
+   constant 22 SCREEN pixels at every zoom.
+
+   22 rather than 14 because a curve is a diagonal: a horizontal band of n px
+   covers rather less than n px measured perpendicular to a line crossing it at
+   an angle, and 14 was already the number people were missing. */
 .canvas-edge-hit {
   stroke: transparent;
-  stroke-width: 14;
+  stroke-width: calc(22 / var(--canvas-k, 1));
   pointer-events: stroke;
-  cursor: context-menu;
+  cursor: pointer;
 }
 
 .canvas-menu-colours {

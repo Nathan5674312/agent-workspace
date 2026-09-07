@@ -172,7 +172,18 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
   /* Set by SidebarResizer, which writes the variable straight onto
      `.vault-layout` during a drag rather than through React state. The fallback
      is the width this pane shipped with, so an untouched sidebar is unchanged. */
-  width: var(--vault-sidebar-w, 15rem); flex: none;
+  /**
+   * CAPPED AGAINST THE WINDOW, not just set. The width above is what the user
+   * dragged it to; `min()` is what stops that width being most of the app when
+   * the window is small. The floor is 360px wide now, and at 360px a fixed
+   * 15rem sidebar leaves the note ~90px — measured, and unusable.
+   *
+   * 42vw rather than a breakpoint that hides the sidebar: hiding it would make
+   * the file tree unreachable at that size, since nothing else opens it. A
+   * proportion keeps every surface reachable at every width, which is what
+   * "put it anywhere, a corner or half a monitor" actually asks for.
+   */
+  width: min(var(--vault-sidebar-w, 15rem), 42vw); flex: none;
   display: flex; flex-direction: column; min-height: 0;
   background: var(--material-heavy);
   backdrop-filter: var(--blur-regular);

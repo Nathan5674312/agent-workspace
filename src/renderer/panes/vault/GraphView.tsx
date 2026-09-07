@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
+import gsap from 'gsap'
+import { useGSAP } from '@gsap/react'
 import * as d3 from 'd3-force'
 import type { VaultGraph } from '../../../shared/ipc.js'
 import { resolvableLinks } from './helpers.js'
@@ -38,8 +40,15 @@ import {
   VelocityTracker,
   project,
   rubberband,
+  prefersReducedMotion,
   DRAG_THRESHOLD,
 } from '../../motion.js'
+
+/**
+ * Registered once, at module scope. Inside a component body it would re-run on
+ * every render, which is the documented way to make this expensive for nothing.
+ */
+gsap.registerPlugin(useGSAP)
 
 /**
  * Graph view — force-directed map of the vault's wikilinks.
@@ -89,6 +98,102 @@ const titleOf = (p: string) => p.split('/').pop()!.replace(/\.md$/i, '')
 export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
+  /** The two controls that keep clear of the agent panel. See `useGSAP` below. */
+  const forcesToggleRef = useRef<HTMLButtonElement>(null)
+  const forcesPanelRef = useRef<HTMLDivElement>(null)
+
+  /**
+   * THE DROP, ANIMATED BY GSAP.
+   *
+   * Forces and the agent activity panel share the top-right corner, so while
+   * agents work the button sits behind the cards. `--agents-drop` — that
+   * panel's measured bottom edge, published on <html> by AgentActivity — is
+   * what moves both controls out of the way; graph.css still owns that sum,
+   * and it is still the only thing that decides WHERE they rest.
+   *
+   * What changed is HOW they get there. It was `transition: top`, and `top` is
+   * a layout property: every frame of that transition reflowed the graph pane.
+   * This measures the jump after CSS has already applied it, then plays the
+   * element back from where it was using `y` — a transform, so the browser
+   * composites it and never touches layout. First/Last/Invert/Play, which is
+   * the one thing GSAP is unambiguously better at than a stylesheet.
+   *
+   * THE CSS TRANSITION HAD TO GO, and not for tidiness: a `transition` on a
+   * property GSAP writes means two interpolators fighting over one value every
+   * tick. Both lose. `test/graph-forces-motion.test.mjs` pins that.
+   *
+   * REDUCED MOTION IS CHECKED WHEN THE TWEEN FIRES, not once at setup, because
+   * both of its inputs can change while the app is open — the OS setting, and
+   * Settings → Appearance → Motion, which writes `data-motion` on <html>. The
+   * control still moves; it just arrives instead of travelling.
+   */
+  useGSAP(
+    (_context, contextSafe) => {
+      const targets = (): HTMLElement[] =>
+        [forcesToggleRef.current, forcesPanelRef.current].filter(
+          (el): el is HTMLButtonElement | HTMLDivElement => el !== null,
+        )
+      /** Null while the popover is closed — a `display: none` box has no top. */
+      const topOf = (el: HTMLElement): number | null => {
+        const r = el.getBoundingClientRect()
+        return r.width === 0 && r.height === 0 ? null : r.top
+      }
+
+      const wasAt = new WeakMap<HTMLElement, number>()
+      for (const el of targets()) {
+        const t = topOf(el)
+        if (t !== null) wasAt.set(el, t)
+      }
+
+      // Non-null: `contextSafe` is only absent when useGSAP is given no scope,
+      // and this call has one. Wrapping is not optional — a tween created in a
+      // callback that runs after the hook is neither scoped nor reverted.
+      const settle = contextSafe!(() => {
+        for (const el of targets()) {
+          const now = topOf(el)
+          if (now === null) continue
+          const before = wasAt.get(el)
+          wasAt.set(el, now)
+          // No previous position means this is the first time it has been
+          // visible — the popover opening, say. It appears where it belongs
+          // rather than flying in from a position it never occupied.
+          if (before === undefined) continue
+          const jumped = before - now
+          if (Math.abs(jumped) < 0.5) continue
+          if (prefersReducedMotion()) {
+            gsap.set(el, { y: 0 })
+            continue
+          }
+          gsap.fromTo(
+            el,
+            { y: jumped },
+            {
+              y: 0,
+              duration: 0.32,
+              // The curve the CSS used, by its GSAP name: cubic-bezier(0.16, 1,
+              // 0.3, 1) is a hard deceleration, which is what makes a control
+              // getting out of the way read as deliberate rather than nudged.
+              ease: 'power4.out',
+              // A second drop while the first is still running — one more agent
+              // starting — must win outright rather than fight the tween under
+              // it, which is what the `false` default would do.
+              overwrite: 'auto',
+            },
+          )
+        }
+      })
+
+      /**
+       * `--agents-drop` and `--graph-top` are both custom properties on the
+       * root's inline style, so one attribute filter catches every move. A
+       * write that changes neither measures a zero delta and tweens nothing.
+       */
+      const watch = new MutationObserver(settle)
+      watch.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] })
+      return () => watch.disconnect()
+    },
+    { scope: wrapRef },
+  )
   const [hoverLabel, setHoverLabel] = useState<string | null>(null)
 
   /**
@@ -1446,6 +1551,7 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       {/* Native Popover, same idiom as PaneMenu: the button opens and
           light-dismisses the panel with no JS and no open state to keep. */}
       <button
+        ref={forcesToggleRef}
         type="button"
         className="graph-forces-toggle"
         popoverTarget="graph-forces"
@@ -1454,7 +1560,7 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
         Forces
       </button>
 
-      <div id="graph-forces" popover="auto" className="graph-forces">
+      <div ref={forcesPanelRef} id="graph-forces" popover="auto" className="graph-forces">
         <div className="graph-forces-head">
           <h2 className="graph-forces-title">Graph</h2>
           <button

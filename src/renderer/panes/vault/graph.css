@@ -37,7 +37,10 @@
     calc(var(--agents-drop, 0px) - var(--graph-top, 0px) + var(--space-4))
   );
   right: var(--space-4);
-  transition: top 320ms cubic-bezier(0.16, 1, 0.3, 1);
+  /* NO `transition: top` HERE. GSAP plays the drop, in GraphView.tsx, and a
+     transition on a property GSAP writes puts two interpolators on one value
+     every tick -- they fight, and the move stutters. The rest of this rule is
+     unchanged: CSS still decides where the control RESTS. */
   display: inline-flex;
   align-items: center;
   gap: var(--space-2);
@@ -78,7 +81,10 @@
   position: fixed;
   top: max(calc(var(--space-6) * 2), calc(var(--agents-drop, 0px) + var(--space-4)));
   right: var(--space-5);
-  transition: top 320ms cubic-bezier(0.16, 1, 0.3, 1);
+  /* NO `transition: top` HERE. GSAP plays the drop, in GraphView.tsx, and a
+     transition on a property GSAP writes puts two interpolators on one value
+     every tick -- they fight, and the move stutters. The rest of this rule is
+     unchanged: CSS still decides where the control RESTS. */
 }
 
 /* `display`, not only the flex properties: the UA sheet closes a popover with

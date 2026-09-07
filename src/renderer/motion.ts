@@ -272,5 +272,22 @@ export class Spring {
 /** ~10px of slop before a press commits to being a drag. */
 export const DRAG_THRESHOLD = 10
 
-export const prefersReducedMotion = (): boolean =>
-  typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+/**
+ * Reduced motion, asked of BOTH places a person can say it.
+ *
+ * The OS query was the only one consulted, which quietly made Settings →
+ * Appearance → Motion → Reduced a lie for every JS animation in the app: it
+ * writes `data-motion="reduced"` on <html>, the stylesheet honours it, and this
+ * helper did not — so CSS transitions stopped and hand-run motion carried on.
+ * `system` writes no attribute at all, which is why the media query is still
+ * the fallback rather than the exception.
+ *
+ * Read at the moment motion is about to happen, never cached: both inputs can
+ * change while the app is open.
+ */
+export const prefersReducedMotion = (): boolean => {
+  if (typeof document !== 'undefined' && document.documentElement.dataset.motion === 'reduced') {
+    return true
+  }
+  return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
+}

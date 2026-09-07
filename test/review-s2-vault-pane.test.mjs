@@ -246,7 +246,23 @@ test('v1 cut respected: no CodeMirror, live preview, canvas doc, or plugin API',
     const body = stripComments(code)
     assert.doesNotMatch(body, /codemirror|prosemirror|monaco/i, name)
     assert.doesNotMatch(body, /livePreview|live-preview/i, name)
-    assert.doesNotMatch(body, /registerPlugin|pluginApi|loadPlugin/i, name)
+    /**
+     * `gsap.registerPlugin(...)` is exempt, and the exemption is deliberately
+     * this narrow — the receiver has to be `gsap`.
+     *
+     * What this line forbids is FATE growing a plugin host: a third-party API
+     * for loading somebody else's JavaScript into this app, which the v1 cut
+     * ruled out on supply-chain grounds and roadmap.ts states as a decision,
+     * not a backlog item. GSAP's call is the opposite shape — it is a library
+     * registering its own module with itself inside our bundle, at build time,
+     * with nothing loadable from outside. Letting the word match it would mean
+     * the guard fails for a reason that has nothing to do with what it guards.
+     */
+    assert.doesNotMatch(
+      body.replace(/gsap\.registerPlugin\(/g, ''),
+      /registerPlugin|pluginApi|loadPlugin/i,
+      name,
+    )
     assert.doesNotMatch(body, /remark-|rehype-|markdown-it/i, name)
     assert.doesNotMatch(body, /^import[^\n]*\bmarked\b/m, name)
   }

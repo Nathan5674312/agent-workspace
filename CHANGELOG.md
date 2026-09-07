@@ -9,6 +9,36 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [1.0.7] — 2026-09-06
+
+The rest of the 9/4 list, and the app fits in a corner of a screen.
+
+### Added
+
+- **The window can be small.** The floor was 1100x700 — wider than half of a
+  1920 screen, so Fate could not sit beside an editor at all. It is 360x400
+  now, and the sidebar is capped against the window rather than fixed, so a
+  quarter-screen snap keeps a usable note instead of a 90px sliver. Drag the
+  sidebar to whatever width you like; it only gives way when the window is too
+  small to honour it.
+
+### Changed
+
+- **The Forces button gets out of the agent panel's way, smoothly.** It moved
+  before; it moves better now — GSAP animates it on a transform instead of a
+  CSS transition on `top`, so the graph pane no longer reflows on every frame
+  of it, behind a canvas of several hundred nodes.
+
+### Fixed
+
+- **The Forces button no longer hunts up and down** while agents are working.
+  It was measuring its own position mid-animation, so every update from the
+  activity panel computed a move against a target that was itself still
+  moving, and relaunched from a wrong number.
+- **Settings → Appearance → Motion → Reduced now applies to everything.** It
+  was honoured by the stylesheet and ignored by every animation the app runs
+  itself, which made the setting a half-truth.
+
 ## [1.0.6] — 2026-09-05
 
 The update button updates the app. It used to open a web page.

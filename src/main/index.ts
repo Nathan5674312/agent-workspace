@@ -26,8 +26,18 @@ function createWindow(): BrowserWindow {
   const win = new BrowserWindow({
     width: 1600,
     height: 1000,
-    minWidth: 1100,
-    minHeight: 700,
+    /**
+     * SMALL ENOUGH TO PUT BESIDE SOMETHING ELSE. It was 1100x700, which is
+     * wider than half of a 1920 screen — the app could not be docked next to
+     * an editor or a browser, on the machine it is written on. The floor is
+     * now the point below which the three columns stop being usable at all,
+     * not the size the layout was designed at.
+     *
+     * From the canvas session's free-form-layout work, which is otherwise
+     * still unfinished and still stashed.
+     */
+    minWidth: 360,
+    minHeight: 400,
     show: false,
     /**
      * NO OS TITLE BAR. The app's own chrome runs to the top edge, and Windows

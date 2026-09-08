@@ -2116,10 +2116,17 @@ export async function search(query: string, budget = 200): Promise<NoteHits[]> {
         // file is the behaviour scan() already rejected.
         continue
       }
-      const { hits, truncated } = searchText(text, query)
-      // A title match with no body hits is still a result — that is how you
-      // find a note you named but never wrote in.
-      if (hits.length === 0 && !titleMatch) continue
+      const { hits, truncated, all } = searchText(text, query)
+      /**
+       * `all`, not `hits.length`: a multi-word query is an AND across the
+       * note, so a note carrying only one of the words is not a result even
+       * though that word produced lines. Showing those was what made
+       * `fate food` look like it had matched half the vault at random.
+       *
+       * A title match with no body hits is still a result — that is how you
+       * find a note you named but never wrote in.
+       */
+      if (!all && !titleMatch) continue
       out.push({ path, title, titleMatch, hits, truncated })
       matched++
     }

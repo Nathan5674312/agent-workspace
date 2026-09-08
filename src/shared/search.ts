@@ -82,6 +82,59 @@ export function isSearchable(q: string): boolean {
   return normalizeQuery(q).length >= 2
 }
 
+/** One word of a query, or one quoted phrase from it. */
+export type Term = {
+  /** What to look for. Never empty. */
+  text: string
+  /** True when it came from quotes, so it must be found as written. */
+  phrase: boolean
+}
+
+/**
+ * A QUERY IS WORDS, NOT ONE STRING, and that is the whole of "search by word".
+ *
+ * `fate food` used to be looked for exactly like that — one 9-character
+ * substring — so it found notes containing the phrase and nothing else. Every
+ * note that discussed both, in either order, a line apart, was invisible. The
+ * user reads that as search being broken, and they are right.
+ *
+ * Each word is now its own term. A NOTE matches when every term appears in it
+ * somewhere; a LINE is shown when it contains any of them. That is the rule
+ * people already know from every search box they use, including the one they
+ * are switching away from.
+ *
+ * Quotes keep the old behaviour where it is wanted: `"fate food"` is one term
+ * that must be found as written, spaces included. An unclosed quote is treated
+ * as if it were closed at the end — a person mid-type has an unclosed quote,
+ * and refusing to search until they finish is worse than searching what they
+ * have.
+ */
+export function parseQuery(q: string): Term[] {
+  const out: Term[] = []
+  const s = normalizeQuery(q)
+  let i = 0
+  while (i < s.length) {
+    const ch = s[i]
+    if (ch === '"') {
+      const end = s.indexOf('"', i + 1)
+      const text = (end === -1 ? s.slice(i + 1) : s.slice(i + 1, end)).trim()
+      if (text) out.push({ text, phrase: true })
+      i = end === -1 ? s.length : end + 1
+      continue
+    }
+    if (/\s/.test(ch)) {
+      i++
+      continue
+    }
+    let j = i
+    while (j < s.length && !/\s/.test(s[j]) && s[j] !== '"') j++
+    const text = s.slice(i, j)
+    if (text) out.push({ text, phrase: false })
+    i = j
+  }
+  return out
+}
+
 /**
  * Case-insensitive index-of, with no regex anywhere.
  *
@@ -114,10 +167,17 @@ function indexOfCI(haystack: string, needle: string, from = 0): number {
   return -1
 }
 
-/** Does this note's name match? Checked separately so a rename is findable. */
+/**
+ * Does this note's name match? Checked separately so a rename is findable.
+ *
+ * EVERY term, not the raw query: a note called `FAST Food` is what somebody
+ * typing `fast food` is looking for, and so is one called `Food, fast` — the
+ * name is a set of words the same way the body is.
+ */
 export function titleMatches(title: string, query: string): boolean {
-  const q = normalizeQuery(query)
-  return q !== '' && indexOfCI(title, q) !== -1
+  const terms = parseQuery(query)
+  if (terms.length === 0) return false
+  return terms.every((t) => indexOfCI(title, t.text) !== -1)
 }
 
 /**
@@ -165,17 +225,47 @@ function snippet(line: string, at: number): { text: string; at: number } {
  * `perNote` caps how many lines come back; the count beyond it is reported
  * rather than dropped silently, because "3 of 40" and "3" are different facts.
  */
-export function searchText(text: string, query: string, perNote = 5): { hits: SearchHit[]; truncated: number } {
-  const q = normalizeQuery(query)
+export function searchText(
+  text: string,
+  query: string,
+  perNote = 5,
+): { hits: SearchHit[]; truncated: number; all: boolean } {
+  const terms = parseQuery(query)
   const hits: SearchHit[] = []
   let truncated = 0
-  if (q === '') return { hits, truncated }
+  if (terms.length === 0) return { hits, truncated, all: false }
+
+  /**
+   * Which terms have been seen ANYWHERE in this note, which is not the same
+   * question as which lines are worth showing. A note saying "fate" on line 3
+   * and "food" on line 900 matches `fate food`; the two lines are two results.
+   * Tracked separately from `hits` because `perNote` caps what is DISPLAYED,
+   * and a note must not stop matching because its evidence arrived late.
+   */
+  const seen = new Set<string>()
 
   const lines = text.split('\n')
   for (let i = 0; i < lines.length; i++) {
     // The trailing \r on a CRLF file is not part of the line the user sees.
     const raw = lines[i].replace(/\r$/, '')
-    const at = indexOfCI(raw, q)
+
+    /**
+     * The EARLIEST term on this line wins the highlight. One hit per line is
+     * this module's existing rule — four rows for one line is noise — and when
+     * several terms share a line the leftmost is the one a reader's eye is
+     * going to land on first.
+     */
+    let at = -1
+    let length = 0
+    for (const t of terms) {
+      const found = indexOfCI(raw, t.text)
+      if (found === -1) continue
+      seen.add(t.text)
+      if (at === -1 || found < at) {
+        at = found
+        length = t.text.length
+      }
+    }
     if (at === -1) continue
     if (hits.length >= perNote) {
       truncated++
@@ -186,9 +276,10 @@ export function searchText(text: string, query: string, perNote = 5): { hits: Se
     const lead = raw.length - raw.trimStart().length
     const trimmed = raw.trim()
     const s = snippet(trimmed, at - lead)
-    hits.push({ line: i, text: s.text, at: s.at, length: q.length })
+    hits.push({ line: i, text: s.text, at: s.at, length })
   }
-  return { hits, truncated }
+
+  return { hits, truncated, all: terms.every((t) => seen.has(t.text)) }
 }
 
 /**

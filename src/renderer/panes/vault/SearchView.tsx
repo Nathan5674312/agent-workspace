@@ -17,8 +17,9 @@
  *
  * `vault.search` reads the vault per query — see the header of
  * `src/shared/search.ts` for why that is the right first version and what
- * replaces it. The two-character floor is `isSearchable`, shared with the main
- * process so the two cannot disagree about what is worth running.
+ * replaces it. The floor is `isSearchable` — a WORD of two characters, not a
+ * query of two characters — and it is shared with the main process, so the two
+ * cannot disagree about what is worth running.
  */
 import { useEffect, useRef, useState } from 'react'
 import { Search as SearchIcon, X } from 'lucide-react'
@@ -167,7 +168,10 @@ export function SearchView({ onOpenHit }: SearchViewProps) {
             : !isSearchable(query)
               ? query === ''
                 ? 'Type a query and press Enter.'
-                : 'Keep typing — two characters minimum.'
+                : // The rule is per WORD now, and the old copy contradicted it:
+                  // `a b` is three characters and still not searchable, so
+                  // "two characters minimum" read as a lie to anyone who counted.
+                  'Keep typing — a word needs two characters.'
               : stale
                 ? 'Press Enter to search.'
                 : results === null

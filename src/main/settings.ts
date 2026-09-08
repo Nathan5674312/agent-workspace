@@ -77,10 +77,65 @@ export function setRootMismatch(message: string | null): void {
  * result is defaults, never a throw. Same posture as network.ts's trust store —
  * a corrupt settings file must not stop the app from starting.
  */
-function load(): Stored {
+/**
+ * A leading byte-order mark, removed.
+ *
+ * Written as an escape rather than the character itself: a literal U+FEFF in
+ * source is invisible, and the next person to read this line would have to
+ * guess what the empty-looking regex matched.
+ */
+const stripBom = (text: string): string =>
+  text.charCodeAt(0) === 0xfeff ? text.slice(1) : text
+
+/**
+ * Move an unreadable settings.json aside, once, before defaults take over.
+ *
+ * WITHOUT THIS THE FILE IS DESTROYED BY THE RECOVERY. `load()` answers with
+ * defaults so the app still boots — right — and then the first setting the user
+ * touches calls `save()`, which writes a fresh file over the damaged one. The
+ * vault path they picked is then gone for good, and the only evidence of what
+ * happened was a folder picker on the next launch.
+ *
+ * ONE slot, deliberately overwritten: this is a repair aid, not a history. And
+ * it never throws — a failed rename must not stop the app booting, which is the
+ * whole reason this path exists.
+ */
+function quarantine(): void {
   try {
-    const parsed: unknown = JSON.parse(readFileSync(settingsPath, 'utf8'))
-    if (typeof parsed !== 'object' || parsed === null) return {}
+    renameSync(settingsPath, `${settingsPath}.corrupt`)
+    console.error(
+      `settings: ${settingsPath} could not be read and was moved to ${settingsPath}.corrupt — starting from defaults.`,
+    )
+  } catch {
+    /* Already gone, locked, or read-only. Defaults still apply. */
+  }
+}
+
+function load(): Stored {
+  let text: string
+  try {
+    text = readFileSync(settingsPath, 'utf8')
+  } catch {
+    // Missing on first run. Not a corruption, and nothing to preserve.
+    return {}
+  }
+
+  try {
+    /**
+     * THE BOM IS STRIPPED BEFORE PARSING, and it is not a hypothetical.
+     * `JSON.parse` rejects a leading U+FEFF, and PowerShell's
+     * `Set-Content -Encoding utf8` writes one — which is how an agent on this
+     * machine turned a working settings.json into an unparseable one and put
+     * itself back through onboarding. The character carries no meaning in a
+     * file we already know is UTF-8.
+     */
+    const parsed: unknown = JSON.parse(stripBom(text))
+    if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {
+      // Valid JSON, wrong shape: `null`, an array, a bare string. Nothing here
+      // can be salvaged and a save would overwrite it, so it goes aside too.
+      quarantine()
+      return {}
+    }
     const raw = parsed as Record<string, unknown>
     const out: Stored = {}
     const dir = raw.vaultDir
@@ -98,7 +153,8 @@ function load(): Stored {
     }
     return out
   } catch {
-    // Missing file on first run, or corrupt. Both mean "no persisted setting".
+    // Unparseable. Keep the bytes; boot on defaults.
+    quarantine()
     return {}
   }
 }

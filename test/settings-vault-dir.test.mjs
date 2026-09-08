@@ -217,3 +217,53 @@ test('a good vaultDir clears a previous refusal', () => {
   assert.equal(s.vaultDir, real)
   assert.equal(s.rootMismatch, null)
 })
+
+// ------------------------------------------------ a file we cannot read back
+
+/**
+ * THE RECOVERY USED TO DESTROY THE EVIDENCE.
+ *
+ * `load()` answers with defaults when settings.json cannot be read, which is
+ * right — a corrupt file must not stop the app booting. But the first setting
+ * the user touched then called `save()`, which wrote a fresh file over the
+ * damaged one, and the vault folder they had picked was gone for good. The only
+ * sign anything had happened was a folder picker on the next launch.
+ *
+ * It is not hypothetical: an agent on this machine wrote settings.json with
+ * PowerShell's `Set-Content -Encoding utf8`, which prefixes a byte-order mark,
+ * and put itself back through onboarding.
+ */
+test('a BOM does not make settings.json unreadable', () => {
+  const dir = mkdtempSync(join(tmpdir(), 'settings-bom-'))
+  writeSettings(`\uFEFF${JSON.stringify({ vaultDir: dir })}`)
+  settings.applySettings()
+  assert.equal(get().vaultDir, dir, 'the folder was discarded over one invisible character')
+  rmSync(dir, { recursive: true, force: true })
+})
+
+test('an unreadable settings.json is moved aside, not overwritten', () => {
+  const damaged = '{"vaultDir": "C:/somewh'
+  writeSettings(damaged)
+  settings.applySettings()
+
+  // The app still boots on defaults — the existing contract, unchanged.
+  assert.equal(get().pendingVaultDir, null)
+
+  const kept = `${SETTINGS_FILE}.corrupt`
+  assert.ok(existsSync(kept), 'the damaged file was not preserved')
+  assert.equal(readFileSync(kept, 'utf8'), damaged, 'the preserved copy is not the original bytes')
+  assert.ok(!existsSync(SETTINGS_FILE), 'the damaged file is still in place to be overwritten')
+
+  // And a save from here writes a clean file without touching the copy.
+  set({ ...DEFAULT_APPEARANCE, theme: 'nord' })
+  assert.equal(onDisk().appearance.theme, 'nord')
+  assert.equal(readFileSync(kept, 'utf8'), damaged, 'the copy was clobbered by the next save')
+  rmSync(kept, { force: true })
+})
+
+test('valid JSON of the wrong shape is preserved too', () => {
+  writeSettings('[]')
+  settings.applySettings()
+  assert.ok(existsSync(`${SETTINGS_FILE}.corrupt`), 'an array settings.json was thrown away')
+  rmSync(`${SETTINGS_FILE}.corrupt`, { force: true })
+})

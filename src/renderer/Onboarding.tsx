@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react'
-import { Frame, Waypoints } from 'lucide-react'
 import type { AppSettings } from '../shared/ipc.js'
 import { applyAppearance } from './appearance.js'
 import { ThemePicker } from './panes/vault/ThemePicker.js'
@@ -15,19 +14,19 @@ import './Onboarding.css'
  * to anyone was the name of an environment variable. There was no tour, no
  * prompt, and no path from that banner to a working vault.
  *
- * Three steps, in Nathan's order:
+ * Two steps, in Nathan's order:
  *
- *   1. WHERE THE BIG TWO ARE. Graph and Canvas. This step lifts the real
- *      ribbon out of the scrim rather than drawing a picture of it, so what is
- *      pointed at is the thing itself — see `body[data-onboarding='surfaces']`
- *      in Onboarding.css. A screenshot of a control goes stale; the control
- *      does not.
- *   2. THE VAULT FOLDER. The step that answers the banner. It opens the real
+ *   1. THE VAULT FOLDER. The step that answers the banner. It opens the real
  *      OS picker through `pickVaultDir()`, which is the only way a folder can
  *      be chosen here — the renderer may never name a directory, so there is
  *      no text field to type one into and this is not a limitation of the tour.
- *   3. THE THEME, through the same visual picker Settings uses. Not a second
+ *   2. THE THEME, through the same visual picker Settings uses. Not a second
  *      copy of it: the component is imported.
+ *
+ * THERE WAS A STEP BEFORE THESE and it is gone, on Nathan's call: a tour page
+ * naming Graph and Canvas, which lit the real ribbon through the scrim. It
+ * explained the app to someone who had not yet told it where their notes are.
+ * The first thing the product asks is now the only thing it needs.
  *
  * THE VAULT IS APPLIED LAST, ONCE, AND NOT WHEN IT IS PICKED. `applyVaultDir()`
  * reloads the window — that is its design, because swapping the vault live
@@ -71,12 +70,12 @@ function markSeen(): void {
   }
 }
 
-type Step = 'surfaces' | 'vault' | 'theme'
-const STEPS: Step[] = ['surfaces', 'vault', 'theme']
+type Step = 'vault' | 'theme'
+const STEPS: Step[] = ['vault', 'theme']
 
 export function Onboarding(): React.ReactElement | null {
   const [open, setOpen] = useState(() => !seen())
-  const [step, setStep] = useState<Step>('surfaces')
+  const [step, setStep] = useState<Step>('vault')
   const [settings, setSettings] = useState<AppSettings | null>(null)
   const [picking, setPicking] = useState(false)
 
@@ -95,25 +94,6 @@ export function Onboarding(): React.ReactElement | null {
       live = false
     }
   }, [open])
-
-  /**
-   * The step, published to the document so CSS can lift the real ribbon out of
-   * the scrim on step one.
-   *
-   * An attribute rather than a prop threaded into LeftRibbon: what is being
-   * highlighted is a fact about the window during this tour, and the ribbon
-   * should not have to know a tour exists to be pointed at.
-   */
-  useEffect(() => {
-    if (!open) {
-      delete document.body.dataset.onboarding
-      return
-    }
-    document.body.dataset.onboarding = step
-    return () => {
-      delete document.body.dataset.onboarding
-    }
-  }, [open, step])
 
   if (!open) return null
 
@@ -159,41 +139,6 @@ export function Onboarding(): React.ReactElement | null {
     <div className="onboard" role="dialog" aria-modal="true" aria-labelledby="onboard-title">
       <div className="onboard-card">
         <p className="onboard-eyebrow">Welcome to Fate</p>
-
-        {step === 'surfaces' && (
-          <>
-            <h1 className="onboard-title" id="onboard-title">
-              Two surfaces do most of the work
-            </h1>
-            <p className="onboard-body">
-              They are in the rail on the left, which is lit up now. Everything
-              else in the app is a way of getting to a note; these two are ways
-              of seeing all of them at once.
-            </p>
-            <ul className="onboard-list">
-              <li>
-                <Waypoints size={18} strokeWidth={1.75} aria-hidden="true" />
-                <div>
-                  <strong>Graph</strong>
-                  <span>
-                    Every note and every link between them. Drag one note onto
-                    another to write the link into the Markdown.
-                  </span>
-                </div>
-              </li>
-              <li>
-                <Frame size={18} strokeWidth={1.75} aria-hidden="true" />
-                <div>
-                  <strong>Canvas</strong>
-                  <span>
-                    Boards of cards, where a card is a file and an edge is the
-                    order an agent walks them.
-                  </span>
-                </div>
-              </li>
-            </ul>
-          </>
-        )}
 
         {step === 'vault' && (
           <>

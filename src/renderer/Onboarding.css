@@ -23,52 +23,6 @@
   -webkit-backdrop-filter: var(--blur-heavy);
 }
 
-/*
- * STEP ONE LIFTS THE REAL RIBBON THROUGH THE SCRIM.
- *
- * The alternative was a picture of the ribbon inside the card, and a picture
- * goes stale the first time an icon moves — which it did this week, when Inbox
- * became Roadmap. Pointing at the live control cannot drift.
- *
- * `position: relative` is needed as well as the z-index: the ribbon is a static
- * flex child, and z-index does nothing to one of those.
- */
-body[data-onboarding='surfaces'] .vault-ribbon {
-  position: relative;
-  z-index: 41;
-  background: var(--bg-elevated);
-  box-shadow: 0 0 0 1px var(--accent), var(--shadow-lg);
-}
-
-/*
- * AND WITHIN IT, THE TWO THE STEP IS ABOUT.
- *
- * Lifting the whole rail says "the icons are over here", which is not what the
- * card claims — it names two of eight. The other six recede and Graph and
- * Canvas take the accent, so the sentence and the screen agree.
- *
- * Selected by `aria-label`, which is the button's accessible name and is set
- * from the same SURFACES table that decides the order. A class added for this
- * would be a second thing to keep in step; the label cannot drift from the
- * control because it IS the control's name. LeftRibbon does not know a tour
- * exists, and should not.
- */
-body[data-onboarding='surfaces'] .vault-ribbon-icon {
-  opacity: 0.35;
-  transition: opacity var(--duration-normal, 200ms) ease;
-}
-/* The class and the label are on the SAME element — the button is
-   `.vault-ribbon-icon` — so these are compound selectors, not descendant ones.
-   Written as descendants first, which silently matched nothing and dimmed all
-   eight icons equally. */
-body[data-onboarding='surfaces'] .vault-ribbon-icon[aria-label='Graph'],
-body[data-onboarding='surfaces'] .vault-ribbon-icon[aria-label='Canvas'] {
-  opacity: 1;
-  color: var(--label);
-  background: var(--fill-nav-selected);
-  box-shadow: 0 0 0 2px var(--accent);
-}
-
 .onboard-card {
   width: min(34rem, 100%);
   max-height: 100%;
@@ -103,24 +57,6 @@ body[data-onboarding='surfaces'] .vault-ribbon-icon[aria-label='Canvas'] {
   line-height: var(--leading-body);
   color: var(--label-secondary);
 }
-
-.onboard-list {
-  list-style: none;
-  margin: 0 0 var(--space-5);
-  padding: 0;
-  display: flex;
-  flex-direction: column;
-  gap: var(--space-4);
-}
-.onboard-list li {
-  display: flex;
-  gap: var(--space-3);
-  align-items: flex-start;
-  color: var(--label-tertiary);
-}
-.onboard-list div { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
-.onboard-list strong { font-size: var(--text-base); font-weight: var(--weight-semibold); color: var(--label); }
-.onboard-list span { font-size: var(--text-sm); line-height: var(--leading-body); color: var(--label-secondary); }
 
 .onboard-folder {
   display: flex;

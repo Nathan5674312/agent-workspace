@@ -186,10 +186,20 @@ test('no ribbon icon falls through to the not-built placeholder', () => {
    * 'editor' is the chain's final else and so is handled without being named,
    * which is the one exemption and is checked by its own assertion below.
    */
+  /**
+   * TWO NAMES FOR THE SURFACE NOW, and either one counts.
+   *
+   * MainCanvas holds the previous surface on screen until the new one has its
+   * data, so it distinguishes the view being ASKED for (`view`, what the
+   * effects load) from the one being PAINTED (`shown`, what the render
+   * branches on). An id dispatched under either is dispatched; an id under
+   * neither still falls through to the editor, which is the failure this
+   * catches.
+   */
   for (const id of ids) {
     if (id === 'editor') continue
     assert.ok(
-      canvas.includes(`view === '${id}'`),
+      canvas.includes(`view === '${id}'`) || canvas.includes(`shown === '${id}'`),
       `ribbon '${id}' is not dispatched in MainCanvas, so it renders the editor`,
     )
   }

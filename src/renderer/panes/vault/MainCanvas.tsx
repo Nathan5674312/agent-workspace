@@ -9,6 +9,7 @@ import { PlannerView } from './PlannerView.js'
 import { RoadmapView } from './RoadmapView.js'
 import { VersionsView } from './VersionsView.js'
 import { TerminalView } from './TerminalView.js'
+import { track } from '../../busy.js'
 import { PaneMenu, PaneMenuItem } from './PaneMenu.js'
 import { BookmarkToggleItem } from './BookmarksView.js'
 import type { VaultNoteMeta } from '../../../shared/notemeta.js'
@@ -135,6 +136,53 @@ export function MainCanvas({
   const [notesError, setNotesError] = useState<string | null>(null)
 
   /**
+   * ── THE VIEW BEING PAINTED, WHICH IS NOT ALWAYS THE VIEW BEING ASKED FOR ──
+   *
+   * Nathan: "do what Apple does where they just let the user sit on the screen
+   * until the new one is done loading."
+   *
+   * Clicking Graph used to swap the surface on the click and then sit on an
+   * empty pane saying "Loading…" for as long as the vault took — a second of
+   * nothing where a moment ago there was a note. The work is the same either
+   * way; what changes is where the user waits. They now wait on the screen
+   * they already have, which still scrolls and still reads, and the new
+   * surface appears when it has something to show.
+   *
+   * `view` is what the tab and the ribbon say. `shown` is what is on screen.
+   * The loading effects below key on `view`, so the fetch starts on the click
+   * as it always did — this only delays the paint.
+   *
+   * NO TIMEOUT, and that is deliberate rather than an omission: every loader
+   * here settles in a `.finally`, so `ready` always arrives, and a cap would
+   * mean swapping to the empty state this exists to prevent. If a read really
+   * does hang, the top-edge glow is still on and the user is still on a screen
+   * that works — which is the better of the two failures.
+   */
+  const [shown, setShown] = useState<MainView>(view)
+
+  /**
+   * Has the surface being asked for got what it needs to draw?
+   *
+   * Only three views load anything. Everything else is ready the instant it is
+   * asked for, and must not be delayed by a check that does not apply to it —
+   * a note is already in memory when the editor is asked for.
+   *
+   * An ERROR counts as ready. A view that failed to load has something to say
+   * and needs to be on screen to say it; holding the old screen would hide the
+   * failure behind a surface that looks fine.
+   */
+  const ready =
+    view === 'graph'
+      ? !loadingGraph && (graph !== null || graphError !== null)
+      : view === 'database' || view === 'roadmap'
+        ? !loadingNotes && (notes !== null || notesError !== null)
+        : true
+
+  useEffect(() => {
+    if (view !== shown && ready) setShown(view)
+  }, [view, shown, ready])
+
+  /**
    * Always re-fetch. This used to early-return whenever `graph` was non-null,
    * which meant the graph you saw was whatever the vault looked like the first
    * time you opened the tab: add a [[link]], save, come back, and the edge was
@@ -173,7 +221,7 @@ export function MainCanvas({
     setGraphError(null)
     // Read-only. The graph is a rebuildable cache derived from wikilinks and is
     // never written back from this pane.
-    getGraph()
+    track(getGraph())
       .then((g) => {
         if (live) setGraph(g)
       })
@@ -227,7 +275,7 @@ export function MainCanvas({
      * whose whole job is to be current — but do not read this as "something
      * upstream is caching for me".
      */
-    getNotes()
+    track(getNotes())
       .then((n) => {
         if (live) setNotes(n)
       })
@@ -255,7 +303,7 @@ export function MainCanvas({
   useEffect(() => {
     if (view !== 'database' || graph) return
     let live = true
-    getGraph()
+    track(getGraph())
       .then((g) => {
         if (live) setGraph(g)
       })
@@ -313,21 +361,21 @@ export function MainCanvas({
           </button>
         </div>
         <span className="vault-note-title">
-          {view === 'graph'
+          {shown === 'graph'
             ? 'Graph view'
-            : view === 'canvas'
+            : shown === 'canvas'
               ? // The board's own name, because a canvas IS a document — unlike
                 // the graph and the database, which are lenses over all of them.
                 (canvasPath?.split('/').pop()?.replace(/\.canvas$/i, '') ?? 'Canvas')
-              : view === 'database'
+              : shown === 'database'
               ? 'Database view'
-              : view === 'planner'
+              : shown === 'planner'
               ? 'Planner'
-              : view === 'terminal'
+              : shown === 'terminal'
                 ? 'Terminal'
-              : view === 'roadmap'
+              : shown === 'roadmap'
                   ? 'Roadmap'
-                  : view === 'versions'
+                  : shown === 'versions'
                     ? // Still the note's own view, so it keeps the note's name.
                       `${note?.title ?? 'No note selected'} — versions`
                     : /* Empty, not "No note selected".
@@ -401,8 +449,15 @@ export function MainCanvas({
         </div>
       )}
 
-      <div className="vault-view-content">
-        {view === 'terminal' ? (
+      {/**
+       * `key={shown}` is what plays the transition, and it is one attribute
+       * rather than a state machine on purpose: React replaces the node when
+       * the key changes, so `.vault-view-content`'s entry animation runs on
+       * every surface change and never on a note change within one surface —
+       * the editor keeps its scroll and its selection when you open a link.
+       */}
+      <div className="vault-view-content" key={shown}>
+        {shown === 'terminal' ? (
           /**
            * Full width now, where it used to be squeezed into the ~250px
            * sidebar. It is a rendered log plus a prompt — see the header of
@@ -412,7 +467,7 @@ export function MainCanvas({
            * is the only thing "close" can mean once this is a surface.
            */
           <TerminalView onClose={() => onViewChange('editor')} />
-        ) : view === 'roadmap' ? (
+        ) : shown === 'roadmap' ? (
           <RoadmapView
             notes={notes}
             onOpenNote={(path) => {
@@ -423,7 +478,7 @@ export function MainCanvas({
               })
             }}
           />
-        ) : view === 'canvas' ? (
+        ) : shown === 'canvas' ? (
           <CanvasView
             path={canvasPath}
             onOpenNote={(path) => {
@@ -445,9 +500,9 @@ export function MainCanvas({
               })
             }}
           />
-        ) : view === 'versions' ? (
+        ) : shown === 'versions' ? (
           <VersionsView note={note} onRestore={onRestore} />
-        ) : view === 'planner' ? (
+        ) : shown === 'planner' ? (
           <PlannerView
             getNotes={getNotes}
             onOpenNote={async (path) => {
@@ -457,7 +512,7 @@ export function MainCanvas({
               if (await onOpenNote(path)) onViewChange('editor')
             }}
           />
-        ) : view === 'database' ? (
+        ) : shown === 'database' ? (
           <DatabaseView
             notes={notes}
             graph={graph}
@@ -495,7 +550,7 @@ export function MainCanvas({
               setNotes(await getNotes())
             }}
           />
-        ) : view === 'editor' ? (
+        ) : shown === 'editor' ? (
           <Editor
             note={note}
             text={text}

@@ -713,6 +713,30 @@ h1, h2, h3 { margin: 0; font-weight: var(--weight-semibold); }
 .vault-view-content { flex: 1; min-height: 0; overflow: auto; padding: var(--space-5); }
 
 /**
+ * THE ARRIVAL, and only the arrival.
+ *
+ * MainCanvas holds the previous surface on screen until the new one has its
+ * data (`shown` there, and the comment on it), so by the time this node exists
+ * there is something to show. The animation is therefore an entrance rather
+ * than a cross-fade: nothing has to be faded OUT, because nothing was ever
+ * blank.
+ *
+ * Short, and barely moving. 160ms and four pixels is enough to read as "this
+ * is new" without being a thing you wait for — a longer or larger entrance on
+ * a surface you change ten times a minute becomes the slowest part of using
+ * the app. Opacity and transform only, so it composites.
+ *
+ * Reduced Motion is handled globally in appearance.css, which caps every
+ * animation at 1ms: the surface then simply appears, which is the end state
+ * without the travel.
+ */
+@keyframes vault-view-enter {
+  from { opacity: 0; transform: translateY(4px); }
+  to { opacity: 1; transform: none; }
+}
+.vault-view-content { animation: vault-view-enter 160ms ease-out; }
+
+/**
  * Scroll edge effect, driven by scroll position with no JavaScript.
  *
  * A hairline under a header is a lie about what is happening: content is

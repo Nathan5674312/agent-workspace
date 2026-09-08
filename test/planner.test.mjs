@@ -166,7 +166,14 @@ test('the calendar is gone from the database', () => {
 test('planner is a main view, not a sidebar list', () => {
   const main = readSource('MainCanvas.tsx')
   assert.match(main, /\| 'planner'/, 'MainView has no planner')
-  assert.match(main, /view === 'planner' \? \(/, 'nothing renders the planner')
+  /**
+   * `shown`, or `view` — MainCanvas now has both, and the distinction is the
+   * "wait on the screen you have" behaviour: `view` is the surface asked for,
+   * `shown` is the one being painted, and the render branches on the latter.
+   * Either name satisfies what this test is actually about, which is that the
+   * planner is dispatched as a main surface rather than as a sidebar list.
+   */
+  assert.match(main, /(?:view|shown) === 'planner' \? \(/, 'nothing renders the planner')
 })
 
 test('the planner is a ribbon surface in its own right', () => {

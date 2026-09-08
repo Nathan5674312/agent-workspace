@@ -36,7 +36,7 @@ import { dirname, join } from 'node:path'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (...p) => readFileSync(join(ROOT, ...p), 'utf8')
 
-const { prefersReducedMotion } = await import('../src/renderer/motion.ts')
+const { prefersReducedMotion, approach, hoverSettled } = await import('../src/renderer/motion.ts')
 
 /** Runs `fn` with `data-motion` and the OS query stubbed, then restores both. */
 function withEnvironment({ attr, osPrefers }, fn) {
@@ -128,4 +128,50 @@ test('neither asking for it means motion runs', () => {
   withEnvironment({ attr: 'system', osPrefers: false }, () => {
     assert.equal(prefersReducedMotion(), false)
   })
+})
+
+/**
+ * ── THE HOVER, WHICH WAS "A LITTLE SEIZURE MATERIAL" ──
+ *
+ * Nathan, sweeping the pointer across a cluster of nodes. He is describing what
+ * the code did: the highlight changed on every node the pointer passed over,
+ * and every change re-dimmed the WHOLE canvas — nodes 1 -> 0.09, links
+ * 0.4 -> 0.07, instantly. Six nodes crossed in a second is six full-contrast
+ * flips of the entire picture.
+ *
+ * Two things fix it and both are here rather than in the component, because
+ * both are arithmetic and the component is a canvas nobody can assert against.
+ */
+test('a pointer passing through a node never commits to it', () => {
+  const dwell = 70
+  // Crossing a cluster: a few milliseconds on each node.
+  assert.equal(hoverSettled(1000, 1012, dwell), false)
+  assert.equal(hoverSettled(1000, 1050, dwell), false)
+  // Aiming at one: the pointer stops.
+  assert.equal(hoverSettled(1000, 1070, dwell), true)
+  assert.equal(hoverSettled(1000, 1300, dwell), true)
+})
+
+test('the fade is frame-rate independent, or it is two different apps', () => {
+  const tau = 90
+  // 100ms of easing, taken in one step and in six, must land in the same place.
+  const oneStep = approach(0, 1, 96, tau)
+  let sixSteps = 0
+  for (let i = 0; i < 6; i++) sixSteps = approach(sixSteps, 1, 16, tau)
+  assert.ok(
+    Math.abs(oneStep - sixSteps) < 0.001,
+    `60Hz and a single long frame disagree: ${oneStep} vs ${sixSteps}`,
+  )
+})
+
+test('the fade actually converges, rather than crawling forever', () => {
+  let v = 0
+  for (let i = 0; i < 20; i++) v = approach(v, 1, 16, 90)
+  assert.ok(v > 0.95, `after 320ms the highlight is only ${v} of the way in`)
+  assert.ok(v < 1, 'an exponential never arrives — the caller snaps the last sliver')
+})
+
+test('reduced motion is the end state with no travel', () => {
+  assert.equal(approach(0, 1, 16, 0), 1)
+  assert.equal(approach(0.4, 0, 16, 0), 0)
 })

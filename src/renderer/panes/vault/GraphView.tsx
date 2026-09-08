@@ -36,10 +36,29 @@ import {
   Decay,
   Spring,
   VelocityTracker,
+  approach,
+  hoverSettled,
+  prefersReducedMotion,
   project,
   rubberband,
   DRAG_THRESHOLD,
 } from '../../motion.js'
+
+/**
+ * How long the pointer must stay on a node before the graph answers.
+ *
+ * 70ms is under the threshold at which a person perceives a wait when they
+ * meant to point at something, and far above the few milliseconds a pointer
+ * spends on each node while crossing a cluster. That gap is the entire trick.
+ */
+const HOVER_DWELL_MS = 70
+
+/**
+ * The time constant of the highlight fade — roughly 63% of the way in 90ms,
+ * settled inside a fifth of a second. Long enough to read as a fade rather
+ * than a switch, short enough that pointing at a node still feels immediate.
+ */
+const HOVER_EASE_MS = 90
 
 /**
  * Graph view — force-directed map of the vault's wikilinks.
@@ -396,6 +415,33 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
     const toGraph = (px: number, py: number) => ({ x: (px - tx) / k, y: (py - ty) / k })
 
     let hover: Node | null = null
+    /**
+     * ── WHY THERE ARE FOUR HOVER VARIABLES AND NOT ONE ──
+     *
+     * Nathan, watching a pointer cross a cluster: "it's a little seizure
+     * material." He is describing exactly what the code did. `hover` changed on
+     * every node the pointer passed over, and every change re-dimmed the WHOLE
+     * canvas — nodes 1 -> 0.09, links 0.4 -> 0.07, all of it, instantly. Cross
+     * six nodes in a second and that is six full-contrast flips of the entire
+     * picture.
+     *
+     * `pending` + `pendingAt` are the dwell: a pointer travelling THROUGH a
+     * node is not pointing at it, so nothing happens until it has stayed for
+     * HOVER_DWELL_MS. Aiming at a node pauses on it and never feels the wait;
+     * sweeping across the canvas never commits at all.
+     *
+     * `focus` is the ease: how far into the highlighted state the picture is,
+     * 0 to 1, moved a frame at a time by `approach`. Every alpha the highlight
+     * touches is interpolated by it, so the graph fades rather than switches.
+     *
+     * `shownHover` is the node the DRAWING uses, which outlives `hover` on the
+     * way out — without it the highlight would vanish on the frame the pointer
+     * left and there would be nothing left to fade.
+     */
+    let pending: Node | null = null
+    let pendingAt = 0
+    let focus = 0
+    let shownHover: Node | null = null
     let neighbours = new Set<string>()
     // Distinguishes a click from a drag that happened to end on a node.
     //
@@ -504,7 +550,12 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
     }
 
     const recomputeNeighbours = () => {
-      neighbours = new Set((hover ? (adjacency.get(hover.id) ?? []) : []).map((n) => n.id))
+      // Keyed on `shownHover` rather than `hover`: the lit set has to match the
+      // node whose highlight is on screen, or the fade-out would light a
+      // neighbourhood belonging to a node that is no longer highlighted.
+      neighbours = new Set(
+        (shownHover ? (adjacency.get(shownHover.id) ?? []) : []).map((n) => n.id),
+      )
     }
 
     /**
@@ -525,7 +576,15 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       ctx.translate(tx, ty)
       ctx.scale(k, k)
 
-      const dim = hover !== null
+      /**
+       * `dim` is now "is there a highlight to draw", and `focus` is how far in
+       * it is. Every alpha below interpolates between the resting value and the
+       * highlighted one rather than choosing between them, which is the whole
+       * of the fade.
+       */
+      const dim = shownHover !== null
+      /** Rest -> highlighted, by however far the ease has travelled. */
+      const mix = (rest: number, lit: number): number => rest + (lit - rest) * focus
 
       /**
        * A held node reads as LIFTED — it grows toward the finger.
@@ -594,7 +653,7 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
        * than a near-absence.
        */
       for (const l of links) {
-        const lit = dim && (l.source.id === hover!.id || l.target.id === hover!.id)
+        const lit = dim && (l.source.id === shownHover!.id || l.target.id === shownHover!.id)
         /**
          * Dimmed edges are DRAWN, faintly, not skipped.
          *
@@ -626,11 +685,17 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
          */
         const scaffold = l.kind === 'structure'
         ctx.strokeStyle = lit ? COL.hot : COL.link
-        ctx.globalAlpha = lit ? 0.95 : dim ? 0.07 : scaffold ? 0.14 : 0.4
+        // The resting alpha is where this edge sits with no highlight at all,
+        // so the interpolation starts from the truth for THIS edge rather than
+        // from one number for all of them.
+        const rest = scaffold ? 0.14 : 0.4
+        ctx.globalAlpha = lit ? mix(rest, 0.95) : dim ? mix(rest, 0.07) : rest
         // A lit edge is the thing being traced, so it also gets weight. At one
         // width the highlight relied on colour alone and thin Cream on Ink is
         // easy to lose against a dense cluster behind it.
-        ctx.lineWidth = ((lit ? 1.6 : scaffold ? 0.6 : 0.9) * forcesRef.current.linkWidth) / k
+        const restWidth = scaffold ? 0.6 : 0.9
+        ctx.lineWidth =
+          ((lit ? mix(restWidth, 1.6) : restWidth) * forcesRef.current.linkWidth) / k
         ctx.beginPath()
         ctx.moveTo(l.source.x!, l.source.y!)
         ctx.lineTo(l.target.x!, l.target.y!)
@@ -720,15 +785,15 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
        * every lit edge.
        */
       for (const n of nodes) {
-        const focus = n.id === hover?.id || pressed?.id === n.id
+        const isFocus = n.id === shownHover?.id || pressed?.id === n.id
         const near = dim && neighbours.has(n.id)
-        const lit = !dim || focus || near
-        ctx.globalAlpha = lit ? 1 : 0.09
+        const lit = !dim || isFocus || near
+        ctx.globalAlpha = lit ? 1 : mix(1, 0.09)
         // One tone for every node that is lit. The neighbourhood is identified
         // by still BEING there while the rest falls away, and the focus by
         // being larger and by owning every lit edge — not by three shades of
         // the same white, which at this dot size nobody can resolve anyway.
-        ctx.fillStyle = focus || near ? COL.hot : COL.node
+        ctx.fillStyle = isFocus || near ? COL.hot : COL.node
         ctx.beginPath()
         ctx.arc(n.x!, n.y!, drawRadius(n), 0, Math.PI * 2)
         ctx.fill()
@@ -744,13 +809,18 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       // being lit while everything else dims; they do not also need naming.
       ctx.globalAlpha = 1
       ctx.textAlign = 'center'
-      if (hover) {
+      if (shownHover) {
         // The one name you asked for, so it is allowed to be the brightest
         // thing on the canvas. At `--label-secondary` and 11px it read as just
         // another label while the node under it had gone to `--accent`.
         ctx.fillStyle = COL.hot
+        // The name fades with its highlight. It used to be drawn at full
+        // opacity the instant a node was hovered, which put the loudest thing
+        // on the canvas on screen with no transition at all.
+        ctx.globalAlpha = focus
         ctx.font = `${13 / k}px ${css.fontFamily}`
-        ctx.fillText(hover.label, hover.x!, hover.y! - nodeR(hover) - 6 / k)
+        ctx.fillText(shownHover.label, shownHover.x!, shownHover.y! - nodeR(shownHover) - 6 / k)
+        ctx.globalAlpha = 1
       } else {
         ctx.fillStyle = COL.label
         ctx.font = `${11 / k}px ${css.fontFamily}`
@@ -925,7 +995,67 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
     const invalidate = () => {
       dirty = true
     }
+    /**
+     * The dwell and the ease, one frame's worth.
+     *
+     * Both live in the frame loop rather than behind a timer, which is not a
+     * workaround for this pane's ban on `setTimeout` but the better shape
+     * anyway: the canvas is already painting, the ease needs the real elapsed
+     * time to be frame-rate independent, and a timer would have to be cancelled
+     * on every pointer move.
+     *
+     * Returns whether anything moved, so the loop knows to repaint.
+     */
+    let lastStep = 0
+    const stepHover = (now: number): boolean => {
+      const dt = lastStep === 0 ? 16 : now - lastStep
+      lastStep = now
+
+      /**
+       * Nothing pending and nothing left to ease: leave immediately, BEFORE
+       * asking about reduced motion. That question reads the DOM and builds a
+       * MediaQueryList, and this runs on every frame of a warm simulation — a
+       * cost with nothing to show for it while the pointer is sitting still.
+       */
+      const settling = focus !== (hover ? 1 : 0)
+      if (pending?.id === hover?.id && !settling) return false
+
+      const reducedNow = prefersReducedMotion()
+
+      // Commit the pending hover once it has stayed put. Under reduced motion
+      // there is no dwell: the setting is about animation, not about hesitating
+      // before answering.
+      if (pending?.id !== hover?.id && (reducedNow || hoverSettled(pendingAt, now, HOVER_DWELL_MS))) {
+        hover = pending
+        if (hover) {
+          // Entering a node adopts it immediately, so the highlight that fades
+          // IN belongs to the node under the cursor. Leaving keeps the old one
+          // (below) so there is something left to fade OUT.
+          shownHover = hover
+          recomputeNeighbours()
+        }
+        setHoverLabel(hover ? hover.label : null)
+        canvas.style.cursor = hover ? 'pointer' : 'grab'
+      }
+
+      const target = hover ? 1 : 0
+      if (focus === target) return false
+      focus = approach(focus, target, dt, reducedNow ? 0 : HOVER_EASE_MS)
+      // An exponential never arrives. Snapping the last sliver is what lets the
+      // canvas go back to sleep instead of repainting forever.
+      if (Math.abs(target - focus) < 0.01) focus = target
+      // The highlight is fully gone: only now is the old node of no further
+      // use, and dropping it any earlier is what would make it disappear rather
+      // than fade.
+      if (focus === 0 && !hover && shownHover) {
+        shownHover = null
+        recomputeNeighbours()
+      }
+      return true
+    }
+
     const loop = () => {
+      if (stepHover(performance.now())) dirty = true
       // Hands damping back after a release, one frame at a time. A no-op
       // unless a release is in flight, and it must run BEFORE the repaint
       // decision below so the frame that is drawn is the frame it describes.
@@ -1060,11 +1190,14 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
         return
       }
       const hit = pick(e)
-      if (hit?.id !== hover?.id) {
-        hover = hit
-        recomputeNeighbours()
-        setHoverLabel(hit ? hit.label : null)
-        canvas.style.cursor = hit ? 'pointer' : 'grab'
+      /**
+       * A move now only says what the pointer is OVER. Whether that becomes the
+       * highlight is `stepHover`'s decision, one dwell later — see the block
+       * where `pending` is declared for what that fixed.
+       */
+      if (hit?.id !== pending?.id) {
+        pending = hit
+        pendingAt = performance.now()
         invalidate()
       }
     }

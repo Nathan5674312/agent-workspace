@@ -291,3 +291,45 @@ export const prefersReducedMotion = (): boolean => {
   }
   return typeof matchMedia === 'function' && matchMedia('(prefers-reduced-motion: reduce)').matches
 }
+
+/**
+ * Move `current` toward `target` by one frame's worth of an exponential ease.
+ *
+ * FRAME-RATE INDEPENDENT, which the naive `current += (target - current) * 0.2`
+ * is not: that form eases twice as fast on a 120Hz display as on a 60Hz one, so
+ * the same code feels different on two machines and the difference is invisible
+ * to whoever wrote it. `1 - e^(-dt/tau)` asks how much time actually passed.
+ *
+ * `tau` is the time constant: after `tau` milliseconds roughly 63% of the
+ * distance is covered, after 3x it is within 5%. Callers snap the last sliver
+ * themselves — an exponential never arrives, and a value that is forever 0.003
+ * away from its target keeps a canvas repainting forever.
+ *
+ * A `tau` of 0 means "no ease": used when Motion is Reduced, where the end
+ * state without the travel is the rule.
+ */
+export function approach(current: number, target: number, dtMs: number, tauMs: number): number {
+  if (tauMs <= 0 || dtMs <= 0) return target
+  return current + (target - current) * (1 - Math.exp(-dtMs / tauMs))
+}
+
+/**
+ * Is a hover worth acting on yet?
+ *
+ * THE ANSWER TO "IT IS A LITTLE SEIZURE MATERIAL". Sweeping the pointer across
+ * a cluster used to change the highlight on every node it passed over, and each
+ * change re-dimmed the entire graph — half a dozen full-canvas contrast flips
+ * inside a second. A pointer travelling THROUGH a node is not pointing at it.
+ *
+ * So a hover has to sit still for `dwellMs` before anything happens. A person
+ * aiming at a node pauses on it and never notices the wait; a person crossing
+ * the canvas never triggers it at all.
+ *
+ * Leaving is not delayed by the same reasoning it is entered by — but it is
+ * still eased, by `approach` above, so the graph fades back rather than
+ * snapping. The dwell governs WHICH node is answered; the ease governs how
+ * hard the answer lands.
+ */
+export function hoverSettled(sinceMs: number, nowMs: number, dwellMs: number): boolean {
+  return nowMs - sinceMs >= dwellMs
+}

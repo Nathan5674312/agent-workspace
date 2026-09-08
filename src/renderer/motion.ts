@@ -273,42 +273,6 @@ export class Spring {
 export const DRAG_THRESHOLD = 10
 
 /**
- * Where a control that has just been MOVED BY CSS should start animating from,
- * so it appears not to have jumped. Returns null when it should not animate.
- *
- * This is the FLIP invert step, and it is here rather than inline in GraphView
- * because getting it wrong is invisible in review and obvious on screen — it
- * already shipped wrong once. The Forces button hunted up and down instead of
- * moving once, because both of these were violated:
- *
- *   THE POSITIONS MUST BE RESTING POSITIONS. `getBoundingClientRect().top`
- *   includes the transform the animation is mid-way through writing. Compare
- *   two of those and the delta is measured against a moving target, so every
- *   update relaunches from a wrong number. Callers pass the rect top with the
- *   current `y` already subtracted — a fact about the stylesheet, stable
- *   whatever the animation is doing.
- *
- *   THE START MUST INCLUDE THE OFFSET ALREADY THERE. Starting at the size of
- *   the jump assumes the control was at rest. Interrupt a move half way and
- *   that assumption discards where it actually is, and it snaps.
- *
- * @param restBefore where CSS rested it when last measured
- * @param restNow    where CSS rests it now
- * @param currentY   the transform offset on it this instant
- * @param epsilon    below this, the move is not worth animating
- */
-export function dropStart(
-  restBefore: number,
-  restNow: number,
-  currentY: number,
-  epsilon = 1,
-): number | null {
-  const jumped = restBefore - restNow
-  if (!Number.isFinite(jumped) || Math.abs(jumped) < epsilon) return null
-  return currentY + jumped
-}
-
-/**
  * Reduced motion, asked of BOTH places a person can say it.
  *
  * The OS query was the only one consulted, which quietly made Settings →

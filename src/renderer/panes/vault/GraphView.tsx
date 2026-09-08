@@ -1,6 +1,4 @@
 import { useEffect, useRef, useState } from 'react'
-import gsap from 'gsap'
-import { useGSAP } from '@gsap/react'
 import * as d3 from 'd3-force'
 import type { VaultGraph } from '../../../shared/ipc.js'
 import { resolvableLinks } from './helpers.js'
@@ -40,16 +38,8 @@ import {
   VelocityTracker,
   project,
   rubberband,
-  dropStart,
-  prefersReducedMotion,
   DRAG_THRESHOLD,
 } from '../../motion.js'
-
-/**
- * Registered once, at module scope. Inside a component body it would re-run on
- * every render, which is the documented way to make this expensive for nothing.
- */
-gsap.registerPlugin(useGSAP)
 
 /**
  * Graph view — force-directed map of the vault's wikilinks.
@@ -99,132 +89,32 @@ const titleOf = (p: string) => p.split('/').pop()!.replace(/\.md$/i, '')
 export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
   const canvasRef = useRef<HTMLCanvasElement>(null)
   const wrapRef = useRef<HTMLDivElement>(null)
-  /** The two controls that keep clear of the agent panel. See `useGSAP` below. */
-  const forcesToggleRef = useRef<HTMLButtonElement>(null)
-  const forcesPanelRef = useRef<HTMLDivElement>(null)
-
   /**
-   * THE DROP, ANIMATED BY GSAP.
+   * THE DROP IS CSS, AND ONLY CSS.
    *
-   * Forces and the agent activity panel share the top-right corner, so while
-   * agents work the button sits behind the cards. `--agents-drop` — that
-   * panel's measured bottom edge, published on <html> by AgentActivity — is
-   * what moves both controls out of the way; graph.css still owns that sum,
-   * and it is still the only thing that decides WHERE they rest.
+   * `graph.css` moves both controls clear of the agent panel from
+   * `--agents-drop`, that panel's measured bottom edge. There was an animation
+   * over the top of it — a FLIP played by GSAP — and it is gone, on Nathan's
+   * call, after he watched it twice:
    *
-   * What changed is HOW they get there. It was `transition: top`, and `top` is
-   * a layout property: every frame of that transition reflowed the graph pane.
-   * This measures the jump after CSS has already applied it, then plays the
-   * element back from where it was using `y` — a transform, so the browser
-   * composites it and never touches layout. First/Last/Invert/Play, which is
-   * the one thing GSAP is unambiguously better at than a stylesheet.
+   *   "it does not smoothly move it keeps checking for the agent box and keeps
+   *    going up and down"
+   *   "it keeps trying to revert back to its original spot then it goes back
+   *    to where it should be"
    *
-   * THE CSS TRANSITION HAD TO GO, and not for tidiness: a `transition` on a
-   * property GSAP writes means two interpolators fighting over one value every
-   * tick. Both lose. `test/graph-forces-motion.test.mjs` pins that.
+   * The second report is the animation working as designed, which is the
+   * problem. A FLIP puts the element back where it WAS and slides it to where
+   * it now IS, so every play begins by moving the control the wrong way. That
+   * reads as a glitch even when it is one clean tween — and it was never one
+   * tween: an agent card changes height whenever its step line or counter
+   * updates, every few hundred ms, and each of those republishes
+   * `--agents-drop` and starts another play. The control spent its life
+   * jumping back and catching up.
    *
-   * REDUCED MOTION IS CHECKED WHEN THE TWEEN FIRES, not once at setup, because
-   * both of its inputs can change while the app is open — the OS setting, and
-   * Settings → Appearance → Motion, which writes `data-motion` on <html>. The
-   * control still moves; it just arrives instead of travelling.
+   * Nothing replaces it. CSS moves the control when the variable changes, in
+   * one frame, in the right direction. A control getting out of the way does
+   * not need to be watched doing it.
    */
-  useGSAP(
-    (_context, contextSafe) => {
-      const targets = (): HTMLElement[] =>
-        [forcesToggleRef.current, forcesPanelRef.current].filter(
-          (el): el is HTMLButtonElement | HTMLDivElement => el !== null,
-        )
-      /**
-       * WHERE CSS PUTS IT, WITH OUR OWN TRANSFORM TAKEN BACK OUT.
-       *
-       * This is the whole bug that shipped in the first version and it is worth
-       * naming precisely. `getBoundingClientRect()` reports the position you
-       * can SEE, which mid-tween includes the `y` GSAP is currently writing.
-       * Measuring that and treating it as the resting position means every
-       * observer firing during a tween computes its delta against a moving
-       * target, then launches a fresh tween from that wrong number. The result
-       * on screen is a control that hunts up and down instead of moving once —
-       * reported, and correctly, as "it keeps checking and keeps going up and
-       * down".
-       *
-       * Subtracting our own `y` makes the reading a fact about the STYLESHEET
-       * — where the control rests — which is stable whatever the animation is
-       * doing at the time. It is the only measurement this can safely compare.
-       *
-       * Null while the popover is closed: a `display: none` box has no top.
-       */
-      const restingTopOf = (el: HTMLElement): number | null => {
-        const r = el.getBoundingClientRect()
-        if (r.width === 0 && r.height === 0) return null
-        return r.top - Number(gsap.getProperty(el, 'y'))
-      }
-
-      const wasAt = new WeakMap<HTMLElement, number>()
-      for (const el of targets()) {
-        const t = restingTopOf(el)
-        if (t !== null) wasAt.set(el, t)
-      }
-
-      // Non-null: `contextSafe` is only absent when useGSAP is given no scope,
-      // and this call has one. Wrapping is not optional — a tween created in a
-      // callback that runs after the hook is neither scoped nor reverted.
-      const settle = contextSafe!(() => {
-        for (const el of targets()) {
-          const now = restingTopOf(el)
-          if (now === null) continue
-          const before = wasAt.get(el)
-          wasAt.set(el, now)
-          // No previous position means this is the first time it has been
-          // visible — the popover opening, say. It appears where it belongs
-          // rather than flying in from a position it never occupied.
-          if (before === undefined) continue
-          const from = dropStart(before, now, Number(gsap.getProperty(el, 'y')))
-          if (from === null) continue
-          if (prefersReducedMotion()) {
-            gsap.set(el, { y: 0 })
-            continue
-          }
-          /**
-           * START FROM THE PIXEL IT IS ON, not from the size of the jump.
-           *
-           * `y: jumped` assumed the element was already at rest. Interrupt a
-           * move half way — a second agent starting, a card growing a line —
-           * and that assumption throws away the offset still on the element,
-           * which is the second half of the hunting this fixes. Adding the
-           * jump to the CURRENT `y` keeps the control exactly where the eye
-           * last saw it, and `overwrite: 'auto'` lets the new tween take over
-           * from there rather than fight the old one.
-           */
-          gsap.fromTo(
-            el,
-            { y: from },
-            {
-              y: 0,
-              duration: 0.32,
-              // The curve the CSS used, by its GSAP name: cubic-bezier(0.16, 1,
-              // 0.3, 1) is a hard deceleration, which is what makes a control
-              // getting out of the way read as deliberate rather than nudged.
-              ease: 'power4.out',
-              // A second drop while the first is still running — one more agent
-              // starting — must win outright rather than fight the tween under
-              // it, which is what the `false` default would do.
-              overwrite: 'auto',
-            },
-          )
-        }
-      })
-
-      /**
-       * `--agents-drop` and `--graph-top` are both custom properties on the
-       * root's inline style, so one attribute filter catches every move. A
-       * write that changes neither measures a zero delta and tweens nothing.
-       */
-      const watch = new MutationObserver(settle)
-      watch.observe(document.documentElement, { attributes: true, attributeFilter: ['style'] })
-      return () => watch.disconnect()
-    },
-    { scope: wrapRef },
-  )
   const [hoverLabel, setHoverLabel] = useState<string | null>(null)
 
   /**
@@ -1582,7 +1472,6 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       {/* Native Popover, same idiom as PaneMenu: the button opens and
           light-dismisses the panel with no JS and no open state to keep. */}
       <button
-        ref={forcesToggleRef}
         type="button"
         className="graph-forces-toggle"
         popoverTarget="graph-forces"
@@ -1591,7 +1480,7 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
         Forces
       </button>
 
-      <div ref={forcesPanelRef} id="graph-forces" popover="auto" className="graph-forces">
+      <div id="graph-forces" popover="auto" className="graph-forces">
         <div className="graph-forces-head">
           <h2 className="graph-forces-title">Graph</h2>
           <button

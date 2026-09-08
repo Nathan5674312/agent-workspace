@@ -6,6 +6,7 @@ import type {
   VaultGraph,
 } from '../../../shared/ipc.js'
 import { toMeta, type VaultNoteMeta } from '../../../shared/notemeta.js'
+import { track } from '../../busy.js'
 
 export function useVault() {
   const [tree, setTree] = useState<VaultTreeNode | null>(null)
@@ -46,8 +47,14 @@ export function useVault() {
    */
   const reload = useCallback(() => setReloadCount((n) => n + 1), [])
 
+  /**
+   * Every note open goes through here, which is why the busy counter does too:
+   * one wrapper covers the tree, the wikilinks, the nav trail, the database and
+   * the graph, because they all call this. The counter is what lights the
+   * top-edge glow — see renderer/busy.ts.
+   */
   const readNote = useCallback((path: string): Promise<VaultNoteBody> => {
-    return window.api.vault.read(path)
+    return track(window.api.vault.read(path))
   }, [])
 
   const saveNote = useCallback(

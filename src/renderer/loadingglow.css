@@ -1,0 +1,106 @@
+/**
+ * The top-edge glow. Co-located with LoadingGlow.tsx.
+ *
+ * WHAT IT MUST NOT DO is the design: it must not block, it must not take a
+ * click, it must not move layout, and it must not be the brightest thing on
+ * the screen. It is two pixels of light along an edge that is otherwise empty
+ * — above the tab strip, beside the window controls — plus a soft bloom under
+ * it that fades out within a few pixels.
+ *
+ * Every colour is `--accent`, which every one of the seven themes publishes,
+ * so the glow is the theme's own colour rather than a blue borrowed from
+ * somewhere else. The alphas are low on purpose: `easily noticeable, not too
+ * much` is the whole brief.
+ */
+
+.loading-glow {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 2px;
+  /* Above every pane and both overlays' scrims, below nothing that takes
+     input — it never does, so nothing can be trapped under it. */
+  z-index: 90;
+  /* THE POINT OF THE WHOLE THING: the window controls, the tab strip and the
+     drag region all live within a few pixels of this bar. */
+  pointer-events: none;
+
+  /* The bar itself: brightest in the middle, gone at both ends, so it reads as
+     light on the edge rather than as a rule drawn across the window. */
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--accent) 55%, transparent) 20%,
+    color-mix(in srgb, var(--accent) 80%, transparent) 50%,
+    color-mix(in srgb, var(--accent) 55%, transparent) 80%,
+    transparent 100%
+  );
+  /* The bloom. Downward only — there is nothing above the window edge to
+     light — and short, so it never reaches the tab labels. */
+  box-shadow: 0 1px 10px color-mix(in srgb, var(--accent) 35%, transparent);
+
+  /* Arriving is a fade, not an appearance. The component already waits 120ms
+     before mounting this at all, so by the time it fades in the work is
+     genuinely slow enough to be worth saying. */
+  animation: loading-glow-in 220ms ease-out;
+}
+
+/**
+ * The travelling sheen — the part that says "still working" without claiming
+ * to know how much is left.
+ *
+ * A pseudo-element rather than a second `background`, so the bar's own
+ * gradient stays put while only this moves. `translateX` on a compositor
+ * property: this runs for the whole of a slow read and must not cost layout.
+ */
+.loading-glow::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(
+    90deg,
+    transparent 0%,
+    color-mix(in srgb, var(--accent) 95%, transparent) 50%,
+    transparent 100%
+  );
+  /* A third of the width, so the pass is a highlight travelling along the bar
+     rather than a second bar sliding over the first. */
+  width: 33%;
+  animation: loading-glow-sweep 1.6s ease-in-out infinite;
+}
+
+@keyframes loading-glow-in {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
+/**
+ * The sweep ENDS where a static indicator should rest, which is what makes
+ * reduced motion work for free.
+ *
+ * `appearance.css` caps every animation at 1ms and one iteration when Motion is
+ * Reduced, so a keyframe set is not disabled — it is jumped to its last frame.
+ * The last frame here is the sheen sitting quietly over the middle of the bar,
+ * which is a lit edge with no travel: the end state without the journey, which
+ * is the rule that file states. A sweep ending off-screen would instead leave
+ * the indicator invisible for exactly the people who cannot see it move.
+ */
+@keyframes loading-glow-sweep {
+  0% {
+    transform: translateX(-30%);
+    opacity: 0.5;
+  }
+  50% {
+    transform: translateX(180%);
+    opacity: 1;
+  }
+  100% {
+    transform: translateX(100%);
+    opacity: 0.85;
+  }
+}

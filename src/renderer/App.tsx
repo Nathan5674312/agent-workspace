@@ -3,6 +3,7 @@ import { AgentCorner } from './panes/corner/AgentCorner.js'
 import { AgentActivity } from './panes/corner/AgentActivity.js'
 import { ErrorBoundary } from './ErrorBoundary.js'
 import { LoadingScreen } from './LoadingScreen.js'
+import { LoadingGlow } from './LoadingGlow.js'
 import { Onboarding } from './Onboarding.js'
 
 /**
@@ -21,6 +22,11 @@ export function App(): React.ReactElement {
           vault from mounting behind it, and the panes below are already loading
           while it plays. */}
       <LoadingScreen />
+      {/* The window's own "something is happening": two pixels of light along
+          the top edge, above the tab strip, taking no clicks. Outside the error
+          boundaries for the same reason the loading screen is — an indicator
+          must never be able to keep the app from mounting. */}
+      <LoadingGlow />
       <section className="pane-vault">
         <ErrorBoundary name="vault">
           <VaultPane />

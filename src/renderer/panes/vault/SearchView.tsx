@@ -23,6 +23,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { Search as SearchIcon, X } from 'lucide-react'
 import { countHits, isSearchable, type NoteHits, type SearchHit } from '../../../shared/search.js'
+import { track } from '../../busy.js'
 import './search.css'
 
 export interface SearchViewProps {
@@ -92,8 +93,10 @@ export function SearchView({ onOpenHit }: SearchViewProps) {
     const id = ++runId.current
     setBusy(true)
     setRan(q)
-    window.api.vault
-      .search(q)
+    // The panel already has its own spinner for the results area; this is what
+    // tells the WINDOW, so a slow query lights the top edge like every other
+    // read does. See renderer/busy.ts.
+    track(window.api.vault.search(q))
       .then((r) => {
         if (id !== runId.current) return
         setResults(r)

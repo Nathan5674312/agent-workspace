@@ -171,11 +171,27 @@ export function MainCanvas({
    * and needs to be on screen to say it; holding the old screen would hide the
    * failure behind a surface that looks fine.
    */
+  /**
+   * ONLY THE FIRST LOAD WAITS. A REFRESH NEVER DOES.
+   *
+   * The first version also waited on `loading`, which meant every RETURN to a
+   * surface waited too — both loaders deliberately re-fetch on every entry, so
+   * bouncing between a note and the graph paid the round trip each time with
+   * the old screen still up. Nathan: "when I click on multiple things it lags
+   * behind." MEASURED against the live build, the paint was actually FASTER
+   * (graph 15ms against 300ms) — what he was feeling was not slowness but the
+   * screen refusing to change on a click that had nothing left to wait for.
+   *
+   * Having data is the whole question. With none, there is nothing to draw and
+   * holding the old screen is the point. With data from the last visit, that
+   * data is what the surface would have painted anyway, so it paints now and
+   * the refresh lands underneath a second later.
+   */
   const ready =
     view === 'graph'
-      ? !loadingGraph && (graph !== null || graphError !== null)
+      ? graph !== null || graphError !== null
       : view === 'database' || view === 'roadmap'
-        ? !loadingNotes && (notes !== null || notesError !== null)
+        ? notes !== null || notesError !== null
         : true
 
   useEffect(() => {

@@ -79,7 +79,27 @@
   /* `position-anchor` is not in Electron 33's Chromium, so the panel is placed
      against the viewport rather than the button. Same corner, no anchor API. */
   position: fixed;
-  top: max(calc(var(--space-6) * 2), calc(var(--agents-drop, 0px) + var(--space-4)));
+  /**
+   * THE DROP IS A VARIABLE BECAUSE THE HEIGHT HAS TO SUBTRACT IT.
+   *
+   * The panel is 733px of sliders and the agent panel pushes it down by its own
+   * measured height, so the two numbers are the same fact and were written
+   * twice: once as `top`, and nowhere as a bound. MEASURED on Nathan's vault,
+   * window 1000px tall, two agents working (`--agents-drop: 303px`): top 315,
+   * bottom 1048 — 48px off the bottom of the window, and with a five-card stack
+   * 105px, which takes the last slider (Label at) off screen entirely. Nothing
+   * scrolled, because a `position: fixed` box with no `max-height` has no
+   * reason to. The controls were not missing, they were past the edge.
+   *
+   * That is why this only ever broke for Nathan and never in a test run: with
+   * no agents the drop is absent, the panel rests at 48px, and 733px fits.
+   */
+  --forces-top: max(calc(var(--space-6) * 2), calc(var(--agents-drop, 0px) + var(--space-4)));
+  top: var(--forces-top);
+  /* Whatever is left of the window under the drop, less the same gap the top
+     keeps. The panel scrolls inside itself rather than off the screen. */
+  max-height: calc(100vh - var(--forces-top) - var(--space-5));
+  overflow-y: auto;
   right: var(--space-5);
   /* NO `transition: top` HERE. GSAP plays the drop, in GraphView.tsx, and a
      transition on a property GSAP writes puts two interpolators on one value

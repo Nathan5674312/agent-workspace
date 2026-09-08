@@ -22,7 +22,6 @@
     "zod": "^4.4.3"
   },
   "devDependencies": {
-    "@gsap/react": "^2.1.2",
     "@types/d3-force": "^3.0.10",
     "@types/node": "^22.10.0",
     "@types/react": "^19.0.0",
@@ -32,7 +31,6 @@
     "electron": "^33.3.0",
     "electron-builder": "^26.15.3",
     "electron-vite": "^2.3.0",
-    "gsap": "^3.15.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
     "typescript": "^5.7.0",

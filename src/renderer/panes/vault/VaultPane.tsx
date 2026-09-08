@@ -30,6 +30,7 @@ import { SidebarFinder, type Finder } from './SidebarFinder.js'
 import { CanvasList } from './CanvasList.js'
 import { SidebarResizer } from './SidebarResizer.js'
 import { SearchView } from './SearchView.js'
+import { QuickSwitcher } from './QuickSwitcher.js'
 import { BookmarksView } from './BookmarksView.js'
 import { DailyNotesView } from './DailyNotesView.js'
 import { ExplorerHeader } from './ExplorerHeader.js'
@@ -1234,6 +1235,23 @@ export function VaultPane(): React.ReactElement {
 
   return (
     <div className="vault-pane">
+      {/**
+       * Ctrl+P / Ctrl+O, from anywhere in the pane. It renders nothing until it
+       * is summoned, and it reads the tree this pane already holds rather than
+       * asking the disk — see QuickSwitcher.tsx for why that makes it a
+       * different surface from the Search panel rather than a mode of it.
+       *
+       * `openNote` and not `loadNote`: it is the one entry point that knows a
+       * `.canvas` is a board and not markdown, and the palette offers boards.
+       */}
+      <QuickSwitcher
+        tree={vault.tree}
+        onOpen={(path) => {
+          void openNote(path).then((opened) => {
+            if (opened) handleViewChange(path.toLowerCase().endsWith('.canvas') ? 'canvas' : 'editor')
+          })
+        }}
+      />
       <div className="vault-layout" ref={layoutRef}>
         {/**
          * ONE JOB: pick the surface.

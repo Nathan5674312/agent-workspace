@@ -1,0 +1,146 @@
+/**
+ * Quick switcher. Co-located with QuickSwitcher.tsx, same rule as search.css:
+ * every value is a token and no colour appears here as a literal.
+ *
+ * It is an overlay rather than a panel, so the two things it owns that the
+ * sidebar sheets do not are the scrim and the stacking. Everything else — the
+ * field, the row, the mark — is deliberately the same shape as the Search
+ * panel's, because they are the same act at two speeds and should not look
+ * like two different apps.
+ */
+
+.qs-scrim {
+  position: fixed;
+  inset: 0;
+  /* Above the pane and the ribbon, below nothing else: the palette is modal
+     while it is up. The popover top layer is not usable here — this is a plain
+     element, and `popover` would put it above the OS window controls. */
+  z-index: 60;
+  display: flex;
+  justify-content: center;
+  /* Not centred vertically. A palette that opens under the cursor's resting
+     height is faster to read than one that opens at the middle of a 1000px
+     window, and it leaves the note visible behind it. */
+  padding-top: 12vh;
+  /* Same scrim as the first-run tour, which is the app's one existing
+     modal: a mix rather than a token, because there is no scrim token. */
+  background: color-mix(in srgb, var(--bg-app) 82%, transparent);
+}
+
+.qs-card {
+  width: min(38rem, calc(100vw - var(--space-6) * 2));
+  max-height: 70vh;
+  display: flex;
+  flex-direction: column;
+  background: var(--material-regular);
+  backdrop-filter: var(--blur-heavy);
+  -webkit-backdrop-filter: var(--blur-heavy);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-lg), inset 0 1px 0 var(--edge-highlight);
+  overflow: hidden;
+}
+
+/* ── the field ─────────────────────────────────────────────── */
+
+.qs-field {
+  display: flex;
+  align-items: center;
+  gap: var(--space-3);
+  padding: var(--space-4) var(--space-5);
+  border-bottom: 1px solid var(--separator);
+  color: var(--label-tertiary);
+  flex: none;
+}
+.qs-input {
+  flex: 1;
+  min-width: 0;
+  border: none;
+  background: none;
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-base);
+}
+.qs-input:focus {
+  outline: none;
+}
+.qs-input::placeholder {
+  color: var(--label-tertiary);
+}
+
+/* ── the list ──────────────────────────────────────────────── */
+
+.qs-list {
+  list-style: none;
+  margin: 0;
+  padding: var(--space-2);
+  overflow-y: auto;
+  min-height: 0;
+}
+.qs-row {
+  width: 100%;
+  display: flex;
+  align-items: baseline;
+  gap: var(--space-3);
+  padding: var(--space-2) var(--space-3);
+  border: none;
+  border-radius: var(--radius-sm);
+  background: none;
+  color: var(--label);
+  font: inherit;
+  font-size: var(--text-sm);
+  text-align: left;
+  cursor: pointer;
+}
+/* One selected row, moved by the arrow keys AND by the pointer, so the thing
+   Enter opens is always the thing that looks chosen. */
+.qs-row--on {
+  background: var(--fill-selected);
+}
+.qs-row-name {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+/* The folder, quieter than the name and the first thing to be clipped: two
+   notes called Index are told apart by it, and nothing else needs it. */
+.qs-row-where {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--label-tertiary);
+  font-size: var(--text-xs);
+}
+.qs-mark {
+  background: none;
+  color: var(--accent);
+  font-weight: var(--weight-semibold);
+}
+
+/* ── the rest ──────────────────────────────────────────────── */
+
+.qs-empty {
+  margin: 0;
+  padding: var(--space-5);
+  color: var(--label-tertiary);
+  font-size: var(--text-sm);
+}
+.qs-hint {
+  margin: 0;
+  padding: var(--space-2) var(--space-5) var(--space-3);
+  border-top: 1px solid var(--separator);
+  color: var(--label-tertiary);
+  font-size: var(--text-xs);
+  flex: none;
+}
+.qs-hint kbd {
+  padding: 0 var(--space-1);
+  border: 1px solid var(--separator);
+  border-radius: var(--radius-sm);
+  font-family: var(--font-ui);
+  font-size: var(--text-xs);
+}

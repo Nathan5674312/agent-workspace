@@ -36,7 +36,9 @@ import { dirname, join } from 'node:path'
 const ROOT = join(dirname(fileURLToPath(import.meta.url)), '..')
 const read = (...p) => readFileSync(join(ROOT, ...p), 'utf8')
 
-const { prefersReducedMotion, approach, hoverSettled } = await import('../src/renderer/motion.ts')
+const { prefersReducedMotion, approach, hoverSettled, hoverDelay } = await import(
+  '../src/renderer/motion.ts'
+)
 
 /** Runs `fn` with `data-motion` and the OS query stubbed, then restores both. */
 function withEnvironment({ attr, osPrefers }, fn) {
@@ -174,4 +176,33 @@ test('the fade actually converges, rather than crawling forever', () => {
 test('reduced motion is the end state with no travel', () => {
   assert.equal(approach(0, 1, 16, 0), 1)
   assert.equal(approach(0.4, 0, 16, 0), 0)
+})
+
+/**
+ * ── AND THEN THE OPPOSITE COMPLAINT ──
+ *
+ * "I hover above Home then a random skill and the amount of time to change
+ * what's highlighted is really bad."
+ *
+ * One dwell was being charged for two different events. Dimming the whole
+ * canvas is worth being deliberate about; changing which node is lit while it
+ * is ALREADY dim is not, and it was paying the same 70ms.
+ */
+test('starting a highlight is deliberate, switching one is not', () => {
+  const cold = hoverDelay(false, true)
+  const switching = hoverDelay(true, true)
+  assert.ok(cold >= 60, `a cold hover commits after ${cold}ms — a sweep would strobe again`)
+  assert.ok(switching <= 30, `switching costs ${switching}ms, which is the delay he reported`)
+  assert.ok(switching < cold, 'the two cases must not be the same number again')
+})
+
+test('a pointer between two nodes has not left, it is in the gap', () => {
+  // Longer than the switch, so crossing empty canvas between two nodes does not
+  // fade the highlight out and back in — the flicker in different clothes.
+  assert.ok(hoverDelay(true, false) > hoverDelay(true, true))
+})
+
+test('the switch still outlasts the time a sweep spends on one node', () => {
+  // 50 moves across the cluster in 549ms, measured: ~11ms per node.
+  assert.ok(hoverDelay(true, true) > 11)
 })

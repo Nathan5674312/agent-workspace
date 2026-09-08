@@ -333,3 +333,31 @@ export function approach(current: number, target: number, dtMs: number, tauMs: n
 export function hoverSettled(sinceMs: number, nowMs: number, dwellMs: number): boolean {
   return nowMs - sinceMs >= dwellMs
 }
+
+/**
+ * How long a hover must hold still before the graph answers it.
+ *
+ * ONE NUMBER WAS WRONG, and both complaints that produced it were right.
+ *
+ * The first version had no delay at all: sweeping the pointer across a cluster
+ * re-dimmed the whole canvas on every node it passed. "A little seizure
+ * material." So a 70ms dwell went in, and then the opposite complaint arrived —
+ * "I hover above Home then a random skill and the amount of time to change
+ * what's highlighted is really bad" — because that same 70ms was being paid on
+ * every switch, when it is only needed once.
+ *
+ * The expensive visual event is the whole graph dimming. That happens on the
+ * FIRST highlight and nowhere else:
+ *
+ *   nothing -> a node   the picture changes completely, so make it deliberate.
+ *   a node -> another   the dim is already applied; only the lit set changes,
+ *                       so switch almost at once. 25ms still filters the 5-15ms
+ *                       a pointer spends on each node while crossing one.
+ *   a node -> empty     do NOT drop it yet. The gap between two nodes is empty
+ *                       canvas, and fading out and back in while crossing it is
+ *                       the flicker again, wearing different clothes.
+ */
+export function hoverDelay(hasHighlight: boolean, overNode: boolean): number {
+  if (!overNode) return 90
+  return hasHighlight ? 25 : 70
+}

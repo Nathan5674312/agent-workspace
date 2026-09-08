@@ -37,21 +37,13 @@ import {
   Spring,
   VelocityTracker,
   approach,
+  hoverDelay,
   hoverSettled,
   prefersReducedMotion,
   project,
   rubberband,
   DRAG_THRESHOLD,
 } from '../../motion.js'
-
-/**
- * How long the pointer must stay on a node before the graph answers.
- *
- * 70ms is under the threshold at which a person perceives a wait when they
- * meant to point at something, and far above the few milliseconds a pointer
- * spends on each node while crossing a cluster. That gap is the entire trick.
- */
-const HOVER_DWELL_MS = 70
 
 /**
  * The time constant of the highlight fade — roughly 63% of the way in 90ms,
@@ -426,9 +418,11 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
      * picture.
      *
      * `pending` + `pendingAt` are the dwell: a pointer travelling THROUGH a
-     * node is not pointing at it, so nothing happens until it has stayed for
-     * HOVER_DWELL_MS. Aiming at a node pauses on it and never feels the wait;
-     * sweeping across the canvas never commits at all.
+     * node is not pointing at it, so nothing happens until it has stayed put
+     * for as long as `hoverDelay` asks for — which depends on what the change
+     * is. Starting a highlight from nothing is the deliberate one; switching
+     * between two nodes is nearly immediate. Sweeping across a cold canvas
+     * never commits at all.
      *
      * `focus` is the ease: how far into the highlighted state the picture is,
      * 0 to 1, moved a frame at a time by `approach`. Every alpha the highlight
@@ -1025,7 +1019,14 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       // Commit the pending hover once it has stayed put. Under reduced motion
       // there is no dwell: the setting is about animation, not about hesitating
       // before answering.
-      if (pending?.id !== hover?.id && (reducedNow || hoverSettled(pendingAt, now, HOVER_DWELL_MS))) {
+      /**
+       * The wait depends on what the change IS — see `hoverDelay`. Switching
+       * between two nodes is nearly immediate; starting a highlight from
+       * nothing is the deliberate one, because that is the frame where the
+       * whole canvas dims.
+       */
+      const dwell = hoverDelay(hover !== null, pending !== null)
+      if (pending?.id !== hover?.id && (reducedNow || hoverSettled(pendingAt, now, dwell))) {
         hover = pending
         if (hover) {
           // Entering a node adopts it immediately, so the highlight that fades

@@ -67,7 +67,7 @@ export function subscribe(listener: Listener): () => void {
   }
 }
 
-/** Whether anything is in flight. For tests and for a first render. */
+/** Whether anything is in flight. Read by the tests; the component subscribes. */
 export function isBusy(): boolean {
   return depth > 0
 }

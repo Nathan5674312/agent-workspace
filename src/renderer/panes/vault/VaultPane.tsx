@@ -1247,8 +1247,11 @@ export function VaultPane(): React.ReactElement {
       <QuickSwitcher
         tree={vault.tree}
         onOpen={(path) => {
+          // `openNote` already routes a `.canvas` to the canvas view itself —
+          // it is the one function that knows a board is not markdown — so this
+          // only has to switch for the notes it does not switch for.
           void openNote(path).then((opened) => {
-            if (opened) handleViewChange(path.toLowerCase().endsWith('.canvas') ? 'canvas' : 'editor')
+            if (opened && !path.toLowerCase().endsWith('.canvas')) handleViewChange('editor')
           })
         }}
       />

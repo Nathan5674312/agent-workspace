@@ -71,9 +71,33 @@ function scoreOne(
   query: string,
   preferBoundary: boolean,
 ): { score: number; ranges: [number, number][] } | null {
-  const hay = candidate.toLowerCase()
   const needle = query.toLowerCase()
   if (needle === '') return { score: 0, ranges: [] }
+
+  /**
+   * THE LOWERCASE COPY IS ONLY USABLE WHILE IT IS THE SAME LENGTH.
+   *
+   * Every index here — the boundary check, the ranges the renderer marks with —
+   * is an index into `candidate`, and they are found in `hay`. For a handful of
+   * characters lowercasing changes the LENGTH (`'İ'.toLowerCase()` is two UTF-16
+   * units), and from the first one every index is shifted: the marks land on the
+   * wrong letters, or past the end of the string. `search.ts` carries the same
+   * guard for the same reason, under `indexOfCI` — a note named `İstanbul notes`
+   * is all it takes.
+   *
+   * Falling back to the original string costs one comparison per candidate
+   * character, on the rare titles that need it and no others.
+   */
+  const lower = candidate.toLowerCase()
+  const aligned = lower.length === candidate.length
+  const hay = aligned ? lower : candidate
+  const eq = (i: number, ch: string): boolean =>
+    aligned ? hay[i] === ch : candidate[i]?.toLowerCase() === ch
+  const find = (ch: string, from: number): number => {
+    if (aligned) return hay.indexOf(ch, from)
+    for (let i = Math.max(0, from); i < candidate.length; i++) if (eq(i, ch)) return i
+    return -1
+  }
 
   const ranges: [number, number][] = []
   let score = 0
@@ -81,7 +105,7 @@ function scoreOne(
   let previousEnd = -1
 
   for (let qi = 0; qi < needle.length; qi++) {
-    let at = hay.indexOf(needle[qi], from)
+    let at = find(needle[qi], from)
     if (at === -1) return null
     /**
      * TAKE THE LETTER THAT STARTS A WORD, not merely the next one.
@@ -100,7 +124,7 @@ function scoreOne(
      */
     if (preferBoundary && !isBoundary(candidate[at - 1], candidate[at])) {
       for (let j = at + 1; j < candidate.length; j++) {
-        if (hay[j] !== needle[qi]) continue
+        if (!eq(j, needle[qi])) continue
         if (isBoundary(candidate[j - 1], candidate[j])) {
           at = j
           break
@@ -123,8 +147,8 @@ function scoreOne(
   }
 
   // The whole name, exactly. Worth more than any accumulation of parts.
-  if (hay === needle) score += 100
-  else if (hay.startsWith(needle)) score += 40
+  if (lower === needle) score += 100
+  else if (lower.startsWith(needle)) score += 40
 
   // A shorter name containing the same letters is the more specific answer.
   score -= Math.min(candidate.length, 60) / 10

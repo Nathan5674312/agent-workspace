@@ -221,7 +221,15 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
     }
     readPalette()
 
-    const reduced = matchMedia('(prefers-reduced-motion: reduce)').matches
+    /**
+     * BOTH answers, not just the OS one. This asked `matchMedia` directly,
+     * which made Settings -> Appearance -> Motion -> Reduced a setting the
+     * graph ignored: it writes `data-motion` on <html>, the stylesheet honours
+     * it, and the simulation — the largest moving thing in the app — did not.
+     * `prefersReducedMotion` is the helper that reads both, and this file
+     * already imports it for the hover ease.
+     */
+    const reduced = prefersReducedMotion()
 
     /**
      * The halo sprite — one gradient disc, built once, blitted per node.
@@ -1026,7 +1034,20 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
        * whole canvas dims.
        */
       const dwell = hoverDelay(hover !== null, pending !== null)
+      /**
+       * `committed` is what this returns on a node-to-node switch, and leaving
+       * it out was a real bug: `focus` is already 1 on both sides of that
+       * change, so the ease had nothing to do and the function reported
+       * "nothing moved" — on the one frame where the lit set had just changed
+       * completely. The canvas then repainted only because the simulation
+       * happened to be warm. Cold (a settled layout, or reduced motion, where
+       * the simulation is stopped) the highlight stayed on the previous node
+       * while the label underneath already named the new one, until any other
+       * event happened to invalidate.
+       */
+      let committed = false
       if (pending?.id !== hover?.id && (reducedNow || hoverSettled(pendingAt, now, dwell))) {
+        committed = true
         hover = pending
         if (hover) {
           // Entering a node adopts it immediately, so the highlight that fades
@@ -1040,7 +1061,7 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       }
 
       const target = hover ? 1 : 0
-      if (focus === target) return false
+      if (focus === target) return committed
       focus = approach(focus, target, dt, reducedNow ? 0 : HOVER_EASE_MS)
       // An exponential never arrives. Snapping the last sliver is what lets the
       // canvas go back to sleep instead of repainting forever.
@@ -1551,6 +1572,29 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       invalidate()
     }
 
+    /**
+     * THE POINTER LEAVING IS NOT A MOVE, and nothing was listening for it.
+     *
+     * `onMove` is the only thing that clears a hover, and it fires while the
+     * pointer is over the canvas. Take the pointer off the canvas — onto the
+     * sidebar, out of the window — and the last node stayed highlighted with
+     * its name on screen and the whole graph dimmed behind it, until the
+     * pointer came back. Harmless when a highlight was one node in a bright
+     * graph; loud now that a highlight dims everything else.
+     *
+     * It clears `pending` rather than `hover`, so it goes through the same
+     * dwell and the same fade as any other departure — including the 90ms
+     * grace, which is what stops a pointer clipping the canvas edge on its way
+     * somewhere from dropping the highlight instantly.
+     */
+    const onLeave = (): void => {
+      if (pending === null) return
+      pending = null
+      pendingAt = performance.now()
+      invalidate()
+    }
+
+    canvas.addEventListener('pointerleave', onLeave)
     canvas.addEventListener('pointermove', onMove)
     canvas.addEventListener('pointermove', onPan)
     canvas.addEventListener('pointerdown', onDown)
@@ -1584,6 +1628,7 @@ export function GraphView({ graph, onOpenNote, onLinkNotes }: GraphViewProps) {
       stopMotion()
       sim.stop()
       themeWatch.disconnect()
+      canvas.removeEventListener('pointerleave', onLeave)
       canvas.removeEventListener('pointermove', onMove)
       canvas.removeEventListener('pointermove', onPan)
       canvas.removeEventListener('pointerdown', onDown)

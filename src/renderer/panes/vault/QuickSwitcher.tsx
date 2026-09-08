@@ -76,6 +76,15 @@ export function QuickSwitcher({ tree, onOpen }: QuickSwitcherProps) {
 
   const paths = useMemo(() => collectPaths(tree), [tree])
   const hits = useMemo(() => quickOpen(paths, query, LIMIT), [paths, query])
+  /**
+   * The selected row, clamped to the list that actually exists.
+   *
+   * `at` is reset by typing, but the LIST can also change underneath it: the
+   * tree reloads when a note is created anywhere in the app, and a shorter list
+   * left `at` pointing past the end — Enter then chose `undefined` and the
+   * palette sat there doing nothing, which reads as the key not working.
+   */
+  const selected = hits.length === 0 ? 0 : Math.min(at, hits.length - 1)
 
   /**
    * Ctrl+P and Ctrl+O, both, because both are muscle memory: the first from
@@ -125,13 +134,13 @@ export function QuickSwitcher({ tree, onOpen }: QuickSwitcherProps) {
       e.preventDefault()
       // Wrapping, so the last row is one press from the first. A list of
       // twenty with a dead end at each end is a list you scroll past twice.
-      const next = e.key === 'ArrowDown' ? at + 1 : at - 1 + hits.length
+      const next = e.key === 'ArrowDown' ? selected + 1 : selected - 1 + hits.length
       setAt(hits.length === 0 ? 0 : next % hits.length)
       return
     }
     if (e.key === 'Enter') {
       e.preventDefault()
-      choose(hits[at])
+      choose(hits[selected])
     }
   }
 
@@ -179,9 +188,9 @@ export function QuickSwitcher({ tree, onOpen }: QuickSwitcherProps) {
                 <button
                   type="button"
                   onClick={() => choose(hit)}
-                  className={i === at ? 'qs-row qs-row--on' : 'qs-row'}
+                  className={i === selected ? 'qs-row qs-row--on' : 'qs-row'}
                   role="option"
-                  aria-selected={i === at}
+                  aria-selected={i === selected}
                   onMouseEnter={() => setAt(i)}
                   title={hit.path}
                 >

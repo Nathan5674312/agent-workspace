@@ -19,7 +19,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 
-const { parseQuery, searchText, titleMatches, isSearchable } = await import(
+const { parseQuery, searchText, titleMatches, isSearchable, searchTerms } = await import(
   '../src/shared/search.ts'
 )
 
@@ -92,4 +92,35 @@ test('an empty query still matches nothing at all', () => {
   assert.equal(searchText(NOTE, '').hits.length, 0)
   assert.equal(titleMatches('anything', ''), false)
   assert.equal(isSearchable(''), false)
+})
+
+/**
+ * ── AND THE COST OF SPLITTING A QUERY INTO WORDS ──
+ *
+ * Splitting turned `a b` from a rare three-character substring into "every note
+ * containing an a AND a b", which is the vault. MEASURED on the real one before
+ * this rule: `a b` returned 215 notes and `to the` 208, out of 479 — a
+ * whole-vault read rendered as a result list, from two keystrokes.
+ *
+ * A bare term has to be two characters to count. A QUOTED one does not: `"a b"`
+ * is somebody asking for that exact string, which is the narrow query the old
+ * two-character floor assumed every query was.
+ */
+test('a one-letter word is not a search term', () => {
+  assert.deepEqual(searchTerms('a b').map((t) => t.text), [])
+  assert.equal(isSearchable('a b'), false)
+  assert.deepEqual(searchTerms('fate a').map((t) => t.text), ['fate'])
+})
+
+test('quoting is how you ask for the short thing anyway', () => {
+  assert.deepEqual(searchTerms('"a b"').map((t) => t.text), ['a b'])
+  assert.equal(isSearchable('"a b"'), true)
+})
+
+test('the floor and the scan cannot disagree', () => {
+  // A query the floor accepts must produce hits the scan can find, or the panel
+  // runs a search that was never going to match anything.
+  const q = 'fate a'
+  assert.equal(isSearchable(q), true)
+  assert.equal(searchText('Fate is the project.', q).all, true)
 })

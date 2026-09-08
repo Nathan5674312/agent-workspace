@@ -276,6 +276,20 @@ const applyColor = (el: HTMLElement | SVGElement | null, color: unknown): void =
   else el.style.setProperty('--canvas-color', value)
 }
 
+/**
+ * How many times a fresh install is told that an arrow can be labelled.
+ *
+ * The arrow menu is right-click only, and a control with no visible trigger is
+ * a control nobody finds. Three is enough to read it once and recognise it
+ * twice; a hint that never stops is noise, and noise is how the toolbar's real
+ * hints stop being read.
+ *
+ * Module scope, not the component body: neither value depends on a render, and
+ * this component re-renders on every pointer move of a drag.
+ */
+const EDGE_HINT_TIMES = 3
+const EDGE_HINT_KEY = 'fate.canvas.edge-hint-seen'
+
 export interface CanvasViewProps {
   /** Vault-relative `.canvas` path, or null when no board is open. */
   path: string | null
@@ -1532,17 +1546,6 @@ export function CanvasView({ path, onOpenNote }: CanvasViewProps) {
     repaint()
     void persist(doc)
   }
-
-  /**
-   * How many times a fresh install is told that an arrow can be labelled.
-   *
-   * The arrow menu is right-click only, and a control with no visible trigger
-   * is a control nobody finds. Three is enough to read it once and recognise it
-   * twice; a hint that never stops is noise, and noise is how the toolbar's
-   * real hints stop being read.
-   */
-  const EDGE_HINT_TIMES = 3
-  const EDGE_HINT_KEY = 'fate.canvas.edge-hint-seen'
 
   const addEdge = (fromNode: string, toNode: string) => {
     if (!doc) return

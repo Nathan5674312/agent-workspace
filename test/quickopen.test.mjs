@@ -102,3 +102,18 @@ test('titleOf drops the folder and the extension, and only the extension', () =>
   assert.equal(titleOf('Home.md'), 'Home')
   assert.equal(titleOf('.gitignore'), '.gitignore', 'a dotfile has no extension to drop')
 })
+
+/**
+ * A note named in Turkish is all it takes: `'İ'.toLowerCase()` is TWO UTF-16
+ * units, so a lowercase copy of the title is longer than the title and every
+ * index found in it points one character further along the original. The marks
+ * then sit on the wrong letters, or past the end. `search.ts` guards the same
+ * case under `indexOfCI`; this one had to learn it too.
+ */
+test('a title whose lowercase is longer still marks the right letters', () => {
+  const paths = ['Notes/İstanbul plan.md']
+  const [hit] = quickOpen(paths, 'plan')
+  assert.ok(hit, 'a title with İ in it stopped matching entirely')
+  const marked = hit.ranges.map(([at, len]) => hit.label.slice(at, at + len)).join('')
+  assert.equal(marked.toLowerCase(), 'plan')
+})

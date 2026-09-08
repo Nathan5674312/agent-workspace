@@ -77,11 +77,6 @@ export function normalizeQuery(q: string): string {
   return q.trim()
 }
 
-/** Is this query worth running? One character matches most of a vault. */
-export function isSearchable(q: string): boolean {
-  return normalizeQuery(q).length >= 2
-}
-
 /** One word of a query, or one quoted phrase from it. */
 export type Term = {
   /** What to look for. Never empty. */
@@ -136,6 +131,36 @@ export function parseQuery(q: string): Term[] {
 }
 
 /**
+ * Is this query worth running?
+ *
+ * ASKED OF THE TERMS, not of the raw string, and that distinction arrived with
+ * word search. The old rule — two characters — was right when the query was one
+ * substring: `a b` was a rare three-character run and matched almost nothing.
+ * Split into words it became "every note containing an a AND a b", which is the
+ * vault. MEASURED on the real one: `a b` returned 215 notes and `to the` 208,
+ * out of 479 — a whole-vault read rendered as a result list.
+ *
+ * So a term has to be two characters to count, and a query with no term that
+ * long is not searched at all. A quoted term is exempt: `"a b"` is somebody
+ * asking for that exact string, which is the narrow query the old rule assumed
+ * everything was.
+ */
+/**
+ * The terms a query actually searches for.
+ *
+ * ONE PLACE, because three callers have to agree: the floor below, the title
+ * check, and the body scan. A term the floor accepts but the scan ignores is a
+ * query that runs and finds nothing.
+ */
+export function searchTerms(q: string): Term[] {
+  return parseQuery(q).filter((t) => t.phrase || t.text.length >= 2)
+}
+
+export function isSearchable(q: string): boolean {
+  return searchTerms(q).length > 0
+}
+
+/**
  * Case-insensitive index-of, with no regex anywhere.
  *
  * A user's query is not a pattern and must never be compiled as one: `.` and
@@ -175,7 +200,7 @@ function indexOfCI(haystack: string, needle: string, from = 0): number {
  * name is a set of words the same way the body is.
  */
 export function titleMatches(title: string, query: string): boolean {
-  const terms = parseQuery(query)
+  const terms = searchTerms(query)
   if (terms.length === 0) return false
   return terms.every((t) => indexOfCI(title, t.text) !== -1)
 }
@@ -230,7 +255,7 @@ export function searchText(
   query: string,
   perNote = 5,
 ): { hits: SearchHit[]; truncated: number; all: boolean } {
-  const terms = parseQuery(query)
+  const terms = searchTerms(query)
   const hits: SearchHit[] = []
   let truncated = 0
   if (terms.length === 0) return { hits, truncated, all: false }

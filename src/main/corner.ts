@@ -90,7 +90,7 @@ export type ConsentOutcome = 'deny' | 'once' | 'session'
 /**
  * As requestConsent, but reports WHETHER the allowance was for this one action
  * or for the rest of the session. src/main/consent.ts needs that distinction
- * to record a session-scoped allowance; claude.ts does not care and uses the
+ * to record a session-scoped allowance; the caller does not care and uses the
  * boolean wrapper above. One code path, two views of it.
  *
  * Everything the boolean form promises still holds here: no path that settles

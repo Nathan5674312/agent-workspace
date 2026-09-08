@@ -288,7 +288,15 @@ export type AppSettings = {
   notifyUpdates: boolean
 }
 
-// ------------------------------------------------------------- claude (pane 1)
+/**
+ * ------------------------------------------------- agent sessions
+ *
+ * These were pane 1's — the Claude chat surface, whose main-process half
+ * (`src/main/claude.ts`) was deleted on 2026-09-08 after being unreachable for
+ * weeks: nothing registered it and no renderer named its channels. What is left
+ * here is what the SUPERVISOR and the agent host still use to describe a run,
+ * which is why the types outlived the pane and the channels did not.
+ */
 
 export type SessionId = string
 
@@ -306,13 +314,6 @@ export type ChatBlock =
   | { kind: 'thinking'; text: string }
   | { kind: 'tool_use'; id: string; name: string; input: unknown }
   | { kind: 'tool_result'; id: string; content: string; isError?: boolean }
-
-export type ChatMessage = {
-  id: string
-  role: 'user' | 'assistant'
-  blocks: ChatBlock[]
-  at: number
-}
 
 export type PermissionMode = 'ask' | 'accept-edits' | 'bypass'
 
@@ -439,12 +440,6 @@ export const CH = {
   vaultMove: 'vault:move',
   vaultUndoMove: 'vault:undo-move',
 
-  claudeNewSession: 'claude:new-session',
-  claudeSend: 'claude:send',
-  claudeInterrupt: 'claude:interrupt',
-  claudeHistory: 'claude:history',
-  claudeSetPermissionMode: 'claude:set-permission-mode',
-
   cornerItems: 'corner:items',
   cornerDecide: 'corner:decide',
   cornerDismiss: 'corner:dismiss',
@@ -508,8 +503,6 @@ export const CH = {
 
 /** main -> renderer pushes. */
 export const EV = {
-  claudeMessage: 'claude:message',
-  claudeSessionUpdate: 'claude:session-update',
   cornerPush: 'corner:push',
   cornerResolved: 'corner:resolved',
   agentActivity: 'agents:activity',

@@ -120,7 +120,8 @@ function toSdkPermissionMode(
 /**
  * Tool results arrive as either a plain string or Anthropic content blocks.
  * Flattened here rather than letting `[object Object]` reach the pane — same
- * reason and same shape as the version this replaced in claude.ts.
+ * reason and same shape as the version this replaced in claude.ts, which was
+ * itself deleted on 2026-09-08 once nothing loaded it.
  */
 function renderToolResult(content: unknown): string {
   if (typeof content === 'string') return content

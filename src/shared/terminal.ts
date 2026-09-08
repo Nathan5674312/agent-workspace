@@ -221,7 +221,7 @@ export const COMMANDS: TerminalCommand[] = [
     group: 'session',
     help: 'enable or disable tools',
     state: 'planned',
-    note: 'the tool list is hard-coded to Read/Glob/Grep in claude.ts',
+    note: 'the tool list is hard-coded to Read/Glob/Grep in agentHost.ts',
   },
 
   // --------------------------------------------------------------------- ops

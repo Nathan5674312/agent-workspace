@@ -190,6 +190,49 @@
   --radius-lg: 12px;
   --radius-xl: 16px;
 
+  /*
+   * CONCENTRIC NESTING — one rounded box inside another.
+   *
+   * Apple shipped this as ConcentricRectangle in iOS 26, and the rule underneath
+   * it is not iOS-specific: a rounded child inside a rounded parent looks right
+   * only when both corners curve around the SAME centre. That happens when
+   *
+   *     inner radius = outer radius − the gap between them
+   *
+   * and it is why hand-picked pairs never quite sit together. CSS needs no API
+   * for it, only inheritance: a container declares --radius and --pad, and every
+   * descendant can read them, so the child derives its corner instead of
+   * guessing one.
+   *
+   *   .card   { --radius: var(--radius-xl); --pad: var(--space-3);
+   *             border-radius: var(--radius); padding: var(--pad); }
+   *   .card > button { border-radius: var(--radius-inner); }
+   *
+   * max() clamps at 2px because the subtraction goes negative whenever the
+   * padding is bigger than the parent's corner, and a negative radius is not a
+   * value — 2px reads as "square, but not razor-edged".
+   *
+   * 🔴 ONLY FOR A CHILD THAT SITS FLUSH IN THE PADDING, and that caveat is the
+   * whole reason this is a tool here rather than a sweep across the app. The
+   * maths assumes the child's edge is exactly --pad from the parent's edge. A
+   * small control floating inside a generously padded card is not concentric
+   * with anything, and forcing this on it squares off a corner for no reason.
+   *
+   * 🔴 IT ALSO NEEDS A SCALE IT CAN WORK ON, AND THIS ONE CANNOT YET. Measured
+   * 2026-09-09 against the tokens directly above: --radius-md (8px) with
+   * --space-3 (8px) padding gives an inner radius of 0, and --radius-lg (12px)
+   * with --space-5 (16px) gives a negative. Every nested pair in the app today
+   * has padding at or above its container's corner, so applying this everywhere
+   * would flatten every chip, tag and button rather than align them. Apple's
+   * example works because an iOS card is ~20px round against ~8px of padding —
+   * a large container corner and a tight inset, the opposite ratio to ours.
+   *
+   * So the mechanism is here and correct, and the containers that want the
+   * effect need bigger corners before it does anything worth seeing. That is a
+   * design call on the look of the app, not a refactor, and it is Nathan's.
+   */
+  --radius-inner: max(2px, calc(var(--radius, 0px) - var(--pad, 0px)));
+
   /* ── depth — bigger surfaces read thicker: more blur, deeper shadow ── */
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
   --shadow-md: 0 4px 16px rgba(0, 0, 0, 0.4);

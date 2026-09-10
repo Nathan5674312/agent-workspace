@@ -9,6 +9,85 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [1.1.0] — 2026-09-09
+
+Everything on the 9/4–9/6 list. The theme underneath it is waiting: the app now
+says when it is working, keeps the screen you are on until the next one can
+draw, and stops charging you a pause for a move you already made.
+
+### Added
+
+- **Ctrl+P opens a note by name.** The app had one search and it answered one
+  question — which notes *say* this. Reaching a note you can already name meant
+  scrolling the tree. Ctrl+P or Ctrl+O (both, because both are muscle memory)
+  opens a box over the pane: type, arrow, Enter. It matches names against the
+  tree this process already holds, so it runs on every keystroke with no disk
+  read and no IPC round trip.
+- **The window says when it is working.** Two pixels of light along the top
+  edge. Every read had its own local spinner and none could tell the *window*
+  anything, so a 200ms vault read looked like a click that missed. No box, no
+  percentage, `pointer-events: none` so the tab strip and window controls
+  underneath are untouched, and it uses `--accent`, so it is the theme's own
+  colour in all seven.
+
+### Changed
+
+- **Search matches words, not the literal string.** `fate food` searched for
+  those nine characters in that order and returned nothing. Measured on a
+  471-note vault: 0 notes as a phrase, 7 notes in 196ms as words. A note matches
+  when every term appears somewhere in it.
+- **A surface waits until it can draw, instead of blanking first.** Clicking
+  Graph swapped the pane on the click and then sat on an empty "Building the
+  graph…" for as long as the vault took. The work is the same; you now wait on
+  the screen you already have, which still scrolls and still reads.
+- **Returning to a surface is one frame.** Only a first load waits. The hold
+  asked two questions where one would do, and every *return* paid a round trip
+  for data already on screen. Measured against 1.0.7: the graph paints in 15ms
+  against 300ms, the database in 343ms against 509ms.
+- **The first run asks where your notes are, and nothing else.** The tour that
+  named Graph and Canvas stood between a new install and the one thing it has to
+  do. Two steps now: the vault folder, then the theme.
+- **The canvas sidebar splits into two panes.** The file tree was a sliver that
+  could not be resized, and the vault name overlapped the search box.
+- **Hovering across the graph fades instead of flashing.** Every node the
+  pointer passed over re-dimmed the entire canvas, so crossing six in a second
+  was six full-contrast flips. A pointer travelling *through* a node is not
+  pointing at it: nothing happens until it has stayed 70ms.
+
+### Fixed
+
+- **A folder picker on next launch, after the settings file was damaged.** The
+  app answers with defaults when `settings.json` cannot be read, which is right.
+  The first setting you then touched wrote a fresh file over the damaged one and
+  the vault folder you had picked was gone for good. A damaged file is now kept.
+- **Highlighting lagged when moving between two nodes.** One dwell was charged
+  for two different events. Dimming the whole canvas is worth deliberating over;
+  changing *which* node is lit while the canvas is already dim is not, and it was
+  paying the same 70ms.
+- **The Forces panel opened below the bottom of the window.** Nothing threw and
+  every slider worked, which is why a first pass called it fine. It is 733px of
+  sliders in a fixed box with no `max-height`, and an unbounded fixed box has no
+  reason to scroll.
+- **The Forces button animated backwards before settling.** It measured, moved
+  the control back where it *was*, then tweened it to where it now is — so every
+  play began by going the wrong way, and the eye read it as the app fighting
+  itself.
+- **The canvas could keep showing the previous node after a hover switch.** The
+  repaint only happened because the simulation was warm; on a settled layout, or
+  with Reduced Motion where the simulation is stopped, the highlight stayed put
+  while the label underneath had already changed.
+- **Zooming the canvas popped a scrollbar and shifted the whole app.**
+
+### Known limitations
+
+- **Windows only.** The macOS and Linux targets are configured and have never
+  been built.
+- **Unsigned.** No code-signing certificate, so SmartScreen warns on first run.
+  Verified on this build: `Get-AuthenticodeSignature` reports `NotSigned`.
+- **The agent reads but does not write.** Its tool list is Read, Glob and Grep.
+- **Nothing prunes version history.** It grows until you clear it.
+- **No sync, sharing, comments or multiplayer.** One machine, one user.
+
 ## [1.0.7] — 2026-09-06
 
 The rest of the 9/4 list, and the app fits in a corner of a screen.
@@ -365,7 +444,9 @@ Stated so they are not discovered. Each is tracked in `src/shared/roadmap.ts`.
 - **No import** from Notion, Evernote or anywhere else. Obsidian needs none —
   it is the same folder.
 
-[Unreleased]: https://github.com/Nathan5674312/agent-workspace/compare/v1.0.6...HEAD
+[Unreleased]: https://github.com/Nathan5674312/agent-workspace/compare/v1.1.0...HEAD
+[1.1.0]: https://github.com/Nathan5674312/agent-workspace/compare/v1.0.7...v1.1.0
+[1.0.7]: https://github.com/Nathan5674312/agent-workspace/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/Nathan5674312/agent-workspace/compare/v1.0.5...v1.0.6
 [1.0.5]: https://github.com/Nathan5674312/agent-workspace/compare/v1.0.4...v1.0.5
 [1.0.0]: https://github.com/Nathan5674312/agent-workspace/releases/tag/v1.0.0

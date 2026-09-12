@@ -95,3 +95,55 @@ test('"Get the update" is a button that installs, not a link to a web page', () 
   )
   assert.match(dialog, /<button[^>]*onClick=\{onGet\}/s, 'Get the update is not a button')
 })
+
+test('the installer can only ever install for the current user', () => {
+  /**
+   * THE LOOP THIS ENDS, on the fifth attempt at it.
+   *
+   * Symptom, reported four times across four fixes: the app offers the new
+   * version, the button is pressed, the app restarts, and the next launch
+   * offers the same version again. Forever. None of the earlier fixes touched
+   * it, because nothing in src/ was ever wrong.
+   *
+   * MEASURED 2026-09-10 on the machine that reported it:
+   *
+   *   HKCU\Software\<APP_GUID>  InstallLocation
+   *     %LOCALAPPDATA%\Programs\Fate\FateVault    1.0.7 — what the Desktop and
+   *                                               user Start Menu shortcuts open
+   *   HKLM\SOFTWARE\<APP_GUID>  InstallLocation
+   *     C:\Users\<user>\Pictures\Fate\FateVault   1.1.0 — owns only the
+   *                                               all-users Start Menu link
+   *
+   * Two registrations of ONE app, in two scopes, and the update kept landing
+   * in the half the user never opens. `oneClick: false` is what made that
+   * reachable: an assisted installer always shows the "Anyone who uses this
+   * computer / Only for me" page, and choosing the first one ONCE is the whole
+   * mistake. After that the silent update resolves to per-machine, needs
+   * elevation, and cannot get it — electron-updater spawns the installer
+   * unelevated (its own update-info.json recorded `isAdminRightsRequired:
+   * false`) with nothing but `--updated /S`.
+   *
+   * Running that exact command by hand is what proved it rather than argued
+   * it: the installer started, raised a UAC consent dialog that a silent run
+   * can never answer, and sat on it. Killed after five minutes; both install
+   * roots were byte-identical to before. The update had never once applied.
+   *
+   * `oneClick: true` is a fix and not a preference. With it electron-builder
+   * never defines INSTALL_MODE_PER_ALL_USERS_REQUIRED, so
+   * `setInstallModePerAllUsers` is not compiled into the installer at all and
+   * oneClick.nsh's initMultiUser has a single unconditional branch. The
+   * all-users install stops being a choice a person can get wrong and becomes
+   * code that does not exist.
+   *
+   * What it costs is the directory page, which is worth naming rather than
+   * mourning: the directory page is how a notes app ended up in `Pictures`.
+   */
+  const nsis = pkg.build?.nsis ?? {}
+  assert.equal(nsis.oneClick, true, 'an assisted installer offers an all-users install again')
+  assert.equal(nsis.perMachine, false, 'perMachine forces the elevated install on everyone')
+  assert.equal(nsis.allowElevation, false, 'the installer may ask for elevation again')
+  assert.ok(
+    !('allowToChangeInstallationDirectory' in nsis),
+    'allowToChangeInstallationDirectory is illegal alongside oneClick; electron-builder refuses to build',
+  )
+})

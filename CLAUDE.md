@@ -70,3 +70,28 @@ CSS and component HMR **does not reliably reach the Electron renderer here**.
 window keeps painting the old one. Kill electron and re-run `npm run dev`
 before believing a visual change, or you will verify three times against a
 stale window.
+
+## 4. Two copies of Fate. Only one of them is Nathan's.
+
+| | Where | Who runs it |
+|---|---|---|
+| **His app** | `%LOCALAPPDATA%\Programs\Fate\FateVault\` (per-user, from the published installer) | Nathan. This is what users see. |
+| **The build** | `dist\win-unpacked\FateVault.exe` | Agents, for verification. |
+
+**Never run an installer on this machine to "test the release."** That is how a
+second, per-machine copy ended up in `C:\Users\Nathan\Pictures\Fate\FateVault\`,
+and its HKLM registration silently broke auto-update for every release between
+1.0.4 and 1.1.0 — the app offered an update, the silent installer resolved to
+per-machine, hid its own window, raised a UAC prompt it could never answer, and
+applied nothing. Four fixes went into `src/` chasing it. See
+`test/update-install.test.mjs` for the mechanism and the guard.
+
+Launch `dist\win-unpacked\FateVault.exe` instead. `src/main/profile.ts`
+recognises that path and redirects userData to `%APPDATA%\agent-workspace-dev`,
+so a verification run cannot write the `settings.json` of the app he uses — which
+it did, unnoticed, until 2026-09-10. Pass `--user-data-dir` on top of that when a
+run must begin from nothing, e.g. to watch onboarding for real; an explicit
+switch always wins.
+
+If a release genuinely has to be installed to be believed, that is Nathan's
+click, not yours.

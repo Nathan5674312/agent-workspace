@@ -15,6 +15,12 @@ export const app = {
     if (name === 'userData') return process.env.TEST_USER_DATA || tmpdir()
     return tmpdir()
   },
+  // src/main/profile.ts redirects userData at module scope, so this must EXIST
+  // for the same reason setAppUserModelId does — without it index.ts throws on
+  // import. Deliberately INERT: getPath above is driven by TEST_USER_DATA so
+  // that each test can aim the module at its own scratch directory, and a
+  // setPath that actually moved the path would fight that on every import.
+  setPath() {},
   // src/main/index.ts runs `app.whenReady().then(...)` at module scope. A
   // promise that never settles lets the module be imported for its pure
   // exports (isExternallyOpenable) without creating a window.

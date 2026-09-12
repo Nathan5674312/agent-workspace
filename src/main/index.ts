@@ -1,3 +1,6 @@
+// FIRST, and not alphabetised: it redirects userData for a test run, and
+// settings.ts resolves its path the moment it is imported. See profile.ts.
+import './profile.js'
 import { app, BrowserWindow, Menu, shell } from 'electron'
 import { join } from 'node:path'
 import { registerIpc } from './ipc.js'

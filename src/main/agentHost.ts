@@ -37,6 +37,12 @@ export type HostStart = {
   cwd: string
   permissionMode: PermissionMode | undefined
   resume: string | undefined
+  /**
+   * Earlier turns the user typed in this vault, quoted verbatim, assembled by
+   * the parent. Present only on a NEW session. The child never reads the vault
+   * itself, so this arrives as data rather than being fetched here.
+   */
+  stated: string | undefined
 }
 
 /** Parent -> child, answering a consent round trip. */
@@ -219,8 +225,18 @@ const vaultTools = createSdkMcpServer({
 async function start(msg: HostStart): Promise<void> {
   send({ kind: 'status', status: 'running' })
   try {
+    /**
+     * The recalled block goes in FRONT of the request, not into a system
+     * prompt: it is the user's own earlier words, and attributing it to the
+     * system would invite the model to weigh it as policy rather than as
+     * something the person actually said.
+     */
+    const prompt = msg.stated ? `${msg.stated}
+
+${msg.text}` : msg.text
+
     run = query({
-      prompt: msg.text,
+      prompt,
       options: {
         cwd: msg.cwd,
         // `tools` restricts which BUILT-IN tools exist, and this list is

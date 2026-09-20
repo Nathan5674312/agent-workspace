@@ -35,6 +35,8 @@ import { utilityProcess, type UtilityProcess } from 'electron'
 import { join } from 'node:path'
 import type { ChatBlock, PermissionMode, Session } from '../shared/ipc.js'
 import type { HostOutbound, VaultOp } from './agentHost.js'
+import * as stated from '../shared/stated.js'
+import { getVaultDir } from './vault.js'
 
 /** What the supervisor tells its caller about a live child. */
 export interface AgentProcessInfo {
@@ -238,12 +240,28 @@ export function run(
     proc.on('spawn', () => {
       child.info.pid = proc.pid ?? null
       child.info.status = 'running'
+      /**
+       * Capture and recall both happen HERE, in the parent, because the child
+       * is not allowed to touch the vault — that rule is what keeps every write
+       * behind vault.ts's consent gate, backups and atomic rename. Neither call
+       * asks the model for anything: the log is the user's own words, and the
+       * preamble is handed over whether or not the agent would have thought to
+       * look. See stated.ts for why that is not left to the agent's judgement.
+       *
+       * Only a NEW session gets the preamble. On a resume the earlier turns are
+       * already in the model's context, and repeating them would spend the
+       * budget re-reading what it just read.
+       */
+      stated.record(text, session.id, getVaultDir())
       proc.postMessage({
         kind: 'start',
         text,
         cwd: session.cwd,
         permissionMode: session.permissionMode,
         resume: session.sdkSessionId,
+        stated: session.sdkSessionId
+          ? undefined
+          : stated.preamble({ excludeSession: session.id, vaultDir: getVaultDir() }),
       })
     })
 

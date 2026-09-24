@@ -27,6 +27,31 @@ Plus bookmarks shared with Obsidian's `bookmarks.json`, templates from
 `src/shared/roadmap.ts` so the app grades itself against the same list this
 README does.
 
+### The agent remembers what you told it
+
+Everything you type to the agent is appended to `System/stated.jsonl` in your
+vault, word for word, and handed back at the start of a later session. Say
+"amounts are in cents, never floats" once in March and a session in June still
+gets it — even in a session that has no memory of March and is looking at code
+that no longer explains why.
+
+Two things it deliberately does NOT do:
+
+- **The agent never writes the log.** It only ever contains what YOU said, so
+  it cannot fill up with things the agent guessed and then treated as settled.
+- **The agent never decides to read it.** Recall happens whether or not it
+  thinks to look.
+
+Both halves used to be left to the agent's judgement, through an instruction
+file asking it to take notes. Measured over repeated runs, it took them about
+half the time, so the same setup helped or did nothing depending on the
+session. The benchmark is in a separate repository: on a task where a rule was
+stated once and the file holding it was then deleted, the agent recovered it in
+**3 of 3 runs with this on, and 0 of 3 without it**.
+
+It is a log under `System/`, not a note — your own notes stay yours, and
+nothing is written among them.
+
 ## What it does not do, in 1.0
 
 Stated here so it is not discovered.
@@ -76,11 +101,17 @@ you do.
 
 - **Your notes** stay in the folder you picked. Fate never copies them out.
 - **Backups** of every overwritten note go to `.backups/` inside that folder.
+- **What you type to the agent** is appended to `System/stated.jsonl` in that
+  same folder — verbatim, one line per turn, never summarised and never written
+  by the agent. Delete the file and the agent simply stops recalling; nothing
+  else depends on it.
 - **App settings** — vault path, theme, layout — go to Electron's `userData`
   directory. Nothing else is stored.
 - **Nothing leaves the machine** except two requests. The agent panel sends
   what you type and what it reads to Anthropic's API, and you start that one by
-  typing. The other is the update check: it asks GitHub for this repository's
+  typing. Note that this now includes earlier turns: the start of a new session
+  carries recent entries from `System/stated.jsonl`, so something you typed
+  last month can be sent again with this month's question. The other is the update check: it asks GitHub for this repository's
   latest release tag, and sends nothing — no identifier, no version, no
   telemetry.
 

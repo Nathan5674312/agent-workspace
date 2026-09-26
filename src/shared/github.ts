@@ -34,7 +34,15 @@ const num = (v: unknown): number | null =>
 
 /** GitHub client ids are `Iv1.…` / `Ov23li…`: short, no spaces, no slashes. */
 export const isClientId = (s: unknown): s is string =>
-  typeof s === 'string' && /^[A-Za-z0-9._-]{8,64}$/.test(s)
+  typeof s === 'string' && /^[A-Za-z0-9._-]{8,64}$/.test(s) && !isClientSecret(s)
+
+/**
+ * A client SECRET is 40 lowercase hex characters and sits right under the Client
+ * ID on GitHub's page. It was pasted into the Client ID box on the first real
+ * sign-in, and saved to plain settings.json, so it is refused by shape.
+ */
+export const isClientSecret = (s: unknown): boolean =>
+  typeof s === 'string' && /^[0-9a-f]{40}$/.test(s)
 
 /**
  * An owner or repo name. These arrive from the renderer and are interpolated
@@ -76,8 +84,9 @@ export async function requestDeviceCode(f: Fetch, clientId: string): Promise<Dev
     body: new URLSearchParams({ client_id: clientId, scope: SCOPE }).toString(),
   })
   const j = (await res.json().catch(() => null)) as Record<string, unknown> | null
-  if (!res.ok || !j) throw new Error(`GitHub refused the sign-in request (${res.status}).`)
-  if (str(j.error)) {
+  // The error body comes WITH a 400, so read it before judging the status; checking
+  // res.ok first hid "device flow is off" behind a bare "(400)".
+  if (j && str(j.error)) {
     // `device_flow_disabled` is the one people actually hit: the box was not ticked.
     throw new Error(
       j.error === 'device_flow_disabled'
@@ -85,6 +94,10 @@ export async function requestDeviceCode(f: Fetch, clientId: string): Promise<Dev
         : `GitHub: ${String(j.error_description ?? j.error)}`,
     )
   }
+  if (res.status === 404) {
+    throw new Error('GitHub does not know this Client ID. Copy it again from the OAuth App page.')
+  }
+  if (!res.ok || !j) throw new Error(`GitHub refused the sign-in request (${res.status}).`)
   const deviceCode = str(j.device_code)
   const userCode = str(j.user_code)
   const verificationUri = str(j.verification_uri)

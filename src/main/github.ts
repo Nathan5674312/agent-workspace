@@ -17,6 +17,7 @@ import { join } from 'node:path'
 import {
   client,
   isClientId,
+  isClientSecret,
   isName,
   isSha,
   parseFiles,
@@ -146,6 +147,9 @@ async function files(owner: string, name: string, sha: string): Promise<FileChan
 
 function setClientId(id: string): GitHubStatus {
   const trimmed = String(id ?? '').trim()
+  if (isClientSecret(trimmed)) {
+    throw new Error('That is the client secret, not the Client ID. Fate never needs the secret; copy the Client ID above it (starts with Ov23li).')
+  }
   if (trimmed !== '' && !isClientId(trimmed)) {
     throw new Error('That does not look like a GitHub Client ID.')
   }

@@ -64,9 +64,24 @@ test('a verification URI off github.com is refused, never opened', async () => {
   await assert.rejects(gh.requestDeviceCode(f, 'Iv1.abcdef1234'), /does not understand/)
 })
 
-test('device flow switched off says which box to tick', async () => {
-  const { f } = stub([json({ error: 'device_flow_disabled' })])
+// GitHub sends this error WITH a 400 (seen live 2026-09-26). The first version of
+// this test used 200, which is how "(400)" with no reason reached a real user.
+test('device flow switched off says which box to tick, even on a 400', async () => {
+  const { f } = stub([json({ error: 'device_flow_disabled' }, 400)])
   await assert.rejects(gh.requestDeviceCode(f, 'Iv1.abcdef1234'), /Enable Device Flow/)
+})
+
+test('an unknown Client ID (404) says to copy it again', async () => {
+  const { f } = stub([new Response('Not Found', { status: 404 })])
+  await assert.rejects(gh.requestDeviceCode(f, 'Ov23liAAAAAAAAAAAAAA'), /does not know this Client ID/)
+})
+
+test('a client secret is never accepted as a Client ID', () => {
+  const secret = '0123456789abcdef0123456789abcdef01234567'
+  assert.equal(gh.isClientSecret(secret), true)
+  assert.equal(gh.isClientId(secret), false)
+  assert.equal(gh.isClientId('Ov23liVwK2hQ9G5k3mOn'), true)
+  assert.equal(gh.isClientId('Iv1.abcdef1234567890'), true)
 })
 
 test('nextPoll: pending keeps the interval, slow_down adds five, token ends it', () => {

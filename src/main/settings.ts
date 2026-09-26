@@ -23,6 +23,7 @@ import {
   type AppSettings,
 } from '../shared/ipc.js'
 import { THEME_IDS, type ThemeId } from '../shared/themes.js'
+import { isClientSecret } from '../shared/github.js'
 import { checkRoots, getVaultDir, setVaultDir } from './vault.js'
 import { getApprovalsPolicy, setApprovalsPolicy } from './consent.js'
 import type { Handle } from './ipc.js'
@@ -153,7 +154,9 @@ function load(): Stored {
     if (typeof raw.approvals === 'object' && raw.approvals !== null) {
       out.approvals = raw.approvals as Approvals
     }
-    if (typeof raw.githubClientId === 'string' && raw.githubClientId !== '') {
+    // A client SECRET once landed here by mistake; it is dropped, and the next
+    // save removes it from disk.
+    if (typeof raw.githubClientId === 'string' && raw.githubClientId !== '' && !isClientSecret(raw.githubClientId)) {
       out.githubClientId = raw.githubClientId
     }
     // Only an explicit false is worth keeping; absent means on (see state()).

@@ -9,6 +9,7 @@ import { PlannerView } from './PlannerView.js'
 import { RoadmapView } from './RoadmapView.js'
 import { VersionsView } from './VersionsView.js'
 import { TerminalView } from './TerminalView.js'
+import { GitHubView } from '../github/GitHubView.js'
 import { track } from '../../busy.js'
 import { PaneMenu, PaneMenuItem } from './PaneMenu.js'
 import { BookmarkToggleItem } from './BookmarksView.js'
@@ -45,6 +46,11 @@ export type MainView =
    * it could not have stayed there anyway, because it finds nothing.
    */
   | 'terminal'
+  /**
+   * What agents are pushing to GitHub. Its own pane directory, not this one:
+   * it polls every 60 s, and this pane's tests forbid timers outright.
+   */
+  | 'github'
 
 export interface MainCanvasProps {
   note: VaultNoteBody | null
@@ -389,6 +395,8 @@ export function MainCanvas({
               ? 'Planner'
               : shown === 'terminal'
                 ? 'Terminal'
+              : shown === 'github'
+                ? 'GitHub'
               : shown === 'roadmap'
                   ? 'Roadmap'
                   : shown === 'versions'
@@ -473,7 +481,9 @@ export function MainCanvas({
        * the editor keeps its scroll and its selection when you open a link.
        */}
       <div className="vault-view-content" key={shown}>
-        {shown === 'terminal' ? (
+        {shown === 'github' ? (
+          <GitHubView />
+        ) : shown === 'terminal' ? (
           /**
            * Full width now, where it used to be squeezed into the ~250px
            * sidebar. It is a rendered log plus a prompt — see the header of

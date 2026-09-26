@@ -424,7 +424,14 @@ import type { NoteHits } from './search.js'
 import { DEFAULT_THEME, type ThemeId } from './themes.js'
 import type { UpdateCheck, UpdateProgress } from './update.js'
 import type { Changelog } from './changelog.js'
+import type { FileChange, Repo, RepoActivity } from './github.js'
 export type { Activity }
+
+/** What the renderer may know about the GitHub sign-in. Never the token. */
+export type GitHubStatus = { clientIdSet: boolean; signedIn: boolean; login: string | null }
+
+/** The code to type at github.com/login/device. */
+export type GitHubSignIn = { userCode: string; verificationUri: string; expiresAt: number }
 
 export const CH = {
   vaultTree: 'vault:tree',
@@ -499,6 +506,20 @@ export const CH = {
    * gated on the ACT rather than on the actor, unlike everything in consent.ts.
    */
   terminalRun: 'terminal:run',
+
+  /**
+   * The GitHub surface. Every call is started by a person — the sign-in button,
+   * or the surface being open — and the token stays in main. src/main/github.ts.
+   */
+  githubStatus: 'github:status',
+  githubSetClientId: 'github:set-client-id',
+  githubSignIn: 'github:sign-in',
+  githubFinishSignIn: 'github:finish-sign-in',
+  githubSignOut: 'github:sign-out',
+  githubRepos: 'github:repos',
+  githubActivity: 'github:activity',
+  githubFiles: 'github:files',
+  githubOpen: 'github:open',
 } as const
 
 /** main -> renderer pushes. */
@@ -702,5 +723,21 @@ export type Api = {
     install(): Promise<string | null>
     /** Fires repeatedly while `install` downloads. Returns its unsubscribe. */
     onProgress(cb: (p: UpdateProgress) => void): () => void
+  }
+  github: {
+    status(): Promise<GitHubStatus>
+    /** Empty string clears it. Main validates the shape. */
+    setClientId(id: string): Promise<GitHubStatus>
+    /** Asks GitHub for a code and opens the browser. Then call `finishSignIn`. */
+    signIn(): Promise<GitHubSignIn>
+    /** Resolves when the code is entered; rejects with a sentence otherwise. */
+    finishSignIn(): Promise<GitHubStatus>
+    /** Deletes the stored token and cancels any sign-in in progress. */
+    signOut(): Promise<GitHubStatus>
+    repos(): Promise<Repo[]>
+    activity(owner: string, name: string, defaultBranch: string): Promise<RepoActivity>
+    files(owner: string, name: string, sha: string): Promise<FileChange[]>
+    /** Opens a github.com link in the browser. Anything else is ignored. */
+    open(url: string): Promise<void>
   }
 }

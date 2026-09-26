@@ -54,8 +54,11 @@ test('no ribbon: surface points at an id the ribbon does not have', () => {
    * so the count is unchanged — which is the point of asserting a count rather
    * than a floor. `review-s2` holds the reasoning and asserts Help still opens
    * the same surface.
+   *
+   * NINE since 2026-09-26: GitHub joined the tools group — what agents are
+   * pushing, per repo. A deliberate addition, counted here for that reason.
    */
-  assert.equal(ids.length, 8, 'expected the eight surfaces')
+  assert.equal(ids.length, 9, 'expected the nine surfaces')
   assert.ok(ids.includes('roadmap'), 'the roadmap icon is gone again')
   for (const f of ALL_FEATURES.filter((f) => f.surface?.startsWith('ribbon:'))) {
     const id = f.surface.slice('ribbon:'.length)

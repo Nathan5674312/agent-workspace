@@ -37,6 +37,8 @@ interface Stored {
   approvals?: Approvals
   /** Absent means true. Only an explicit refusal is written. */
   notifyUpdates?: boolean
+  /** The OAuth App the GitHub surface signs in through. Not a secret; the token is not here. */
+  githubClientId?: string
 }
 
 /** The last thing loaded from or written to disk. */
@@ -150,6 +152,9 @@ function load(): Stored {
     // over and comes back normalised; anything else never reaches the gate.
     if (typeof raw.approvals === 'object' && raw.approvals !== null) {
       out.approvals = raw.approvals as Approvals
+    }
+    if (typeof raw.githubClientId === 'string' && raw.githubClientId !== '') {
+      out.githubClientId = raw.githubClientId
     }
     return out
   } catch {
@@ -315,6 +320,17 @@ function setNotifyUpdates(on: boolean): AppSettings {
   current = { ...current, notifyUpdates: on }
   save(current)
   return state()
+}
+
+export function getGithubClientId(): string | null {
+  return current.githubClientId ?? null
+}
+
+/** Validated by src/main/github.ts, the only caller. Null removes the key. */
+export function setGithubClientId(id: string | null): void {
+  const { githubClientId: _drop, ...rest } = current
+  current = id === null ? rest : { ...rest, githubClientId: id }
+  save(current)
 }
 
 function setAppearance(a: Appearance): AppSettings {

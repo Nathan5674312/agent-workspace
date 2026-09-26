@@ -8,6 +8,7 @@ import * as settings from './settings.js'
 import * as terminal from './terminal.js'
 import * as activity from './activity.js'
 import * as update from './update.js'
+import * as github from './github.js'
 
 /**
  * True only for the window's top-level frame.
@@ -140,6 +141,8 @@ export function registerIpc(): void {
   // The one outbound request the app makes on its own behalf, and only when a
   // person clicks. See the header of src/main/update.ts.
   update.register(handle)
+  // Only on a click or while the GitHub surface is open. See src/main/github.ts.
+  github.register(handle)
 }
 
 export type Handle = typeof handle

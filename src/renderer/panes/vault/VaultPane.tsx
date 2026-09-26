@@ -57,6 +57,7 @@ const VIEW_LABEL: Record<MainView, string> = {
   canvas: 'Canvas',
   planner: 'Planner',
   terminal: 'Terminal',
+  github: 'GitHub',
 }
 import { ConflictDialog } from './ConflictDialog.js'
 import { SettingsDialog } from './SettingsDialog.js'

@@ -33,6 +33,7 @@ import {
   Calendar,
   FileText,
   Frame,
+  GitBranch,
   History,
   Route,
   SquareTerminal,
@@ -109,6 +110,7 @@ const SURFACES: {
   { id: 'roadmap', label: 'Roadmap', Icon: Route, group: 'vault' },
   { id: 'terminal', label: 'Terminal', Icon: SquareTerminal, group: 'tools' },
   { id: 'versions', label: 'Versions', Icon: History, group: 'tools' },
+  { id: 'github', label: 'GitHub', Icon: GitBranch, group: 'tools' },
 ]
 
 /** Exported so the pane's test can assert every surface has exactly one icon. */

@@ -97,6 +97,20 @@ export const nativeImage = {
   createFromPath: () => ({ isEmpty: () => true }),
 }
 
+/**
+ * src/main/github.ts encrypts its token with this. "Unavailable" is the honest
+ * stand-in: no OS keystore under `node --test`, so nothing is ever written.
+ */
+export const safeStorage = {
+  isEncryptionAvailable: () => false,
+  encryptString() {
+    throw new Error('safeStorage is not available under node --test')
+  },
+  decryptString() {
+    throw new Error('safeStorage is not available under node --test')
+  },
+}
+
 export const contextBridge = { exposeInMainWorld() {} }
 export const ipcRenderer = { invoke() {}, on() {}, removeListener() {} }
 
@@ -128,4 +142,5 @@ export default {
   contextBridge,
   ipcRenderer,
   utilityProcess,
+  safeStorage,
 }

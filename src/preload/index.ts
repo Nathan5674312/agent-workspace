@@ -98,6 +98,19 @@ const api: Api = {
     install: () => ipcRenderer.invoke(CH.updateInstall),
     onProgress: (cb) => on<[UpdateProgress]>(EV.updateProgress, cb),
   },
+  // Owner, repo and sha are checked in main before they reach a URL, and the
+  // token never crosses: see src/main/github.ts.
+  github: {
+    status: () => ipcRenderer.invoke(CH.githubStatus),
+    setClientId: (id) => ipcRenderer.invoke(CH.githubSetClientId, id),
+    signIn: () => ipcRenderer.invoke(CH.githubSignIn),
+    finishSignIn: () => ipcRenderer.invoke(CH.githubFinishSignIn),
+    signOut: () => ipcRenderer.invoke(CH.githubSignOut),
+    repos: () => ipcRenderer.invoke(CH.githubRepos),
+    activity: (o, n, b) => ipcRenderer.invoke(CH.githubActivity, o, n, b),
+    files: (o, n, s) => ipcRenderer.invoke(CH.githubFiles, o, n, s),
+    open: (url) => ipcRenderer.invoke(CH.githubOpen, url),
+  },
 }
 
 contextBridge.exposeInMainWorld('api', api)

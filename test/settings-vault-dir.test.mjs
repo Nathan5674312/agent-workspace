@@ -79,6 +79,17 @@ for (const [name, text] of [
   })
 }
 
+// "Don't check for updates" used to be forgotten on restart: load() never read
+// the key back, so state() reported true and the next save dropped it.
+test('notifyUpdates: false survives a reload and the next save', () => {
+  writeSettings('{"notifyUpdates": false}')
+  settings.applySettings()
+  assert.equal(get().notifyUpdates, false)
+
+  set(DEFAULT_APPEARANCE)
+  assert.equal(onDisk().notifyUpdates, false)
+})
+
 test('a missing settings.json is not an error — it is the first run', () => {
   const before = get().vaultDir
   rmSync(SETTINGS_FILE, { force: true })

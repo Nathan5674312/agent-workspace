@@ -156,6 +156,8 @@ function load(): Stored {
     if (typeof raw.githubClientId === 'string' && raw.githubClientId !== '') {
       out.githubClientId = raw.githubClientId
     }
+    // Only an explicit false is worth keeping; absent means on (see state()).
+    if (raw.notifyUpdates === false) out.notifyUpdates = false
     return out
   } catch {
     // Unparseable. Keep the bytes; boot on defaults.

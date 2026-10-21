@@ -190,7 +190,7 @@ function fsError(e: unknown): Error {
  * resolves under the root while its real path does not. Resolving links would
  * make every note reached that way unopenable.
  */
-function resolveInVault(rel: string): string {
+export function resolveInVault(rel: string): string {
   return resolveUnder(resolve(VAULT_DIR), rel, 'vault: path escapes the vault')
 }
 
@@ -955,7 +955,7 @@ function appendJournal(rec: JournalLine): void {
  * `Notes/../.git/x.md` is caught as `.git` rather than read as three innocent
  * segments.
  */
-function requireVisible(abs: string): void {
+export function requireVisible(abs: string): void {
   for (const part of relative(resolve(VAULT_DIR), abs).split(sep)) {
     if (part.startsWith('.') || HIDDEN.has(part)) {
       throw new Error('vault: the explorer does not show that path')

@@ -31,11 +31,15 @@ export default defineConfig({
        * Both land in `out/main/`, which is what makes
        * `join(__dirname, 'agentHost.js')` in supervisor.ts resolve in dev and in
        * the packaged app without a branch.
+       *
+       * `mcp.ts` is the third, for the same reason: nothing imports it. An
+       * outside agent (Claude Code) launches it as `node out/main/mcp.js`.
        */
       lib: {
         entry: [
           resolve(__dirname, 'src/main/index.ts'),
           resolve(__dirname, 'src/main/agentHost.ts'),
+          resolve(__dirname, 'src/main/mcp.ts'),
         ],
       },
       rollupOptions: { external: ['electron'] },

@@ -36,6 +36,7 @@ import { join } from 'node:path'
 import type { ChatBlock, PermissionMode, Session } from '../shared/ipc.js'
 import type { HostOutbound, VaultOp } from './agentHost.js'
 import * as stated from '../shared/stated.js'
+import { standingOrders } from '../shared/orders.js'
 import { getVaultDir } from './vault.js'
 
 /** What the supervisor tells its caller about a live child. */
@@ -262,6 +263,7 @@ export function run(
         stated: session.sdkSessionId
           ? undefined
           : stated.preamble({ excludeSession: session.id, vaultDir: getVaultDir() }),
+        orders: standingOrders(getVaultDir()),
       })
     })
 

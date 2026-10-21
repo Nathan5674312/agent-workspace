@@ -43,6 +43,12 @@ export type HostStart = {
    * itself, so this arrives as data rather than being fetched here.
    */
   stated: string | undefined
+  /**
+   * The vault's AGENTS.md and CLAUDE.md, read by the parent (see
+   * shared/orders.ts). Present on EVERY turn: a system prompt is not part of
+   * what a resume replays.
+   */
+  orders: string | undefined
 }
 
 /** Parent -> child, answering a consent round trip. */
@@ -239,6 +245,9 @@ ${msg.text}` : msg.text
       prompt,
       options: {
         cwd: msg.cwd,
+        // A plain string, not the claude_code preset: this is a vault agent,
+        // not a coding CLI. Undefined leaves the SDK default untouched.
+        systemPrompt: msg.orders,
         // `tools` restricts which BUILT-IN tools exist, and this list is
         // still read-only on purpose: no Bash, and no built-in Write or Edit,
         // because those write to disk behind vault.ts's back. See vaultTools.

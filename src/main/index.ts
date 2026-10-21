@@ -6,7 +6,7 @@ import { join } from 'node:path'
 import { registerIpc } from './ipc.js'
 import * as activity from './activity.js'
 import { checkRoots } from './vault.js'
-import { applySettings, currentTheme, setRootMismatch } from './settings.js'
+import { applySettings, currentTheme, setRootMismatch, startVaultSync } from './settings.js'
 import { applyWindowIcon } from './windowIcon.js'
 import { killAll } from './supervisor.js'
 import * as control from './control.js'
@@ -201,6 +201,8 @@ void app.whenReady().then(() => {
   // The door outside agents knock on to show a view or report a change. See
   // main/control.ts; it failing costs live views, never the window.
   void control.start()
+  // Vault <-> GitHub, only if the user turned it on (main/vaultSync.ts).
+  startVaultSync()
   // Diagnostic only, and deliberately not awaited: it scans the vault, and a
   // slow or unreachable disk must never hold up the window. Warns once at boot
   // if the vault root is missing, unreadable, or holds no notes. (It used to

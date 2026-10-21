@@ -39,6 +39,19 @@ import {
   type AppSettings,
 } from '../../../shared/ipc.js'
 import { applyAppearance } from '../../appearance.js'
+import type { SyncStatus } from '../../../shared/gitsync.js'
+
+/** The status line under the sync switch: what it does when off, what it last did when on. */
+function syncLine(on: boolean, s: SyncStatus | null): string {
+  if (!on) {
+    return 'Off. When on, this vault is committed, pulled and pushed with its GitHub remote at launch and every two minutes. If both sides changed a note, both are kept.'
+  }
+  if (!s || s.running) return 'Syncing…'
+  if (s.available === false) return s.why ?? 'This vault cannot sync.'
+  if (s.lastError) return `Last try failed: ${s.lastError}`
+  if (s.lastAt) return `Synced ${new Date(s.lastAt).toLocaleTimeString()}: ${s.lastSummary ?? ''}`
+  return 'Starting…'
+}
 import { ThemePicker } from './ThemePicker.js'
 import './settings.css'
 
@@ -203,6 +216,26 @@ export function SettingsDialog({ isOpen, onClose, isDirty }: SettingsDialogProps
       cancelled = true
     }
   }, [isOpen])
+
+  /**
+   * Vault <-> GitHub sync (main/vaultSync.ts). Read on open. Both actions below
+   * resolve only after the pass they start, so the line ends on what it did
+   * with no polling — this pane holds no timers, by a guard in its tests.
+   */
+  const [sync, setSync] = useState<SyncStatus | null>(null)
+  useEffect(() => {
+    if (isOpen) void window.api.settings.vaultSyncStatus().then(setSync, () => {})
+  }, [isOpen])
+  const busy = () => setSync((s) => (s ? { ...s, running: true } : s))
+  const toggleSync = async (on: boolean) => {
+    if (on) busy()
+    setSettings(await window.api.settings.setVaultSync(on))
+    setSync(await window.api.settings.vaultSyncStatus())
+  }
+  const syncNow = async () => {
+    busy()
+    setSync(await window.api.settings.vaultSyncNow())
+  }
 
   /**
    * Ask whether there is a newer version. Fires only from the button.
@@ -478,6 +511,38 @@ export function SettingsDialog({ isOpen, onClose, isDirty }: SettingsDialogProps
                 <p className="settings-hint">
                   Choose a folder to switch vaults. Your notes are not moved or changed.
                 </p>
+              )}
+            </div>
+
+            <div className="settings-field">
+              <div className="settings-field-head">
+                <label className="settings-label" htmlFor="settings-vault-sync">
+                  Sync with GitHub
+                </label>
+                <input
+                  id="settings-vault-sync"
+                  className="settings-appearance-toggle"
+                  type="checkbox"
+                  checked={settings?.vaultSync ?? false}
+                  disabled={!settings}
+                  onChange={(e) => void toggleSync(e.target.checked)}
+                />
+              </div>
+              <p className="settings-hint" role="status">
+                {syncLine(settings?.vaultSync ?? false, sync)}
+              </p>
+              {settings?.vaultSync && (
+                <button
+                  type="button"
+                  className="settings-change"
+                  onClick={() => void syncNow()}
+                  disabled={sync?.running}
+                >
+                  {sync?.running ? 'Syncing…' : 'Sync now'}
+                </button>
+              )}
+              {sync && sync.conflicts.length > 0 && (
+                <p className="settings-hint">Kept both sides of: {sync.conflicts.join(', ')}</p>
               )}
             </div>
 

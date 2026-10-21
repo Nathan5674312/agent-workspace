@@ -26,6 +26,7 @@ import { THEME_IDS, type ThemeId } from '../shared/themes.js'
 import { isClientSecret } from '../shared/github.js'
 import { checkRoots, getVaultDir, setVaultDir } from './vault.js'
 import { announce } from './control.js'
+import { configure as configureSync, getStatus as getSyncStatus, runNow as runSyncNow } from './vaultSync.js'
 import { getApprovalsPolicy, setApprovalsPolicy } from './consent.js'
 import type { Handle } from './ipc.js'
 import { applyWindowIcon } from './windowIcon.js'
@@ -39,6 +40,8 @@ interface Stored {
   approvals?: Approvals
   /** Absent means true. Only an explicit refusal is written. */
   notifyUpdates?: boolean
+  /** Absent means OFF: committing and pushing someone's notes is opt-in. See main/vaultSync.ts. */
+  vaultSync?: boolean
   /** The OAuth App the GitHub surface signs in through. Not a secret; the token is not here. */
   githubClientId?: string
 }
@@ -162,6 +165,8 @@ function load(): Stored {
     }
     // Only an explicit false is worth keeping; absent means on (see state()).
     if (raw.notifyUpdates === false) out.notifyUpdates = false
+    // Only an explicit true turns it on; anything else is the default, off.
+    if (raw.vaultSync === true) out.vaultSync = true
     return out
   } catch {
     // Unparseable. Keep the bytes; boot on defaults.
@@ -306,6 +311,7 @@ function state(): AppSettings {
     // notify me" writes the key, so the file records a decision and never a
     // default the user did not make.
     notifyUpdates: current.notifyUpdates !== false,
+    vaultSync: current.vaultSync === true,
   }
 }
 
@@ -322,6 +328,21 @@ function state(): AppSettings {
  * preference that forgets itself on restart is not a refusal, it is a nag with
  * extra steps.
  */
+/** At launch, after the vault folder is applied: sync runs only if the user turned it on. */
+export function startVaultSync(): void {
+  void configureSync(current.vaultSync === true)
+}
+
+/** On starts a pass now and one every two minutes; off stops the timer. Nothing already pushed is touched. */
+async function setVaultSync(on: boolean): Promise<AppSettings> {
+  current = on ? { ...current, vaultSync: true } : (({ vaultSync: _, ...rest }) => rest)(current)
+  save(current)
+  // Answers after the first pass, so the dialog shows what it did without
+  // polling: the vault pane holds no timers, by a guard in its tests.
+  await configureSync(on)
+  return state()
+}
+
 function setNotifyUpdates(on: boolean): AppSettings {
   current = { ...current, notifyUpdates: on }
   save(current)
@@ -469,4 +490,7 @@ export function register(handle: Handle): void {
   handle(CH.settingsSetAppearance, (a: Appearance) => setAppearance(a))
   handle(CH.settingsSetApprovals, (a: Approvals) => setApprovals(a))
   handle(CH.settingsSetNotifyUpdates, (on: boolean) => setNotifyUpdates(on))
+  handle(CH.settingsSetVaultSync, (on: boolean) => setVaultSync(on === true))
+  handle(CH.vaultSyncStatus, () => getSyncStatus())
+  handle(CH.vaultSyncNow, () => runSyncNow())
 }

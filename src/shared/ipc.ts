@@ -286,6 +286,8 @@ export type AppSettings = {
    * person who declines to be told is not declining to be able to ask.
    */
   notifyUpdates: boolean
+  /** Off unless the user turned it on. */
+  vaultSync: boolean
 }
 
 /**
@@ -436,6 +438,7 @@ import type { UpdateCheck, UpdateProgress } from './update.js'
 import type { Changelog } from './changelog.js'
 import type { FileChange, Repo, RepoActivity } from './github.js'
 import type { OpenRequest } from './control.js'
+import type { SyncStatus } from './gitsync.js'
 export type { Activity }
 
 /** What the renderer may know about the GitHub sign-in. Never the token. */
@@ -473,6 +476,9 @@ export const CH = {
   settingsSetAppearance: 'settings:set-appearance',
   settingsSetApprovals: 'settings:set-approvals',
   settingsSetNotifyUpdates: 'settings:set-notify-updates',
+  settingsSetVaultSync: 'settings:set-vault-sync',
+  vaultSyncStatus: 'vault-sync:status',
+  vaultSyncNow: 'vault-sync:now',
 
   /**
    * THE ONLY CHANNEL THAT LEAVES THIS MACHINE without the user having typed to
@@ -703,6 +709,11 @@ export type Api = {
      * forgets itself on restart is a nag rather than a preference.
      */
     setNotifyUpdates(on: boolean): Promise<AppSettings>
+    /** Turn vault <-> GitHub sync on or off. See main/vaultSync.ts. */
+    setVaultSync(on: boolean): Promise<AppSettings>
+    vaultSyncStatus(): Promise<SyncStatus>
+    /** One pass now. Resolves with the status after it. */
+    vaultSyncNow(): Promise<SyncStatus>
   }
   update: {
     /**

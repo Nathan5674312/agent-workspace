@@ -85,6 +85,9 @@ const api: Api = {
     // human MORE often.
     setApprovals: (a) => ipcRenderer.invoke(CH.settingsSetApprovals, a),
     setNotifyUpdates: (on: boolean) => ipcRenderer.invoke(CH.settingsSetNotifyUpdates, on),
+    setVaultSync: (on: boolean) => ipcRenderer.invoke(CH.settingsSetVaultSync, on),
+    vaultSyncStatus: () => ipcRenderer.invoke(CH.vaultSyncStatus),
+    vaultSyncNow: () => ipcRenderer.invoke(CH.vaultSyncNow),
   },
   update: {
     // No argument, and nothing to give one: the feed URL is a constant in

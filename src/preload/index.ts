@@ -1,6 +1,7 @@
 import { contextBridge, ipcRenderer } from 'electron'
 import { CH, EV, type Api, type Activity } from '../shared/ipc.js'
 import type { UpdateProgress } from '../shared/update.js'
+import type { OpenRequest } from '../shared/control.js'
 
 /**
  * The ONLY bridge between renderer and main. Nothing else crosses.
@@ -22,6 +23,7 @@ function on<T extends unknown[]>(
 
 const api: Api = {
   vault: {
+    onChanged: (cb) => on(EV.vaultChanged, cb),
     tree: () => ipcRenderer.invoke(CH.vaultTree),
     search: (query: string) => ipcRenderer.invoke(CH.vaultSearch, query),
     list: () => ipcRenderer.invoke(CH.vaultList),
@@ -39,6 +41,7 @@ const api: Api = {
   agents: {
     activity: () => ipcRenderer.invoke(CH.agentActivity),
     onActivity: (cb) => on<[Activity[]]>(EV.agentActivity, cb),
+    onOpen: (cb) => on<[OpenRequest]>(EV.agentOpen, cb),
   },
   terminal: {
     processes: () => ipcRenderer.invoke(CH.terminalProcesses),

@@ -321,7 +321,12 @@ test('no node, electron or network access anywhere in the pane', () => {
  * in shared/update.ts, so admitting it here does not give the pane the ability
  * to point a request anywhere.
  */
-const ALLOWED_API = new Set(['vault', 'settings', 'terminal', 'update'])
+/**
+ * `agents` joined for one listener: an outside agent asking the window to show a
+ * view (shared/control.ts) lands in this pane, because opening notes, boards and
+ * views is this pane's job. It reads nothing else from that surface.
+ */
+const ALLOWED_API = new Set(['vault', 'settings', 'terminal', 'update', 'agents'])
 
 test('the pane reaches only into its own window.api surfaces', () => {
   for (const [name, code] of all()) {

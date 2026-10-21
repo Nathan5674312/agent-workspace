@@ -81,6 +81,7 @@ import {
   type WikilinkRef,
 } from './helpers.js'
 import type { VaultNoteBody } from '../../../shared/ipc.js'
+import type { OpenRequest } from '../../../shared/control.js'
 import { setFrontmatter } from '../../../shared/notemeta.js'
 import { listTemplates, type Template } from '../../../shared/templates.js'
 import { startupNote } from '../../../shared/startup.js'
@@ -612,6 +613,24 @@ export function VaultPane(): React.ReactElement {
     }))
     return true
   }
+
+  /**
+   * AN OUTSIDE AGENT ASKED TO SHOW SOMETHING (shared/control.ts).
+   *
+   * It goes through the same two doors a click does: `openNote` for a path, so
+   * a board still lands on the canvas and a dirty buffer still gets its
+   * discard prompt, and `handleViewChange` for a bare view. Subscribed once and
+   * read through a ref, because both functions are rebuilt every render and a
+   * listener holding the first ones would act on a vault state long gone.
+   */
+  const agentOpenRef = useRef<(r: OpenRequest) => void>(() => {})
+  agentOpenRef.current = (r) => {
+    if (!r.path) return handleViewChange(r.view)
+    void openNote(r.path).then((ok) => {
+      if (ok && r.view !== 'editor' && r.view !== 'canvas') handleViewChange(r.view)
+    })
+  }
+  useEffect(() => window.api.agents.onOpen((r) => agentOpenRef.current(r)), [])
 
   /**
    * Back and forward go through `loadNote` rather than `openNote` — they must

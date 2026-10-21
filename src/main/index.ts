@@ -9,6 +9,7 @@ import { checkRoots } from './vault.js'
 import { applySettings, currentTheme, setRootMismatch } from './settings.js'
 import { applyWindowIcon } from './windowIcon.js'
 import { killAll } from './supervisor.js'
+import * as control from './control.js'
 
 /**
  * Only http(s) may be handed to the OS. `new URL` is the parser, not a regex —
@@ -197,6 +198,9 @@ void app.whenReady().then(() => {
   // surface until the next tool call.
   activity.start()
   createWindow()
+  // The door outside agents knock on to show a view or report a change. See
+  // main/control.ts; it failing costs live views, never the window.
+  void control.start()
   // Diagnostic only, and deliberately not awaited: it scans the vault, and a
   // slow or unreachable disk must never hold up the window. Warns once at boot
   // if the vault root is missing, unreadable, or holds no notes. (It used to
@@ -244,4 +248,5 @@ app.on('window-all-closed', () => {
  */
 app.on('will-quit', () => {
   killAll()
+  control.stop()
 })

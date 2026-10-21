@@ -47,6 +47,10 @@ export function useVault() {
    */
   const reload = useCallback(() => setReloadCount((n) => n + 1), [])
 
+  // An outside agent wrote to the vault (main/control.ts), which is the other
+  // thing that changes what is IN it. Same reload, same single code path.
+  useEffect(() => window.api.vault.onChanged(reload), [reload])
+
   /**
    * Every note open goes through here, which is why the busy counter does too:
    * one wrapper covers the tree, the wikilinks, the nav trail, the database and

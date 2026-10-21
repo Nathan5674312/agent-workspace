@@ -25,6 +25,7 @@ import {
 import { THEME_IDS, type ThemeId } from '../shared/themes.js'
 import { isClientSecret } from '../shared/github.js'
 import { checkRoots, getVaultDir, setVaultDir } from './vault.js'
+import { announce } from './control.js'
 import { getApprovalsPolicy, setApprovalsPolicy } from './consent.js'
 import type { Handle } from './ipc.js'
 import { applyWindowIcon } from './windowIcon.js'
@@ -449,6 +450,8 @@ async function applyVaultDir(): Promise<AppSettings> {
   }
 
   setVaultDir(stored) // also drops the index memo — see vault.ts
+  // Agents find the app by the vault it has open, so the address moves with it.
+  announce()
   // The old boot warning describes the old root, so it must not outlive it.
   // Recomputed here rather than left stale, which would leave "point at X
   // instead" advice sitting under the folder it was telling you to pick.

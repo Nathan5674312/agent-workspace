@@ -351,6 +351,16 @@ export type Actor =
        */
       reason: string
     }
+  /**
+   * An agent OUTSIDE the app (Claude Code, Codex, Cursor) writing through the
+   * MCP server, src/main/mcp.ts. Passes the gate without a prompt: its own
+   * client already asked the human, and a second prompt for the same act is the
+   * approval fatigue this file opens by refusing. What it gets instead is
+   * attribution and a bar to clear — every write names the agent and the
+   * EVIDENCE behind it (the user's words, a command's output, a file), and
+   * vault.ts keeps a backup of whatever it replaced.
+   */
+  | { kind: 'external'; agent: string; evidence: string }
 
 /**
  * Everything the corner can show. `consent` items BLOCK until answered;
@@ -425,6 +435,7 @@ import { DEFAULT_THEME, type ThemeId } from './themes.js'
 import type { UpdateCheck, UpdateProgress } from './update.js'
 import type { Changelog } from './changelog.js'
 import type { FileChange, Repo, RepoActivity } from './github.js'
+import type { OpenRequest } from './control.js'
 export type { Activity }
 
 /** What the renderer may know about the GitHub sign-in. Never the token. */
@@ -530,6 +541,10 @@ export const EV = {
   cornerResolved: 'corner:resolved',
   agentActivity: 'agents:activity',
   networkChanged: 'network:changed',
+  /** An outside agent asked the window to show a view. See shared/control.ts. */
+  agentOpen: 'agents:open',
+  /** An outside agent changed the vault; re-read the folder. */
+  vaultChanged: 'vault:changed',
   /** Download progress while an update installs. See CH.updateInstall. */
   updateProgress: 'update:progress',
 } as const
@@ -537,6 +552,8 @@ export const EV = {
 /** The full surface exposed on `window.api`. Implemented in preload/index.ts. */
 export type Api = {
   vault: {
+    /** An outside agent wrote to the vault. Returns its unsubscribe. */
+    onChanged(cb: () => void): () => void
     tree(): Promise<VaultTreeNode>
     list(): Promise<VaultNote[]>
     read(path: string): Promise<VaultNoteBody>
@@ -618,6 +635,8 @@ export type Api = {
     activity(): Promise<Activity[]>
     /** New activity as it happens. Returns its own unsubscribe. */
     onActivity(cb: (items: Activity[]) => void): () => void
+    /** An outside agent asked to bring a view forward. Returns its unsubscribe. */
+    onOpen(cb: (request: OpenRequest) => void): () => void
   }
   terminal: {
     /** Live agent processes, one per running session. */

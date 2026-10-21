@@ -175,14 +175,28 @@ function requireActor(actor: Actor): void {
   // whole point is to check values the type system has already been told are
   // fine, because the annotation is erased at runtime and the argument may have
   // come from JavaScript that never saw it.
-  const a = actor as { kind?: unknown; sessionId?: unknown; reason?: unknown } | undefined | null
+  const a = actor as
+    | { kind?: unknown; sessionId?: unknown; reason?: unknown; agent?: unknown; evidence?: unknown }
+    | undefined
+    | null
 
   if (!a || typeof a !== 'object') {
     throw new Error('consent: this call requires an actor saying who is mutating the vault')
   }
   if (a.kind === 'user') return
+  if (a.kind === 'external') {
+    // No prompt for this kind, so the two fields are the whole of its
+    // accountability: refused blank, exactly as an agent's reason is.
+    if (typeof a.agent !== 'string' || a.agent.trim() === '') {
+      throw new Error('consent: an external actor needs the agent\'s name')
+    }
+    if (typeof a.evidence !== 'string' || a.evidence.trim() === '') {
+      throw new Error('consent: an external write needs evidence: the user\'s words, a command\'s output, or a file')
+    }
+    return
+  }
   if (a.kind !== 'agent') {
-    throw new Error('consent: an actor must be { kind: "user" } or { kind: "agent", ... }')
+    throw new Error('consent: an actor must be { kind: "user" }, { kind: "agent", ... } or { kind: "external", ... }')
   }
   if (typeof a.sessionId !== 'string' || a.sessionId.trim() === '') {
     throw new Error('consent: an agent actor needs a sessionId')
@@ -254,7 +268,7 @@ async function ask(
  */
 export async function gate(actor: Actor, kind: OpKind, what: readonly string[]): Promise<void> {
   requireActor(actor)
-  if (actor.kind === 'user') return
+  if (actor.kind === 'user' || actor.kind === 'external') return
 
   // 'strict' spends nothing, so a standing grant of either lifetime is simply
   // not consulted — and, being unspent, it is still there if the policy is put
@@ -288,7 +302,7 @@ export async function withBatchConsent<T>(
   run: () => Promise<T>,
 ): Promise<T> {
   requireActor(actor)
-  if (actor.kind === 'user') return run()
+  if (actor.kind === 'user' || actor.kind === 'external') return run()
 
   const key = keyOf(actor.sessionId, kind)
 

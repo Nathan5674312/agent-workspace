@@ -56,16 +56,21 @@ const call = async (name, args = {}) => (await rpc('tools/call', { name, argumen
 const text = (r) => r.content[0].text
 
 test('initialize echoes the protocol version and tells the agent to search first', async () => {
-  const { result } = await rpc('initialize', { protocolVersion: '2025-03-26', capabilities: {} })
+  const { result } = await rpc('initialize', { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 'test-agent' } })
   assert.equal(result.protocolVersion, '2025-03-26')
   assert.equal(result.serverInfo.name, 'fate')
   assert.match(result.instructions, /search_vault/)
   assert.ok(result.instructions.includes(vault))
 })
 
-test('tools/list offers exactly the five tools', async () => {
+test('tools/list offers every surface of the app', async () => {
   const { result } = await rpc('tools/list')
-  assert.deepEqual(result.tools.map((t) => t.name), ['search_vault', 'list_boards', 'board_next', 'board_record', 'create_board'])
+  assert.deepEqual(result.tools.map((t) => t.name), [
+    'search_vault', 'list_boards', 'board_next', 'board_record', 'create_board',
+    'read_note', 'write_note', 'move_note', 'set_property',
+    'note_links', 'graph_path', 'graph_overview', 'query_notes',
+    'read_board', 'add_to_board', 'roadmap', 'open_view',
+  ])
   for (const t of result.tools) assert.equal(t.run, undefined, 'the handler must not leak into the schema')
 })
 
@@ -105,6 +110,7 @@ const flow = {
     { from: 'b', to: 'd' },
     { from: 'c', to: 'd' },
   ],
+  evidence: 'the user asked for this pipeline in chat',
 }
 
 test('create_board writes a runnable board, and refuses overwrite, loops and escapes', async () => {

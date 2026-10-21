@@ -71,11 +71,17 @@ test('tools/list offers exactly the five tools', async () => {
 
 test('search returns 1-based lines and the graph around the note', async () => {
   const out = text(await call('search_vault', { query: 'release procedure' }))
-  assert.match(out, /\)\n\n## Notes\/Release\.md\n/, 'every word must be in the name for a name match')
+  assert.match(out, /word weight[^\n]*\n\n## Notes\/Release\.md\n/, 'every word must be in the name for a name match')
   assert.match(out, /L3: .*release procedure/)
   assert.match(out, /links to: Checklist\.md/)
   assert.match(text(await call('search_vault', { query: 'checklist' })), /## Checklist\.md \(name matches\)[\s\S]*linked from: Notes\/Release\.md/)
   assert.match(text(await call('search_vault', { query: 'zzqx' })), /Nothing in the vault matches/)
+})
+
+test('a whole question finds the note even though no note holds every word', async () => {
+  // "shipping" is in no note, so the AND search would return nothing here.
+  const out = text(await call('search_vault', { query: 'what was the release procedure before shipping' }))
+  assert.match(out, /## Notes\/Release\.md\n[\s\S]*L3: .*release procedure/)
 })
 
 test('unknown methods and bad JSON are protocol errors, not crashes', async () => {

@@ -32,6 +32,8 @@ import * as vault from './vault.js'
 import { canvasId, isCanvasPath, parseCanvas, serializeCanvas, type CanvasDoc } from '../shared/canvas.js'
 import { compile, type Plan, type Step } from '../shared/pipeline.js'
 import * as runs from '../shared/run.js'
+import { terms } from '../shared/retrieve.js'
+import { searchText, titleMatches } from '../shared/search.js'
 import type { BoardStamp } from '../shared/brief.js'
 import type { VaultTreeNode } from '../shared/ipc.js'
 
@@ -167,11 +169,11 @@ const TOOLS: Tool[] = [
   {
     name: 'search_vault',
     description:
-      "Search the user's Fate vault (their notes, decisions, projects and past work) with the app's own ranking: notes whose name matches come first, then by how often the words appear. Every word must appear. Returns matching lines with 1-based line numbers, plus each note's links and backlinks so you can follow the graph. Use this BEFORE answering anything about the user's projects, preferences or history.",
+      "Search the user's Fate vault (their notes, decisions, projects and past work). Two or more words are ranked by how strongly they appear, rare words counting most, so a whole question works and a note need not contain every word. One word finds every note containing it, names first. Returns matching lines with 1-based line numbers, plus each note's links and backlinks so you can follow the graph. Use this BEFORE answering anything about the user's projects, preferences or history.",
     inputSchema: {
       type: 'object',
       properties: {
-        query: { type: 'string', description: 'Words to find, e.g. "release procedure". All must appear.' },
+        query: { type: 'string', description: 'Words or a whole question, e.g. "release procedure" or "why does my wifi keep dropping".' },
         limit: { type: 'number', description: 'Most notes to return. Default 8.' },
       },
       required: ['query'],
@@ -179,13 +181,34 @@ const TOOLS: Tool[] = [
     async run(a) {
       const query = str(a.query, 'query')
       const limit = typeof a.limit === 'number' && a.limit > 0 ? Math.floor(a.limit) : 8
-      const found = (await vault.search(query)).slice(0, limit)
+      // Two or more words: BM25 via vault.related(), which put a right note in
+      // the top 5 for 14/14 held-out questions against 2/14 for the AND search
+      // (fate-benchmark/retrieval). One word: the AND search, whose names-first
+      // order is the right one for a single word.
+      const ranked = new Set(terms(query)).size >= 2
+      const paths = ranked
+        ? await vault.related(query, limit)
+        : (await vault.search(query)).slice(0, limit).map((n) => n.path)
+      const found = (
+        await Promise.all(
+          paths.map(async (path) => {
+            try {
+              const { text, title } = await vault.read(path)
+              return { path, titleMatch: titleMatches(title, query), ...searchText(text, query) }
+            } catch {
+              return null // gone between the ranking and the read
+            }
+          }),
+        )
+      ).filter((n) => n !== null)
       if (found.length === 0) return `Nothing in the vault matches "${query}". Try fewer or different words.`
       const { links } = await vault.graph()
       const near = (pick: (l: { from: string; to: string }) => string | null) =>
         [...new Set(links.map(pick).filter((x): x is string => !!x))].slice(0, 6).join(', ')
       return [
-        `Vault: ${vault.getVaultDir()} (paths below are relative to it)`,
+        `Vault: ${vault.getVaultDir()} (paths below are relative to it). ${
+          ranked ? 'Ranked by word weight; a note need not contain every word.' : 'Every note contains the word; names first.'
+        }`,
         ...found.map((n) => {
           const out = near((l) => (l.from === n.path ? l.to : null))
           const back = near((l) => (l.to === n.path ? l.from : null))

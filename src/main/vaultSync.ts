@@ -20,7 +20,7 @@
  * holds a token.
  */
 import { execFile } from 'node:child_process'
-import { existsSync, mkdirSync, statSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs'
 import { hostname } from 'node:os'
 import { dirname, join, resolve } from 'node:path'
 import { BrowserWindow } from 'electron'
@@ -63,7 +63,21 @@ export type SyncResult =
   | { ok: false; unavailable: string }
   | { ok: true; committed: number; pulled: number; pushed: number; conflicts: string[]; waiting: boolean }
 
-const same = (a: string, b: string): boolean => resolve(a).toLowerCase() === resolve(b).toLowerCase()
+/**
+ * Real paths, both sides: git reports the long name for a folder that reached
+ * us as an 8.3 short one (`C:\Users\RUNNER~1\...` on a GitHub runner, any
+ * `LONGFO~1` here), and a junction resolves to where it points. Compared
+ * lexically, the vault looked like it sat inside some other repo and sync
+ * quietly did nothing.
+ */
+const real = (p: string): string => {
+  try {
+    return realpathSync.native(p)
+  } catch {
+    return resolve(p)
+  }
+}
+const same = (a: string, b: string): boolean => real(a).toLowerCase() === real(b).toLowerCase()
 const day = (now: number): string => new Date(now).toISOString().slice(0, 10)
 
 /**

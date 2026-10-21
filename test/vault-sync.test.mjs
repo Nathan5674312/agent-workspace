@@ -121,6 +121,35 @@ test('both sides edit one note: ours stays, theirs is kept beside it, nothing is
   assert.equal(read(b, copy), 'theirs\n')
 })
 
+/** The 8.3 short form of a folder, or null where the volume keeps none. */
+function shortPath(dir) {
+  if (process.platform !== 'win32') return null
+  try {
+    const out = execFileSync('cmd.exe', ['/d', '/c', `for %I in ("${dir}") do @echo %~sI`], {
+      encoding: 'utf8',
+      windowsVerbatimArguments: true,
+    }).trim()
+    return out && out.toLowerCase() !== dir.toLowerCase() ? out : null
+  } catch {
+    return null
+  }
+}
+
+test('a vault reached by its 8.3 short path still syncs', async (t) => {
+  // The first CI run failed exactly here: the runner's temp folder is
+  // C:\Users\RUNNER~1\..., git reports the long name, and a lexical compare
+  // decided the vault sat inside some other repo.
+  const { a, b } = world()
+  const short = shortPath(a)
+  if (!short) return t.skip('this volume keeps no 8.3 names')
+  writeFileSync(join(a, 'Short.md'), 'via the short path\n')
+  const r = await syncOnce(short, LATER)
+  assert.equal(r.ok, true, JSON.stringify(r))
+  assert.equal(r.pushed, 1)
+  await syncOnce(b, LATER)
+  assert.equal(read(b, 'Short.md'), 'via the short path\n')
+})
+
 test('a deletion never wins over an edit, from either side', async () => {
   // We delete, the cloud edits: the edit comes back.
   {

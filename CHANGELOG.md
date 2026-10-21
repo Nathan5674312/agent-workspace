@@ -9,6 +9,66 @@ versions follow [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
 Nothing yet.
 
+## [1.2.0] — 2026-10-21
+
+Fate becomes a workspace that agents work in and you supervise: your vault
+follows its GitHub repo on its own, you can see and merge what agents push,
+and an agent can bring a view forward in this window while it works.
+
+### Added
+
+- **Sync with GitHub** (Settings → Vault). Off until you turn it on, and inert
+  unless the vault folder is the top of a git repository with a remote branch.
+  On, it runs at launch and every two minutes while Fate is open: it commits
+  your changes once nothing has been touched for 30 seconds, so a note still
+  being written is never captured halfway; then it pulls, merges and pushes.
+  If both sides changed the same note, yours stays where it is and the other
+  side's is saved beside it as `note (conflict <date> github).md`. If one side
+  deleted a note the other edited, the edited note survives. It runs your own
+  git with your own credentials, and the status line says what the last pass
+  did.
+- **A GitHub view of what agents are pushing.** Sign in through your browser
+  (GitHub's device flow; the token is encrypted and never leaves the main
+  process). Per repository: commits landed in the last 24 hours and 7 days,
+  branches ahead of the default branch, open pull requests, Actions runs in
+  progress, and an "agent active now" mark.
+- **Review and merge a pull request from the app.** An open pull request
+  expands to the files it changes, with lines added and removed. Merge stays
+  disabled until that list has loaded, takes a second confirming click, and is
+  pinned to the commit you were shown: if anything was pushed after you
+  looked, GitHub refuses the merge and the row says why.
+- **Agents can bring a view forward.** An agent working through Fate's tools
+  can switch this window to the graph, a board, the database, the roadmap, the
+  planner or a note, and a change an agent makes appears without a reload. The
+  app listens on this machine only, behind a token that changes every launch.
+
+### Fixed
+
+- **An update was offered on every launch and never applied.** Two installs
+  of the app were registered, one per-user and one per-machine, and a silent
+  update could not answer the permission prompt the per-machine one raised.
+  The installer is now one-click and per-user only, so that prompt no longer
+  exists in it.
+- **"Don't check for updates" was forgotten after a restart.** The setting was
+  written but never read back.
+- **GitHub sign-in failed with a bare "(400)".** It now says why (for example,
+  device flow switched off on the OAuth App), and a client secret pasted into
+  the Client ID box is refused instead of being saved.
+
+### Known limitations
+
+- **Windows only.** The macOS and Linux targets are configured and have never
+  been built.
+- **Unsigned.** No code-signing certificate, so SmartScreen warns on first run.
+- **The agent tools run from a source checkout only.** The installed app
+  packs them inside `app.asar`, which `node` cannot launch, so registering
+  them with an agent means pointing at `out/main/mcp.js` in a clone of this
+  repository.
+- **Merge uses the repository's plain merge.** A repository that allows only
+  squash or rebase merges refuses, with GitHub's own message.
+- **Sync conflict copies need a person.** Both sides are kept; folding them
+  into one note is yours to do.
+
 ## [1.1.0] — 2026-09-09
 
 Everything on the 9/4–9/6 list. The theme underneath it is waiting: the app now
@@ -444,7 +504,8 @@ Stated so they are not discovered. Each is tracked in `src/shared/roadmap.ts`.
 - **No import** from Notion, Evernote or anywhere else. Obsidian needs none —
   it is the same folder.
 
-[Unreleased]: https://github.com/Nathan5674312/agent-workspace/compare/v1.1.0...HEAD
+[Unreleased]: https://github.com/Nathan5674312/agent-workspace/compare/v1.2.0...HEAD
+[1.2.0]: https://github.com/Nathan5674312/agent-workspace/compare/v1.1.0...v1.2.0
 [1.1.0]: https://github.com/Nathan5674312/agent-workspace/compare/v1.0.7...v1.1.0
 [1.0.7]: https://github.com/Nathan5674312/agent-workspace/compare/v1.0.6...v1.0.7
 [1.0.6]: https://github.com/Nathan5674312/agent-workspace/compare/v1.0.5...v1.0.6

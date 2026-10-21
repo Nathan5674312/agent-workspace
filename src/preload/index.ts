@@ -109,6 +109,8 @@ const api: Api = {
     repos: () => ipcRenderer.invoke(CH.githubRepos),
     activity: (o, n, b) => ipcRenderer.invoke(CH.githubActivity, o, n, b),
     files: (o, n, s) => ipcRenderer.invoke(CH.githubFiles, o, n, s),
+    pullFiles: (o, n, num) => ipcRenderer.invoke(CH.githubPullFiles, o, n, num),
+    merge: (o, n, num, sha) => ipcRenderer.invoke(CH.githubMerge, o, n, num, sha),
     open: (url) => ipcRenderer.invoke(CH.githubOpen, url),
   },
 }

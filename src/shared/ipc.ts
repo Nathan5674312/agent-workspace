@@ -519,6 +519,8 @@ export const CH = {
   githubRepos: 'github:repos',
   githubActivity: 'github:activity',
   githubFiles: 'github:files',
+  githubPullFiles: 'github:pull-files',
+  githubMerge: 'github:merge',
   githubOpen: 'github:open',
 } as const
 
@@ -737,6 +739,9 @@ export type Api = {
     repos(): Promise<Repo[]>
     activity(owner: string, name: string, defaultBranch: string): Promise<RepoActivity>
     files(owner: string, name: string, sha: string): Promise<FileChange[]>
+    pullFiles(owner: string, name: string, number: number): Promise<FileChange[]>
+    /** Merges at `sha` only; rejects with GitHub's reason if the branch moved. */
+    merge(owner: string, name: string, number: number, sha: string): Promise<void>
     /** Opens a github.com link in the browser. Anything else is ignored. */
     open(url: string): Promise<void>
   }

@@ -223,8 +223,8 @@ test('repoActivity aggregates landed, pending (once per PR), runs and active-now
     '/repos/o/r/compare/main...stale': { ahead_by: 0, behind_by: 9, commits: [] },
     '/repos/o/r/compare/main...topic': { ahead_by: 2, behind_by: 0, commits: [commit('c1', 'human', 5)] },
     '/repos/o/r/pulls?': [
-      { number: 7, title: 'Feat', html_url: 'https://github.com/o/r/pull/7', head: { ref: 'claude/feat', repo: { full_name: 'o/r' } } },
-      { number: 8, title: 'Fork', html_url: 'https://github.com/o/r/pull/8', head: { ref: 'main', repo: { full_name: 'x/r' } } },
+      { number: 7, title: 'Feat', html_url: 'https://github.com/o/r/pull/7', head: { ref: 'claude/feat', sha: 'a'.repeat(40), repo: { full_name: 'o/r' } } },
+      { number: 8, title: 'Fork', html_url: 'https://github.com/o/r/pull/8', head: { ref: 'main', sha: 'b'.repeat(40), repo: { full_name: 'x/r' } } },
     ],
     '/repos/o/r/actions/runs?': {
       workflow_runs: [{ name: 'CI', head_branch: 'claude/feat', html_url: 'https://github.com/o/r/actions/runs/1', run_started_at: iso(2) }],
@@ -281,4 +281,51 @@ test('parseFiles and parseRepos drop what does not validate', () => {
     ]),
     [{ owner: 'o', name: 'r', private: true, pushedAt: Date.parse('2026-09-26T00:00:00Z'), defaultBranch: 'trunk' }],
   )
+})
+
+// ── acting on a pull request ──────────────────────────────────────
+
+test('a write is JSON with the token as Bearer, and a refusal says why without the token', async () => {
+  const { f, calls } = stub([json({}), json({ message: 'Head branch was modified. Review and try the merge again.' }, 409)])
+  const c = gh.client(f, 'gho_SECRET', () => 0)
+  await c.send('PUT', '/repos/o/r/pulls/12/merge', { sha: 'abc1234' })
+  assert.equal(calls[0].init.method, 'PUT')
+  assert.equal(calls[0].init.headers['content-type'], 'application/json')
+  assert.equal(calls[0].init.headers.authorization, 'Bearer gho_SECRET')
+  assert.deepEqual(JSON.parse(calls[0].init.body), { sha: 'abc1234' })
+  await assert.rejects(
+    c.send('PUT', '/repos/o/r/pulls/12/merge', {}),
+    (e) => /409 .*Head branch was modified/.test(e.message) && !e.message.includes('gho_SECRET'),
+  )
+})
+
+test('a merge is pinned to the head the person saw', async () => {
+  const { f, calls } = stub([json({ merged: true })])
+  await gh.mergePull(gh.client(f, 't', () => 0), 'o', 'r', 12, 'a'.repeat(40))
+  assert.equal(calls[0].url, 'https://api.github.com/repos/o/r/pulls/12/merge')
+  assert.deepEqual(JSON.parse(calls[0].init.body), { sha: 'a'.repeat(40) })
+})
+
+test('a bad pull request is refused before any request goes out', async () => {
+  const { f, calls } = stub([])
+  const c = gh.client(f, 't', () => 0)
+  for (const [o, n, num, sha] of [
+    ['o', 'r', 0, 'a'.repeat(40)],
+    ['o', 'r', 1.5, 'a'.repeat(40)],
+    ['o', 'r', '12', 'a'.repeat(40)],
+    ['o', 'r', 12, 'not-a-sha'],
+    ['o', 'r', 12, undefined],
+    ['../x', 'r', 12, 'a'.repeat(40)],
+  ]) {
+    await assert.rejects(gh.mergePull(c, o, n, num, sha), /Not a pull request/)
+  }
+  await assert.rejects(gh.pullFiles(c, 'o', 'r', -1), /Not a pull request/)
+  assert.equal(calls.length, 0)
+})
+
+test("a pull request's files come from its own endpoint, parsed like a commit's", async () => {
+  const { f, calls } = stub([json([{ filename: 'src/a.ts', additions: 3, deletions: 1 }, { filename: 'x' }])])
+  const files = await gh.pullFiles(gh.client(f, 't', () => 0), 'o', 'r', 12)
+  assert.equal(calls[0].url, 'https://api.github.com/repos/o/r/pulls/12/files?per_page=100')
+  assert.deepEqual(files, [{ path: 'src/a.ts', added: 3, removed: 1 }])
 })

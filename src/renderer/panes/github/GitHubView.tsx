@@ -7,7 +7,7 @@
  */
 import { useCallback, useEffect, useState } from 'react'
 import type { GitHubSignIn, GitHubStatus } from '../../../shared/ipc.js'
-import type { Commit, FileChange, Repo, RepoActivity } from '../../../shared/github.js'
+import { isAgentBranch, type Commit, type FileChange, type PullRequest, type Repo, type RepoActivity } from '../../../shared/github.js'
 import './github.css'
 
 const POLL_MS = 60_000
@@ -283,14 +283,7 @@ function RepoDetail({ repo }: { repo: Repo }) {
               <h3 className="gh-subtitle">Open pull requests</h3>
               <ul className="gh-list">
                 {data.pulls.map((p) => (
-                  <li key={p.number} className="gh-item">
-                    <button className="gh-link" onClick={() => void window.api.github.open(p.url)}>
-                      #{p.number} {p.title}
-                    </button>
-                    <span className="gh-meta">
-                      {p.branch} · {p.ahead === null ? 'fork' : `${p.ahead} ahead`}
-                    </span>
-                  </li>
+                  <PullRow key={p.number} repo={repo} pull={p} onMerged={load} />
                 ))}
               </ul>
             </>
@@ -318,6 +311,85 @@ function Stat({ n, label, strong }: { n: number; label: string; strong?: boolean
       <span className="gh-stat-n">{n}</span>
       <span className="gh-meta">{label}</span>
     </div>
+  )
+}
+
+/**
+ * One open pull request: what it changes, and a merge that needs two clicks.
+ *
+ * Merge stays disabled until the file list has loaded, so it cannot be merged
+ * unseen, and it is pinned to the head commit this poll saw (mergePull). The
+ * click is the user's own action, so there is no consent prompt; the second
+ * click is the guard against a slip.
+ */
+function PullRow({ repo, pull, onMerged }: { repo: Repo; pull: PullRequest; onMerged: () => void }) {
+  const [files, setFiles] = useState<FileChange[] | null>(null)
+  const [open, setOpen] = useState(false)
+  const [error, setError] = useState<string | null>(null)
+  const [confirming, setConfirming] = useState(false)
+  const [merging, setMerging] = useState(false)
+
+  const toggle = () => {
+    setOpen(!open)
+    if (!open && files === null) {
+      window.api.github
+        .pullFiles(repo.owner, repo.name, pull.number)
+        .then(setFiles, (e) => setError(message(e)))
+    }
+  }
+
+  const merge = () => {
+    if (!confirming) return setConfirming(true)
+    setMerging(true)
+    setError(null)
+    window.api.github.merge(repo.owner, repo.name, pull.number, pull.head).then(onMerged, (e) => {
+      setError(message(e))
+      setMerging(false)
+      setConfirming(false)
+    })
+  }
+
+  return (
+    <li className="gh-item gh-item--commit">
+      <button className="gh-commit" aria-expanded={open} onClick={toggle}>
+        <span className="gh-item-main">
+          #{pull.number} {pull.title}
+          {isAgentBranch(pull.branch) && <span className="gh-badge">agent</span>}
+        </span>
+        <span className="gh-meta">
+          {pull.branch} · {pull.ahead === null ? 'fork' : `${pull.ahead} ahead`}
+        </span>
+      </button>
+      {open && (
+        <>
+          <ul className="gh-files">
+            {error && <li className="gh-error">{error}</li>}
+            {!files && !error && <li className="gh-note">Loading…</li>}
+            {files?.length === 0 && <li className="gh-note">No file changes.</li>}
+            {files?.map((f) => (
+              <li key={f.path} className="gh-file">
+                <span className="gh-file-path">{f.path}</span>
+                <span className="gh-add">+{f.added}</span>
+                <span className="gh-del">−{f.removed}</span>
+              </li>
+            ))}
+          </ul>
+          <div className="gh-actions">
+            <button className="gh-btn" disabled={merging || files === null} onClick={merge}>
+              {merging ? 'Merging…' : confirming ? `Confirm: merge into ${repo.defaultBranch}` : 'Merge'}
+            </button>
+            {confirming && !merging && (
+              <button className="gh-link" onClick={() => setConfirming(false)}>
+                Cancel
+              </button>
+            )}
+            <button className="gh-link" onClick={() => void window.api.github.open(pull.url)}>
+              Open on GitHub
+            </button>
+          </div>
+        </>
+      )}
+    </li>
   )
 }
 

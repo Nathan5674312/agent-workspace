@@ -221,7 +221,12 @@ export class RateLimited extends Error {
   }
 }
 
-export type Client = { get: (path: string) => Promise<unknown>; blockedUntil: () => number }
+export type Client = {
+  get: (path: string) => Promise<unknown>
+  /** A write. Only ever started by a person's click in the GitHub view; see mergePull. */
+  send: (method: 'PUT' | 'POST' | 'PATCH', path: string, body: unknown) => Promise<unknown>
+  blockedUntil: () => number
+}
 
 /**
  * An authenticated GET with the backoff built in. While blocked it throws
@@ -230,22 +235,32 @@ export type Client = { get: (path: string) => Promise<unknown>; blockedUntil: ()
  */
 export function client(f: Fetch, token: string, now: () => number = Date.now): Client {
   let blocked = 0
+  const request = async (path: string, init: RequestInit = {}): Promise<unknown> => {
+    if (now() < blocked) throw new RateLimited(blocked)
+    const res = await f(`${API}${path}`, {
+      ...init,
+      headers: {
+        ...HEADERS,
+        authorization: `Bearer ${token}`,
+        ...(init.body ? { 'content-type': 'application/json' } : {}),
+      },
+    })
+    const wait = rateLimitWait(res.status, res.headers, now())
+    if (wait > 0) blocked = now() + wait
+    if (res.status === 401) throw new Error('GitHub no longer accepts this sign-in. Sign in again.')
+    if (!res.ok) {
+      if (wait > 0) throw new RateLimited(blocked)
+      // GitHub says WHY in `message` ("Head branch was modified", "not
+      // mergeable"), and that is the part a person can act on.
+      const why = str(((await res.json().catch(() => null)) as Record<string, unknown> | null)?.message)
+      throw new Error(`GitHub answered ${res.status} for ${path.split('?')[0]}${why ? `: ${why}` : '.'}`)
+    }
+    return res.json()
+  }
   return {
     blockedUntil: () => blocked,
-    async get(path) {
-      if (now() < blocked) throw new RateLimited(blocked)
-      const res = await f(`${API}${path}`, {
-        headers: { ...HEADERS, authorization: `Bearer ${token}` },
-      })
-      const wait = rateLimitWait(res.status, res.headers, now())
-      if (wait > 0) blocked = now() + wait
-      if (res.status === 401) throw new Error('GitHub no longer accepts this sign-in. Sign in again.')
-      if (!res.ok) {
-        if (wait > 0) throw new RateLimited(blocked)
-        throw new Error(`GitHub answered ${res.status} for ${path.split('?')[0]}.`)
-      }
-      return res.json()
-    },
+    get: (path) => request(path),
+    send: (method, path, body) => request(path, { method, body: JSON.stringify(body) }),
   }
 }
 
@@ -293,6 +308,8 @@ export type PullRequest = {
   number: number
   title: string
   branch: string
+  /** The head commit as this poll saw it. A merge is pinned to it; see mergePull. */
+  head: string
   /** Null when the head lives in a fork, whose compare this app never ran. */
   ahead: number | null
   url: string
@@ -437,14 +454,16 @@ export async function repoActivity(
     const n = num(p?.number)
     const head = p?.head as Record<string, unknown> | undefined
     const ref = str(head?.ref)
+    const sha = head?.sha
     const url = str(p?.html_url)
-    if (n === null || !ref || !url?.startsWith('https://github.com/')) continue
+    if (n === null || !ref || !isSha(sha) || !url?.startsWith('https://github.com/')) continue
     const sameRepo =
       str((head?.repo as Record<string, unknown> | null)?.full_name) === `${owner}/${name}`
     pulls.push({
       number: n,
       title: str(p.title) ?? `#${n}`,
       branch: ref,
+      head: sha,
       ahead: sameRepo ? (aheadOf.get(ref) ?? 0) : null,
       url,
     })
@@ -481,4 +500,30 @@ export async function repoActivity(
     activeNow: isActive(agentTimes, now),
     skippedBranches: names.length - compared.length,
   }
+}
+
+// ------------------------------------------------------------------ acting on a pull request
+
+const isPullNumber = (n: unknown): n is number => Number.isInteger(n) && (n as number) > 0
+
+/** What a pull request changes, for the person deciding whether to merge it. */
+export async function pullFiles(c: Client, owner: string, name: string, number: number): Promise<FileChange[]> {
+  if (!isName(owner) || !isName(name) || !isPullNumber(number)) throw new Error('Not a pull request.')
+  // ponytail: the first 100 files. A pull request bigger than that is reviewed on github.com.
+  return parseFiles({ files: await c.get(`/repos/${owner}/${name}/pulls/${number}/files?per_page=100`) })
+}
+
+/**
+ * Merge a pull request, but ONLY at the commit the person looked at.
+ *
+ * `sha` is the head the view showed when they clicked. GitHub refuses (409) if
+ * the branch has moved since, so an agent pushing after the review cannot get
+ * unseen work merged under it. Same idea as the vault's lost-update guard.
+ *
+ * ponytail: the repository's plain merge. A repo that only allows squash or
+ * rebase refuses with GitHub's own sentence; add a method picker when one does.
+ */
+export async function mergePull(c: Client, owner: string, name: string, number: number, sha: string): Promise<void> {
+  if (!isName(owner) || !isName(name) || !isPullNumber(number) || !isSha(sha)) throw new Error('Not a pull request.')
+  await c.send('PUT', `/repos/${owner}/${name}/pulls/${number}/merge`, { sha })
 }

@@ -20,8 +20,10 @@ import {
   isClientSecret,
   isName,
   isSha,
+  mergePull,
   parseFiles,
   parseRepos,
+  pullFiles,
   pollForToken,
   repoActivity,
   requestDeviceCode,
@@ -171,5 +173,9 @@ export function register(handle: Handle): void {
   handle(CH.githubRepos, () => repos())
   handle(CH.githubActivity, (o: string, n: string, b: string) => activity(o, n, b))
   handle(CH.githubFiles, (o: string, n: string, s: string) => files(o, n, s))
+  // Both validate in shared/github.ts: the renderer is untrusted, and its
+  // arguments arrive as whatever it chose to send.
+  handle(CH.githubPullFiles, (o: string, n: string, num: number) => pullFiles(need(), o, n, num))
+  handle(CH.githubMerge, (o: string, n: string, num: number, sha: string) => mergePull(need(), o, n, num, sha))
   handle(CH.githubOpen, (url: string) => open(url))
 }

@@ -252,6 +252,13 @@
 .gh-files {
   padding: 0 var(--space-4) var(--space-3) var(--space-6);
 }
+/* A pull request's merge row sits under its file list, at the same indent. */
+.gh-actions {
+  display: flex;
+  align-items: center;
+  gap: var(--space-4);
+  padding: 0 var(--space-4) var(--space-3) var(--space-6);
+}
 .gh-file {
   display: flex;
   gap: var(--space-3);

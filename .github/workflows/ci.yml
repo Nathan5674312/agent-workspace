@@ -1,0 +1,31 @@
+# The three checks CLAUDE.md says to run before pushing, run for every push to
+# main and every pull request, so an agent's branch is judged before it lands.
+#
+# Windows only: the app ships for Windows, and the suite's path tests are written
+# against Windows paths. Tests that read the real vault skip themselves here.
+#
+# Checks only. Releases stay manual and follow docs/AGENT-RELEASE.md, because a
+# release reaches every user and this file should never be able to cut one.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: windows-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - run: npm ci
+      - run: npm test
+      # tsc --noEmit, then electron-vite build.
+      - run: npm run build

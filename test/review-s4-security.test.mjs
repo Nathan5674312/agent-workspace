@@ -24,6 +24,18 @@ import { mkdtemp, mkdir, readFile, stat, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 
+/**
+ * The account folder in a path under Users — `Nathan` on his machine,
+ * `RUNNER~1` on a GitHub runner. What these tests prove is that it never
+ * reaches the renderer, so it is read off the fixture rather than hard-coded:
+ * a literal name made the suite fail on every machine but one.
+ */
+const userSegment = (p) => p.match(/[\\/]Users[\\/]([^\\/]+)/i)?.[1]
+const leaksUser = (msg, p) => {
+  const u = userSegment(p)
+  return !!u && msg.toLowerCase().includes(u.toLowerCase())
+}
+
 // claude.ts / network.ts persist under app.getPath('userData'); keep that in a
 // scratch directory rather than the real one.
 process.env.TEST_USER_DATA = mkdtempSync(join(tmpdir(), 'aw-s4-'))
@@ -302,7 +314,7 @@ test('paths cannot escape the vault, in either direction', async (t) => {
     // any more than an fs error may.
     await assert.rejects(
       () => vault.read('../../x.md'),
-      (e) => !e.message.includes(dir) && !/Nathan/i.test(e.message),
+      (e) => !e.message.includes(dir) && !leaksUser(e.message, dir),
     )
   })
 
@@ -378,14 +390,14 @@ test('fs errors reach the renderer with the path removed', async (t) => {
 
   // The scratch vault is under the user's Temp directory, so the absolute path
   // in these errors really does contain the OS username.
-  assert.match(dir, /Nathan/i, 'fixture cannot demonstrate the leak')
+  assert.ok(userSegment(dir), `fixture cannot demonstrate the leak: ${dir} is not under a Users folder`)
 
   await t.test('a missing note names no path', async () => {
     await assert.rejects(
       () => read(topFrame, 'Missing.md'),
       (e) => {
         assert.ok(!e.message.includes(dir), `vault path leaked: ${e.message}`)
-        assert.ok(!/Nathan/i.test(e.message), `username leaked: ${e.message}`)
+        assert.ok(!leaksUser(e.message, dir), `username leaked: ${e.message}`)
         assert.match(e.message, /<path>/)
         assert.match(e.message, /no such file or directory/i)
         return true
@@ -398,7 +410,7 @@ test('fs errors reach the renderer with the path removed', async (t) => {
       () => save(topFrame, 'Missing/Deep.md', 'text', 0),
       (e) => {
         assert.ok(!e.message.includes(dir), `vault path leaked: ${e.message}`)
-        assert.ok(!/Nathan/i.test(e.message), `username leaked: ${e.message}`)
+        assert.ok(!leaksUser(e.message, dir), `username leaked: ${e.message}`)
         return true
       },
     )

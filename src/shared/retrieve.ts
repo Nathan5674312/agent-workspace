@@ -56,23 +56,33 @@ export function terms(text: string): string[] {
 
 export type Doc = { path: string; title: string; text: string }
 
-type Entry = { path: string; tf: Map<string, number>; len: number }
+export type Entry = { path: string; tf: Map<string, number>; len: number }
 export type Index = { entries: Entry[]; df: Map<string, number>; avg: number }
 
-export function buildIndex(docs: Doc[]): Index {
+/**
+ * One note's term counts. Built a note at a time so a caller can drop each
+ * note's text as soon as it is counted: holding a whole vault's text at once is
+ * the 856 MB main-process peak scan() in vault.ts was rewritten to avoid.
+ */
+export function entry(d: Doc): Entry {
+  const tf = new Map<string, number>()
+  const add = (t: string, w: number) => tf.set(t, (tf.get(t) ?? 0) + w)
+  const body = terms(d.text)
+  for (const t of body) add(t, 1)
+  const title = terms(d.title)
+  for (const t of title) add(t, TITLE_WEIGHT)
+  return { path: d.path, tf, len: body.length + title.length * TITLE_WEIGHT }
+}
+
+export function indexOf(entries: Entry[]): Index {
   const df = new Map<string, number>()
-  const entries = docs.map((d) => {
-    const tf = new Map<string, number>()
-    const add = (t: string, w: number) => tf.set(t, (tf.get(t) ?? 0) + w)
-    const body = terms(d.text)
-    for (const t of body) add(t, 1)
-    const title = terms(d.title)
-    for (const t of title) add(t, TITLE_WEIGHT)
-    for (const t of tf.keys()) df.set(t, (df.get(t) ?? 0) + 1)
-    return { path: d.path, tf, len: body.length + title.length * TITLE_WEIGHT }
-  })
+  for (const e of entries) for (const t of e.tf.keys()) df.set(t, (df.get(t) ?? 0) + 1)
   const avg = entries.reduce((n, e) => n + e.len, 0) / Math.max(1, entries.length)
   return { entries, df, avg }
+}
+
+export function buildIndex(docs: Doc[]): Index {
+  return indexOf(docs.map(entry))
 }
 
 /** Notes ranked by BM25 against every distinct term in `query`. Zero-score notes are dropped. */
@@ -92,4 +102,19 @@ export function rank(index: Index, query: string, k = 10): { path: string; score
   }
   // Path as the tie-break, so identical queries give identical order.
   return scored.sort((a, b) => b.score - a.score || a.path.localeCompare(b.path)).slice(0, k)
+}
+
+/**
+ * What the agent reads in front of the user's message. Paths only, never
+ * excerpts: excerpts cut mid-note are what lost 6/16 to 16/16 in the vault's own
+ * A/B, and a path makes the agent read the whole note instead. The wording says
+ * how they were picked, so a poor match reads as one rather than as a claim.
+ */
+export function pointerBlock(paths: string[], vaultDir: string): string | undefined {
+  if (paths.length === 0) return undefined
+  return [
+    `Notes in this vault that share the most words with the message below, best first (paths relative to ${vaultDir}).`,
+    'Picked by word overlap, not meaning: open the ones that fit before answering, ignore the rest, and search further if none answers it.',
+    ...paths.map((p) => `- ${p}`),
+  ].join('\n')
 }

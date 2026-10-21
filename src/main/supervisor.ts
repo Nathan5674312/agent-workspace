@@ -37,7 +37,8 @@ import type { ChatBlock, PermissionMode, Session } from '../shared/ipc.js'
 import type { HostOutbound, VaultOp } from './agentHost.js'
 import * as stated from '../shared/stated.js'
 import { standingOrders } from '../shared/orders.js'
-import { getVaultDir } from './vault.js'
+import { pointerBlock } from '../shared/retrieve.js'
+import { getVaultDir, related } from './vault.js'
 
 /** What the supervisor tells its caller about a live child. */
 export interface AgentProcessInfo {
@@ -215,6 +216,16 @@ export function run(
   }
   children.set(session.id, child)
 
+  /**
+   * The notes this message is most likely about, looked up while the process
+   * starts so the walk overlaps the spawn. Every turn, not only a new session:
+   * each message can be about something else. A failed lookup is no pointers,
+   * never a failed turn.
+   */
+  const pointers = related(text)
+    .then((paths) => pointerBlock(paths, getVaultDir()))
+    .catch(() => undefined)
+
   /** Anything the child printed before dying. The only clue a hard crash leaves. */
   let stderr = ''
   proc.stderr?.on('data', (d: Buffer) => {
@@ -238,7 +249,7 @@ export function run(
       resolve(record)
     }
 
-    proc.on('spawn', () => {
+    proc.on('spawn', async () => {
       child.info.pid = proc.pid ?? null
       child.info.status = 'running'
       /**
@@ -254,6 +265,9 @@ export function run(
        * budget re-reading what it just read.
        */
       stated.record(text, session.id, getVaultDir())
+      const relatedBlock = await pointers
+      // Killed or interrupted while the lookup ran: nothing left to start.
+      if (child.settled) return
       proc.postMessage({
         kind: 'start',
         text,
@@ -264,6 +278,7 @@ export function run(
           ? undefined
           : stated.preamble({ excludeSession: session.id, vaultDir: getVaultDir() }),
         orders: standingOrders(getVaultDir()),
+        related: relatedBlock,
       })
     })
 

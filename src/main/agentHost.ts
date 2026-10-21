@@ -49,6 +49,12 @@ export type HostStart = {
    * what a resume replays.
    */
   orders: string | undefined
+  /**
+   * Paths of the notes this message most likely concerns, ranked by the parent
+   * (vault.related, shared/retrieve.ts). Every turn. Pointers, not excerpts: the
+   * agent still reads the notes, and still searches if they miss.
+   */
+  related: string | undefined
 }
 
 /** Parent -> child, answering a consent round trip. */
@@ -237,9 +243,13 @@ async function start(msg: HostStart): Promise<void> {
      * system would invite the model to weigh it as policy rather than as
      * something the person actually said.
      */
-    const prompt = msg.stated ? `${msg.stated}
+    const asked = msg.stated ? `${msg.stated}
 
 ${msg.text}` : msg.text
+    // The pointers lead, because the stated block ends by announcing the request.
+    const prompt = msg.related ? `${msg.related}
+
+${asked}` : asked
 
     run = query({
       prompt,

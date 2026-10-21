@@ -65,6 +65,7 @@ import {
   titleMatches,
   type NoteHits,
 } from '../shared/search.ts'
+import { entry, indexOf, rank, terms, type Entry } from '../shared/retrieve.ts'
 
 /**
  * The vault root on disk. Every read and every write in this file is resolved
@@ -2134,4 +2135,55 @@ export async function search(query: string, budget = 200): Promise<NoteHits[]> {
   await Promise.all(Array.from({ length: Math.min(LIMIT, paths.length) }, worker))
 
   return rankNotes(out)
+}
+
+/**
+ * The notes a whole MESSAGE is most likely about: the agent's head start.
+ *
+ * search() above cannot do this. It ANDs every word, so a sentence matches
+ * nothing; on the frozen set in fate-benchmark/retrieval it put a right note in
+ * the top 5 for 2 of 14 held-out questions. BM25 (shared/retrieve.ts) did 14 of
+ * 14. That measurement is why this exists, and its limits are written there.
+ *
+ * The same walk, skips and size cap as search(), for search()'s reason: a note
+ * the explorer hides must not surface here either. Each note's text is counted
+ * and dropped as it is read, never held all at once (see scan()).
+ *
+ * ponytail: re-reads the vault per call, no cached index. Fine at hundreds of
+ * notes; cache the Entry list, invalidated like graph(), when a vault in the
+ * thousands makes a turn visibly slow to start.
+ */
+export async function related(message: string, k = 5): Promise<string[]> {
+  // Under two distinct words is an acknowledgement ("thanks!") or a lookup the
+  // agent will run itself, and one word matches whatever happens to contain it.
+  if (new Set(terms(message)).size < 2) return []
+
+  const { readFile, stat } = await import('node:fs/promises')
+  const { join } = await import('node:path')
+
+  const paths: string[] = []
+  const collect = (n: VaultTreeNode): void => {
+    if (n.kind === 'note' && !isSkipped(n.path)) paths.push(n.path)
+    n.children?.forEach(collect)
+  }
+  collect(await tree())
+
+  const entries: Entry[] = []
+  const LIMIT = 16
+  let cursor = 0
+  const worker = async (): Promise<void> => {
+    while (cursor < paths.length) {
+      const path = paths[cursor++]
+      try {
+        const abs = join(VAULT_DIR, path)
+        if ((await stat(abs)).size > MAX_TEXT_BYTES) continue
+        entries.push(entry({ path, title: titleOf(path), text: await readFile(abs, 'utf8') }))
+      } catch {
+        // Gone between the walk and the read. One missing note is not a failed turn.
+      }
+    }
+  }
+  await Promise.all(Array.from({ length: Math.min(LIMIT, paths.length) }, worker))
+
+  return rank(indexOf(entries), message, k).map((r) => r.path)
 }
